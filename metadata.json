@@ -1,0 +1,7 @@
+{
+  "name": "DZD Learn",
+  "description": "All-in-one Sri Lankan education platform featuring past papers, study notes, university courses, AI tutor, and AI voice language practice.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
