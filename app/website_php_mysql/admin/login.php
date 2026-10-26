@@ -34,7 +34,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Login | DZD Learn</title>
+    <title>Admin Login | TheStudent</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
 </head>
@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <i class="fa-solid fa-shield-halved"></i>
             </div>
             <h1 class="text-2xl font-extrabold text-slate-900">Admin Authentication</h1>
-            <p class="text-xs text-slate-500 mt-1">DZD Learn Past Papers Management System</p>
+            <p class="text-xs text-slate-500 mt-1">TheStudent Past Papers Management System</p>
         </div>
 
         <?php if ($error): ?>

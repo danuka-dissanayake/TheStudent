@@ -1,0 +1,20 @@
+CREATE TABLE IF NOT EXISTS past_papers (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    year INT NOT NULL,
+    duration VARCHAR(50) DEFAULT '3 Hours',
+    pages INT DEFAULT 16,
+    medium VARCHAR(30) DEFAULT 'English',
+    has_marking_scheme TINYINT(1) DEFAULT 1,
+    thumbnail_url VARCHAR(500) DEFAULT '',
+    category VARCHAR(50) NOT NULL,
+    grade VARCHAR(50) NOT NULL,
+    stream VARCHAR(100) DEFAULT NULL,
+    subject VARCHAR(100) NOT NULL,
+    pdf_url TEXT NOT NULL,
+    marking_scheme_url TEXT DEFAULT NULL,
+    file_size VARCHAR(20) DEFAULT '3.5 MB',
+    description TEXT,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) DEFAULT 'published'
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

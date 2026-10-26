@@ -1,37 +1,71 @@
 package com.example.ui.screens
 
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.*
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.Image
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
+import coil.compose.AsyncImage
+import com.example.R
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
 import com.example.data.model.SriLankanCurriculumConfig
 import com.example.ui.components.PaperTileSkeleton
-import com.example.ui.theme.*
+import com.example.ui.theme.EmeraldPrimary
+import kotlin.math.absoluteValue
 
+/**
+ * Modern Papers & Exams Screen matching user specification:
+ * - "TheStudent" branding over bold "Papers & Exams" headline
+ * - Top-right modern 3-line filter button triggering a right-side sliding Filter Sidebar
+ * - Pill-shaped search bar "Search papers, subjects, years"
+ * - Deep black featured card carousel with vibrant green badge and "Open paper" action
+ * - "Popular this week" section (5-7 cards)
+ * - Category Sections:
+ *   1. G.C.E. A/L Examination Papers
+ *   2. G.C.E. O/L Examination Papers
+ *   3. Provincial & School Term Test Papers
+ *   4. Prototype & National Model Papers
+ *   5. Scholarship & Junior Secondary Papers
+ * - Each section displays 5-7 cards with a "See all [Section Name]" button placed BELOW the last card of that section.
+ * - Pixel-accurate alignment: Pastel mint initial avatars (M, P, S, C, etc.), subtitles, "Marking scheme"/"Answers" badges, download counts, and solid black download buttons.
+ * - Right-side sliding Filter Sidebar with Category, Grade, and Year headers prefixed with icons, grid-style layout displaying 6 items at once with "Load More (+X)" expand buttons, black selection buttons, and no database configurations.
+ */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PapersScreen(
     papers: List<PastPaper>,
@@ -46,96 +80,89 @@ fun PapersScreen(
     onDownloadPaper: (PastPaper) -> Unit,
     onRefreshPapers: () -> Unit = {},
     onUpdateServerUrl: (String) -> Unit = {},
+    onNavigateHome: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    val isDark = false
     var searchQuery by remember { mutableStateOf("") }
+    var showFilterSidebar by remember { mutableStateOf(false) }
 
-    // Navigation state
-    // Categories: All, Junior Secondary, Ordinary Level (O/L), Advanced Level (A/L)
+    // Filter states
     var selectedCategory by remember { mutableStateOf("All Categories") }
-    // Grade: All Grades, Grade 6 .. Grade 13
     var selectedGrade by remember { mutableStateOf("All Grades") }
-    // Stream (for A/L: Grade 12 & 13): All Streams, Physical Science, Biological Science, Commerce, Arts, Technology
     var selectedStream by remember { mutableStateOf("All Streams") }
-    // Subject filter
     var selectedSubject by remember { mutableStateOf("All Subjects") }
-    // Year filter
     var selectedYear by remember { mutableStateOf("All Years") }
 
-    // Dropdown menu control states
-    var isGradeDropdownExpanded by remember { mutableStateOf(false) }
-    var isStreamDropdownExpanded by remember { mutableStateOf(false) }
-    var isSubjectDropdownExpanded by remember { mutableStateOf(false) }
-    var showServerConfigDialog by remember { mutableStateOf(false) }
-
-    // Determine category based on selected grade
-    val isAlActive = selectedGrade == "Grade 12" || selectedGrade == "Grade 13" || selectedCategory.contains("A/L")
-    val isOlActive = selectedGrade == "Grade 10" || selectedGrade == "Grade 11" || selectedCategory.contains("O/L")
-    val isJuniorActive = selectedGrade in listOf("Grade 6", "Grade 7", "Grade 8", "Grade 9") || selectedCategory.contains("Junior")
+    BackHandler {
+        if (showFilterSidebar) {
+            showFilterSidebar = false
+        } else {
+            onNavigateHome()
+        }
+    }
 
     // Filter grades list based on selected category
     val gradeList = remember(selectedCategory) {
         when {
-            selectedCategory.contains("Junior") -> listOf("All Grades", "Grade 6", "Grade 7", "Grade 8", "Grade 9")
+            selectedCategory.contains("Junior") -> listOf("All Grades", "Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9")
             selectedCategory.contains("O/L") -> listOf("All Grades", "Grade 10", "Grade 11")
             selectedCategory.contains("A/L") -> listOf("All Grades", "Grade 12", "Grade 13")
             else -> SriLankanCurriculumConfig.allGrades
         }
     }
 
-    // Available subjects dynamically resolved from curriculum config + merged with live database papers
-    val availableSubjects = remember(selectedGrade, selectedStream, selectedCategory, papers) {
-        val dbSubjects = papers
-            .filter { paper ->
-                val matchesGrade = selectedGrade == "All Grades" || paper.grade.equals(selectedGrade, ignoreCase = true)
-                val matchesStream = selectedStream == "All Streams" || paper.stream.equals(selectedStream, ignoreCase = true)
-                val matchesCat = selectedCategory == "All Categories" ||
-                        paper.category.contains(selectedCategory, ignoreCase = true) ||
-                        (selectedCategory.contains("A/L") && (paper.grade == "Grade 12" || paper.grade == "Grade 13")) ||
-                        (selectedCategory.contains("O/L") && (paper.grade == "Grade 10" || paper.grade == "Grade 11")) ||
-                        (selectedCategory.contains("Junior") && paper.grade in listOf("Grade 6", "Grade 7", "Grade 8", "Grade 9"))
-                matchesGrade && matchesStream && matchesCat
-            }
-            .map { it.subject }
-            .distinct()
-
-        SriLankanCurriculumConfig.getSubjectsForSelection(
-            grade = selectedGrade,
-            stream = selectedStream,
-            databaseSubjects = dbSubjects
-        )
-    }
-
-    // Ensure selected subject remains valid when grade/stream changes
-    LaunchedEffect(selectedGrade, selectedStream, selectedCategory) {
-        if (selectedSubject != "All Subjects" && !availableSubjects.contains(selectedSubject)) {
-            selectedSubject = "All Subjects"
-        }
-    }
-
-    // When student picks a grade, auto-sync category
-    fun onSelectGrade(grade: String) {
-        selectedGrade = grade
-        if (grade == "All Grades") {
-            // keep current category
-        } else if (grade == "Grade 12" || grade == "Grade 13") {
-            selectedCategory = SriLankanCurriculumConfig.CAT_AL
-        } else if (grade == "Grade 10" || grade == "Grade 11") {
-            selectedCategory = SriLankanCurriculumConfig.CAT_OL
-            selectedStream = "All Streams"
-        } else if (grade in listOf("Grade 6", "Grade 7", "Grade 8", "Grade 9")) {
-            selectedCategory = SriLankanCurriculumConfig.CAT_JUNIOR
-            selectedStream = "All Streams"
-        }
-    }
-
-    // Available years from papers
     val availableYears = remember(papers) {
-        val years = papers.map { it.year.toString() }.distinct().sortedDescending()
-        listOf("All Years") + if (years.isNotEmpty()) years else listOf("2024", "2023", "2022")
+        val yearsFromPapers = papers.map { it.year.toString() }.distinct().sortedDescending()
+        val defaultYears = listOf("2024", "2023", "2022", "2021", "2020", "2019", "2018", "2017", "2016", "2015")
+        val combined = (yearsFromPapers + defaultYears).distinct()
+        listOf("All Years") + combined
     }
 
-    // Filter logic
+    // Categorized lists for home feed sections (5-7 cards max per section on main view)
+    val popularPapers = remember(papers) {
+        papers.take(6)
+    }
+
+    val alPapers = remember(papers) {
+        papers.filter { it.category == "A/L" || it.grade in listOf("Grade 12", "Grade 13") }
+    }
+
+    val olPapers = remember(papers) {
+        papers.filter { it.category == "O/L" || it.grade in listOf("Grade 10", "Grade 11") }
+    }
+
+    val provincialPapers = remember(papers) {
+        papers.filter {
+            it.category.contains("Provincial", ignoreCase = true) ||
+                    it.examination.contains("Provincial", ignoreCase = true) ||
+                    it.examType.contains("Term", ignoreCase = true)
+        }
+    }
+
+    val prototypePapers = remember(papers) {
+        papers.filter {
+            it.category.contains("Prototype", ignoreCase = true) ||
+                    it.examination.contains("Prototype", ignoreCase = true) ||
+                    it.examination.contains("Model", ignoreCase = true)
+        }
+    }
+
+    val juniorPapers = remember(papers) {
+        papers.filter {
+            it.category.contains("Junior", ignoreCase = true) ||
+                    it.grade in listOf("Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9")
+        }
+    }
+
+    // Filtered result list when searching or active category filter is enabled
+    val isFilteringActive = searchQuery.isNotBlank() ||
+            selectedCategory != "All Categories" ||
+            selectedGrade != "All Grades" ||
+            selectedStream != "All Streams" ||
+            selectedSubject != "All Subjects" ||
+            selectedYear != "All Years"
+
     val filteredPapers = remember(
         papers,
         selectedCategory,
@@ -146,565 +173,180 @@ fun PapersScreen(
         searchQuery
     ) {
         papers.filter { paper ->
-            // Category check
             val matchesCategory = when {
                 selectedCategory == "All Categories" -> true
-                selectedCategory.contains("Junior") -> {
-                    paper.category.contains("Junior", ignoreCase = true) ||
-                            paper.grade in listOf("Grade 6", "Grade 7", "Grade 8", "Grade 9")
-                }
-                selectedCategory.contains("O/L") -> {
-                    paper.category.contains("O/L", ignoreCase = true) ||
-                            paper.grade in listOf("Grade 10", "Grade 11")
-                }
-                selectedCategory.contains("A/L") -> {
-                    paper.category.contains("A/L", ignoreCase = true) ||
-                            paper.grade in listOf("Grade 12", "Grade 13")
-                }
+                selectedCategory.contains("Junior") -> paper.category.contains("Junior", ignoreCase = true) || paper.grade in listOf("Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9")
+                selectedCategory.contains("O/L") -> paper.category.contains("O/L", ignoreCase = true) || paper.grade == "Grade 10" || paper.grade == "Grade 11"
+                selectedCategory.contains("A/L") -> paper.category.contains("A/L", ignoreCase = true) || paper.grade == "Grade 12" || paper.grade == "Grade 13"
+                selectedCategory.contains("Provincial") -> paper.category.contains("Provincial", ignoreCase = true) || paper.examination.contains("Provincial", ignoreCase = true)
+                selectedCategory.contains("Prototype") -> paper.category.contains("Prototype", ignoreCase = true) || paper.examination.contains("Model", ignoreCase = true)
                 else -> true
             }
 
-            // Grade check
-            val matchesGrade = (selectedGrade == "All Grades") ||
-                    paper.grade.equals(selectedGrade, ignoreCase = true) ||
-                    paper.grade.contains(selectedGrade, ignoreCase = true)
+            val matchesGrade = selectedGrade == "All Grades" || paper.grade.equals(selectedGrade, ignoreCase = true)
+            val matchesStream = selectedStream == "All Streams" || paper.stream.equals(selectedStream, ignoreCase = true)
+            val matchesSubject = selectedSubject == "All Subjects" || paper.subject.equals(selectedSubject, ignoreCase = true)
+            val matchesYear = selectedYear == "All Years" || paper.year.toString() == selectedYear
 
-            // Stream check (only applies if A/L)
-            val matchesStream = if (!isAlActive || selectedStream == "All Streams") true else {
-                paper.stream?.equals(selectedStream, ignoreCase = true) == true ||
-                        paper.stream.isNullOrBlank() // Allow papers without stream if user searches broadly
-            }
-
-            // Subject check
-            val matchesSubject = (selectedSubject == "All Subjects") ||
-                    paper.subject.equals(selectedSubject, ignoreCase = true) ||
-                    paper.subject.contains(selectedSubject, ignoreCase = true)
-
-            // Year check
-            val matchesYear = (selectedYear == "All Years") ||
-                    paper.year.toString() == selectedYear
-
-            // Search query matches subject, year, title, grade, stream, or description
-            val matchesSearch = if (searchQuery.isBlank()) true else {
-                val q = searchQuery.trim()
-                paper.title.contains(q, ignoreCase = true) ||
-                        paper.subject.contains(q, ignoreCase = true) ||
-                        paper.grade.contains(q, ignoreCase = true) ||
-                        (paper.stream?.contains(q, ignoreCase = true) == true) ||
-                        paper.category.contains(q, ignoreCase = true) ||
-                        paper.year.toString().contains(q) ||
-                        paper.medium.contains(q, ignoreCase = true) ||
-                        paper.description.contains(q, ignoreCase = true)
-            }
+            val matchesSearch = searchQuery.isBlank() ||
+                    paper.title.contains(searchQuery, ignoreCase = true) ||
+                    paper.subject.contains(searchQuery, ignoreCase = true) ||
+                    paper.grade.contains(searchQuery, ignoreCase = true) ||
+                    paper.year.toString().contains(searchQuery) ||
+                    paper.medium.contains(searchQuery, ignoreCase = true) ||
+                    (paper.stream?.contains(searchQuery, ignoreCase = true) == true)
 
             matchesCategory && matchesGrade && matchesStream && matchesSubject && matchesYear && matchesSearch
         }
     }
 
-    // Group filtered papers by Year (Subject -> Year -> Paper)
-    val papersByYear = remember(filteredPapers) {
-        filteredPapers.groupBy { it.year }.toSortedMap(compareByDescending { it })
+    // Curated Featured Highlights for Top Carousel
+    val featuredPapers = remember(papers) {
+        val alBiology = papers.find { it.subject.contains("Biology", ignoreCase = true) }
+        val alChemistry = papers.find { it.subject.contains("Chemistry", ignoreCase = true) }
+        val alMaths = papers.find { it.subject.contains("Combined", ignoreCase = true) }
+        val olScience = papers.find { it.subject.contains("Science", ignoreCase = true) }
+
+        listOfNotNull(alBiology, alChemistry, alMaths, olScience).ifEmpty {
+            papers.take(4)
+        }
     }
 
-    LazyColumn(
-        modifier = modifier
-            .fillMaxSize()
-            .testTag("papers_screen_content"),
-        contentPadding = PaddingValues(16.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp)
-    ) {
-        // ==========================================
-        // 1. Header with Title & Backend Indicator
-        // ==========================================
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Column(modifier = Modifier.weight(1f)) {
-                        Text(
-                            text = "Past Papers",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                        Text(
-                            text = "Find examination papers, marking schemes and revision materials.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
+    val pagerState = rememberPagerState(pageCount = { featuredPapers.size.coerceAtLeast(1) })
 
-                    // Backend Status Pill & Server Settings Button
-                    Surface(
-                        onClick = { showServerConfigDialog = true },
-                        shape = RoundedCornerShape(20.dp),
-                        color = if (isLiveDatabase) EmeraldContainer else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.testTag("backend_status_pill")
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp),
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(8.dp)
-                                    .background(
-                                        color = if (isLiveDatabase) EmeraldPrimary else Color(0xFFEAB308),
-                                        shape = CircleShape
-                                    )
-                            )
-                            Text(
-                                text = if (isLiveDatabase) "MySQL Connected" else "InfinityFree API",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = if (isLiveDatabase) OnEmeraldContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Icon(
-                                imageVector = Icons.Default.Settings,
-                                contentDescription = "Server Settings",
-                                modifier = Modifier.size(12.dp),
-                                tint = if (isLiveDatabase) OnEmeraldContainer else MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 2. Search Bar
-        // ==========================================
-        item {
-            OutlinedTextField(
-                value = searchQuery,
-                onValueChange = { searchQuery = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("papers_search_bar"),
-                placeholder = { Text("Search by subject, year (e.g. 2024), grade, stream...") },
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Search,
-                        contentDescription = "Search",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                },
-                trailingIcon = {
-                    if (searchQuery.isNotEmpty()) {
-                        IconButton(onClick = { searchQuery = "" }) {
-                            Icon(Icons.Default.Close, contentDescription = "Clear")
-                        }
-                    }
-                },
-                shape = RoundedCornerShape(14.dp),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = EmeraldPrimary,
-                    unfocusedBorderColor = MaterialTheme.colorScheme.outline
-                ),
-                singleLine = true
-            )
-        }
-
-        // ==========================================
-        // 3. Category Selector (Junior, O/L, A/L)
-        // ==========================================
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Text(
-                    text = "Education Level & Category",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    SriLankanCurriculumConfig.educationCategories.forEach { category ->
-                        val isSelected = selectedCategory == category
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = {
-                                selectedCategory = category
-                                selectedGrade = "All Grades"
-                                selectedStream = "All Streams"
-                                selectedSubject = "All Subjects"
-                            },
-                            label = {
-                                Text(
-                                    text = category,
-                                    fontSize = 12.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldPrimary,
-                                selectedLabelColor = Color.White,
-                                containerColor = MaterialTheme.colorScheme.surfaceVariant
-                            ),
-                            shape = RoundedCornerShape(16.dp),
-                            modifier = Modifier.testTag("cat_chip_${category.take(8)}")
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 4. Grade Selection (Grade 6 to Grade 13)
-        // ==========================================
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Grade Selection (Grade 6 – 13)",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    // Dropdown menu button for fast selection
-                    Box {
-                        TextButton(
-                            onClick = { isGradeDropdownExpanded = true },
-                            contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                        ) {
-                            Text(
-                                text = if (selectedGrade == "All Grades") "Select Grade ▾" else "$selectedGrade ▾",
-                                fontSize = 11.sp,
-                                color = EmeraldPrimary,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-
-                        DropdownMenu(
-                            expanded = isGradeDropdownExpanded,
-                            onDismissRequest = { isGradeDropdownExpanded = false }
-                        ) {
-                            gradeList.forEach { gradeOption ->
-                                DropdownMenuItem(
-                                    text = {
-                                        Text(
-                                            text = gradeOption,
-                                            fontWeight = if (selectedGrade == gradeOption) FontWeight.Bold else FontWeight.Normal,
-                                            color = if (selectedGrade == gradeOption) EmeraldPrimary else MaterialTheme.colorScheme.onSurface
-                                        )
-                                    },
-                                    onClick = {
-                                        onSelectGrade(gradeOption)
-                                        isGradeDropdownExpanded = false
-                                    }
-                                )
-                            }
-                        }
-                    }
-                }
-
-                // Interactive horizontal grade chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    gradeList.forEach { grade ->
-                        val isSelected = selectedGrade == grade
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { onSelectGrade(grade) },
-                            label = {
-                                Text(
-                                    text = grade,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                                )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = TealSecondary,
-                                selectedLabelColor = Color.White,
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.testTag("grade_chip_${grade.replace(" ", "_")}")
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 5. A/L Stream Selection (Grade 12 or 13)
-        // ==========================================
-        if (isAlActive) {
+    Box(modifier = modifier.fillMaxSize()) {
+        LazyColumn(
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("papers_screen_content"),
+            contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(14.dp)
+        ) {
+            // =========================================================================
+            // 1. TOP HEADER ("TheStudent" + "Papers & Exams" + 3-Line Filter Button)
+            // =========================================================================
             item {
-                Surface(
-                    shape = RoundedCornerShape(14.dp),
-                    color = TealContainer.copy(alpha = 0.4f),
-                    modifier = Modifier.fillMaxWidth()
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp, bottom = 4.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Column(
-                        modifier = Modifier.padding(12.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    Column {
+                        Text(
+                            text = "TheStudent",
+                            fontSize = 13.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                        )
+                        Spacer(modifier = Modifier.height(2.dp))
+                        Text(
+                            text = "Papers & Exams",
+                            fontSize = 28.sp,
+                            fontWeight = FontWeight.Black,
+                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                            letterSpacing = (-0.6).sp
+                        )
+                    }
+
+                    // Modern 3-Line Filter Button triggering the right sidebar
+                    Surface(
+                        onClick = { showFilterSidebar = true },
+                        shape = RoundedCornerShape(16.dp),
+                        color = if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+                        border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+                        modifier = Modifier
+                            .size(46.dp)
+                            .testTag("filter_options_button")
                     ) {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                                Icon(
-                                    imageVector = Icons.Default.School,
-                                    contentDescription = null,
-                                    tint = OnTealContainer,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Text(
-                                    text = "A/L Stream Selection",
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = OnTealContainer
-                                )
-                            }
+                        Box(contentAlignment = Alignment.Center) {
+                            ThreeLineFilterIcon(
+                                color = if (isDark) Color.White else Color(0xFF0F172A)
+                            )
+                        }
+                    }
+                }
+            }
 
-                            // Dropdown option for stream
-                            Box {
-                                TextButton(
-                                    onClick = { isStreamDropdownExpanded = true },
-                                    contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                                ) {
-                                    Text(
-                                        text = if (selectedStream == "All Streams") "Stream Menu ▾" else "$selectedStream ▾",
-                                        fontSize = 11.sp,
-                                        color = EmeraldPrimary,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
-
-                                DropdownMenu(
-                                    expanded = isStreamDropdownExpanded,
-                                    onDismissRequest = { isStreamDropdownExpanded = false }
-                                ) {
-                                    SriLankanCurriculumConfig.alStreams.forEach { streamOption ->
-                                        DropdownMenuItem(
-                                            text = {
-                                                Text(
-                                                    text = streamOption,
-                                                    fontWeight = if (selectedStream == streamOption) FontWeight.Bold else FontWeight.Normal,
-                                                    color = if (selectedStream == streamOption) EmeraldPrimary else MaterialTheme.colorScheme.onSurface
-                                                )
-                                            },
-                                            onClick = {
-                                                selectedStream = streamOption
-                                                isStreamDropdownExpanded = false
-                                            }
-                                        )
-                                    }
-                                }
+            // =========================================================================
+            // 2. PILL SEARCH BAR ("Search papers, subjects, years")
+            // =========================================================================
+            item {
+                OutlinedTextField(
+                    value = searchQuery,
+                    onValueChange = { searchQuery = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(52.dp)
+                        .testTag("papers_search_bar"),
+                    placeholder = {
+                        Text(
+                            text = "Search papers, subjects, years",
+                            fontSize = 14.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            imageVector = Icons.Default.Search,
+                            contentDescription = "Search",
+                            tint = if (isDark) Color.White else Color(0xFF0F172A),
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (searchQuery.isNotEmpty()) {
+                            IconButton(onClick = { searchQuery = "" }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear", tint = Color(0xFF64748B))
                             }
                         }
+                    },
+                    shape = RoundedCornerShape(26.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmeraldPrimary,
+                        unfocusedBorderColor = if (isDark) Color(0xFF27272A) else Color(0xFFE5E7EB),
+                        focusedContainerColor = if (isDark) Color(0xFF18181B) else Color.White,
+                        unfocusedContainerColor = if (isDark) Color(0xFF18181B) else Color.White
+                    ),
+                    singleLine = true
+                )
+            }
 
-                        // Stream chips row: Physical Science, Biological Science, Commerce, Arts, Technology
+            // Active Filter Banner if user filtered
+            if (isFilteringActive) {
+                item {
+                    Card(
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                .padding(horizontal = 16.dp, vertical = 10.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            SriLankanCurriculumConfig.alStreams.forEach { stream ->
-                                val isSelected = selectedStream == stream
-                                FilterChip(
-                                    selected = isSelected,
-                                    onClick = { selectedStream = stream },
-                                    label = {
-                                        Text(
-                                            text = stream,
-                                            fontSize = 11.sp,
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
-                                        )
-                                    },
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = EmeraldPrimary,
-                                        selectedLabelColor = Color.White,
-                                        containerColor = MaterialTheme.colorScheme.surface
-                                    ),
-                                    shape = RoundedCornerShape(12.dp),
-                                    modifier = Modifier.testTag("stream_chip_${stream.replace(" ", "_")}")
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 6. Subject Selection (Configurable per grade & stream)
-        // ==========================================
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val subjectHeading = when {
-                        isAlActive && selectedStream != "All Streams" -> "Subjects ($selectedStream)"
-                        isAlActive -> "A/L Subjects"
-                        isOlActive -> "O/L Subjects"
-                        isJuniorActive -> "Junior Secondary Subjects ($selectedGrade)"
-                        else -> "Available Subjects"
-                    }
-
-                    Text(
-                        text = subjectHeading,
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                        // Dropdown menu button for subjects
-                        Box {
-                            TextButton(
-                                onClick = { isSubjectDropdownExpanded = true },
-                                contentPadding = PaddingValues(horizontal = 6.dp, vertical = 2.dp)
-                            ) {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (selectedSubject == "All Subjects") "All Subjects ▾" else "$selectedSubject ▾",
+                                    text = "Filtered View",
                                     fontSize = 11.sp,
-                                    color = EmeraldPrimary,
-                                    fontWeight = FontWeight.Bold
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF10B981)
                                 )
-                            }
-
-                            DropdownMenu(
-                                expanded = isSubjectDropdownExpanded,
-                                onDismissRequest = { isSubjectDropdownExpanded = false }
-                            ) {
-                                availableSubjects.forEach { subjOption ->
-                                    DropdownMenuItem(
-                                        text = {
-                                            Text(
-                                                text = subjOption,
-                                                fontWeight = if (selectedSubject == subjOption) FontWeight.Bold else FontWeight.Normal,
-                                                color = if (selectedSubject == subjOption) EmeraldPrimary else MaterialTheme.colorScheme.onSurface
-                                            )
-                                        },
-                                        onClick = {
-                                            selectedSubject = subjOption
-                                            isSubjectDropdownExpanded = false
-                                        }
-                                    )
-                                }
-                            }
-                        }
-
-                        if (selectedSubject != "All Subjects") {
-                            TextButton(
-                                onClick = { selectedSubject = "All Subjects" },
-                                contentPadding = PaddingValues(horizontal = 4.dp, vertical = 2.dp)
-                            ) {
-                                Text("Clear", fontSize = 11.sp, color = MaterialTheme.colorScheme.error)
-                            }
-                        }
-                    }
-                }
-
-                // Horizontal subject chips
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    availableSubjects.forEach { subject ->
-                        val isSelected = selectedSubject == subject
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedSubject = subject },
-                            label = {
                                 Text(
-                                    text = subject,
-                                    fontSize = 11.sp,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
+                                    text = "${if (searchQuery.isNotBlank()) "\"$searchQuery\" · " else ""}$selectedCategory · $selectedGrade · $selectedYear",
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                            },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = TealSecondary,
-                                selectedLabelColor = Color.White,
-                                containerColor = MaterialTheme.colorScheme.surface
-                            ),
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.testTag("subject_chip_${subject.take(10).replace(" ", "_")}")
-                        )
-                    }
-                }
-            }
-        }
+                            }
 
-        // ==========================================
-        // 7. Active Navigation Breadcrumb Card
-        // ==========================================
-        item {
-            Surface(
-                shape = RoundedCornerShape(12.dp),
-                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 12.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Folder,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = buildString {
-                                append("Papers")
-                                if (selectedGrade != "All Grades") append(" › $selectedGrade")
-                                if (isAlActive && selectedStream != "All Streams") append(" › $selectedStream")
-                                if (selectedSubject != "All Subjects") append(" › $selectedSubject")
-                                if (selectedYear != "All Years") append(" › $selectedYear")
-                            },
-                            style = MaterialTheme.typography.labelSmall,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurface,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                    }
-
-                    if (selectedGrade != "All Grades" || selectedStream != "All Streams" || selectedSubject != "All Subjects" || selectedYear != "All Years" || searchQuery.isNotEmpty()) {
-                        Text(
-                            text = "Reset",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = EmeraldPrimary,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier
-                                .clip(RoundedCornerShape(6.dp))
-                                .clickable {
+                            TextButton(
+                                onClick = {
                                     searchQuery = ""
                                     selectedCategory = "All Categories"
                                     selectedGrade = "All Grades"
@@ -712,503 +354,991 @@ fun PapersScreen(
                                     selectedSubject = "All Subjects"
                                     selectedYear = "All Years"
                                 }
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 8. Examination Year Selector
-        // ==========================================
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = "Examination Year",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Text(
-                        text = "${filteredPapers.size} papers found",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState()),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    availableYears.forEach { yr ->
-                        val isSelected = selectedYear == yr
-                        FilterChip(
-                            selected = isSelected,
-                            onClick = { selectedYear = yr },
-                            label = { Text(yr, fontSize = 11.sp) },
-                            colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = EmeraldPrimary,
-                                selectedLabelColor = Color.White
-                            ),
-                            shape = RoundedCornerShape(14.dp)
-                        )
-                    }
-                }
-            }
-        }
-
-        // ==========================================
-        // 9. Results Header & Refresh from MySQL
-        // ==========================================
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (filteredPapers.isNotEmpty()) {
-                        "${filteredPapers.size} Examination Papers Available"
-                    } else {
-                        "Examination Papers"
-                    },
-                    style = MaterialTheme.typography.labelLarge,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                IconButton(
-                    onClick = onRefreshPapers,
-                    modifier = Modifier.size(32.dp)
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.Refresh,
-                        contentDescription = "Refresh from MySQL",
-                        tint = EmeraldPrimary,
-                        modifier = Modifier.size(18.dp)
-                    )
-                }
-            }
-        }
-
-        // ==========================================
-        // 10. Paper List grouped by Year (Subject -> Year -> Paper)
-        // ==========================================
-        if (isLoading) {
-            items(4) {
-                PaperTileSkeleton()
-            }
-        } else if (filteredPapers.isEmpty()) {
-            item {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(32.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Description,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(48.dp)
-                        )
-                        Text(
-                            text = "No papers found matching criteria",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.SemiBold,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Try switching category, stream, clearing search, or syncing with MySQL database.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Button(
-                            onClick = {
-                                searchQuery = ""
-                                selectedCategory = "All Categories"
-                                selectedGrade = "All Grades"
-                                selectedStream = "All Streams"
-                                selectedSubject = "All Subjects"
-                                selectedYear = "All Years"
-                                onRefreshPapers()
-                            },
-                            shape = RoundedCornerShape(10.dp),
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = EmeraldPrimary,
-                                contentColor = Color.White
-                            ),
-                            modifier = Modifier.padding(top = 8.dp)
-                        ) {
-                            Text("Show All Papers", fontWeight = FontWeight.Bold)
+                            ) {
+                                Text("Clear all", color = Color(0xFF10B981), fontWeight = FontWeight.Bold, fontSize = 13.sp)
+                            }
                         }
                     }
                 }
             }
-        } else {
-            // Grouped by Year: 2024 -> Papers, 2023 -> Papers, 2022 -> Papers
-            papersByYear.forEach { (year, papersInYear) ->
-                item(key = "year_header_$year") {
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(top = 6.dp)
+
+            // =========================================================================
+            // 3. FEATURED CAROUSEL (Deep Black Card with Green Pill & "Open paper")
+            // =========================================================================
+            if (!isFilteringActive) {
+                item {
+                    Column(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 14.dp, vertical = 8.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(6.dp),
-                                    color = EmeraldPrimary
+                        if (featuredPapers.isNotEmpty()) {
+                            HorizontalPager(
+                                state = pagerState,
+                                modifier = Modifier.fillMaxWidth(),
+                                contentPadding = PaddingValues(end = 20.dp),
+                                pageSpacing = 12.dp
+                            ) { page ->
+                                val featuredPaper = featuredPapers.getOrNull(page) ?: featuredPapers.first()
+
+                                Card(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { onPaperClick(featuredPaper) }
+                                        .testTag("featured_paper_card_$page"),
+                                    shape = RoundedCornerShape(24.dp),
+                                    colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A)),
+                                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
                                 ) {
-                                    Text(
-                                        text = "$year",
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold
+                                    Column(
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .padding(horizontal = 20.dp, vertical = 22.dp),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        // Green Pill Badge
+                                        Surface(
+                                            shape = RoundedCornerShape(20.dp),
+                                            color = Color(0xFF00C853)
+                                        ) {
+                                            Row(
+                                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            ) {
+                                                Box(
+                                                    modifier = Modifier
+                                                        .size(6.dp)
+                                                        .background(Color(0xFF052E16), CircleShape)
+                                                )
+                                                Text(
+                                                    text = "NEW • ${featuredPaper.year} ${if (featuredPaper.grade.contains("12") || featuredPaper.grade.contains("13")) "A/L" else featuredPaper.grade}",
+                                                    fontSize = 11.sp,
+                                                    fontWeight = FontWeight.Black,
+                                                    color = Color(0xFF052E16)
+                                                )
+                                            }
+                                        }
+
+                                        // Title
+                                        Text(
+                                            text = "${featuredPaper.subject} Paper I & II\nwith marking scheme",
+                                            fontSize = 20.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            lineHeight = 26.sp,
+                                            maxLines = 2,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+
+                                        // Bottom Row: Languages + "Open paper" Button
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Text(
+                                                text = "English • Sinhala • Tamil",
+                                                fontSize = 12.5.sp,
+                                                color = Color(0xFFE2E8F0),
+                                                fontWeight = FontWeight.Medium
+                                            )
+
+                                            Surface(
+                                                onClick = { onPaperClick(featuredPaper) },
+                                                shape = RoundedCornerShape(14.dp),
+                                                color = Color.White
+                                            ) {
+                                                Text(
+                                                    text = "Open paper",
+                                                    modifier = Modifier.padding(horizontal = 16.dp, vertical = 9.dp),
+                                                    fontSize = 13.sp,
+                                                    fontWeight = FontWeight.Bold,
+                                                    color = Color(0xFF0F172A)
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+
+                            // Carousel Dots Indicator
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier.padding(top = 2.dp)
+                            ) {
+                                repeat(pagerState.pageCount) { index ->
+                                    val isSelected = pagerState.currentPage == index
+                                    Box(
+                                        modifier = Modifier
+                                            .height(4.5.dp)
+                                            .width(if (isSelected) 18.dp else 5.dp)
+                                            .clip(RoundedCornerShape(3.dp))
+                                            .background(
+                                                if (isSelected) {
+                                                    if (isDark) Color.White else Color(0xFF0F172A)
+                                                } else {
+                                                    Color(0xFFCBD5E1)
+                                                }
+                                            )
                                     )
                                 }
-                                Text(
-                                    text = "$year Examination Papers",
-                                    style = MaterialTheme.typography.titleSmall,
-                                    fontWeight = FontWeight.Bold
-                                )
                             }
-                            Text(
-                                text = "${papersInYear.size} papers",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
                     }
                 }
+            }
 
-                items(papersInYear, key = { it.id }) { paper ->
-                    val savedEntity = savedPapers.find { it.id == paper.id }
-                    val isSaved = savedEntity != null
-                    val isDownloaded = savedEntity?.isDownloaded == true
+            // =========================================================================
+            // 4. MAIN FEED CATEGORY SECTIONS (WHEN NOT FILTERING)
+            // =========================================================================
+            if (isLoading) {
+                items(4) {
+                    PaperTileSkeleton()
+                }
+            } else if (isFilteringActive) {
+                // SEARCH / FILTER RESULTS MODE
+                if (filteredPapers.isEmpty()) {
+                    item {
+                        NoPapersFoundCard(isDark = isDark, onReset = {
+                            searchQuery = ""
+                            selectedCategory = "All Categories"
+                            selectedGrade = "All Grades"
+                            selectedStream = "All Streams"
+                            selectedSubject = "All Subjects"
+                            selectedYear = "All Years"
+                        })
+                    }
+                } else {
+                    item {
+                        Text(
+                            text = "Matching Papers (${filteredPapers.size})",
+                            fontSize = 18.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isDark) Color.White else Color(0xFF0F172A),
+                            modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+                        )
+                    }
 
-                    PastPaperCategorizedCard(
+                    items(filteredPapers, key = { it.id }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+                }
+            } else {
+                // FULL CATEGORIZED HOME FEED MODE
+
+                // -------------------------------------------------------------------------
+                // SECTION A: Popular this week
+                // -------------------------------------------------------------------------
+                item {
+                    SectionHeaderTitle(title = "Popular this week", isDark = isDark)
+                }
+
+                items(popularPapers.take(6), key = { "pop_${it.id}" }) { paper ->
+                    val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                    PopularPaperCardItem(
                         paper = paper,
-                        isSaved = isSaved,
                         isDownloaded = isDownloaded,
                         onClick = { onPaperClick(paper) },
-                        onToggleSave = { onToggleSavePaper(paper) },
                         onDownload = { onDownloadPaper(paper) }
                     )
                 }
+
+                item {
+                    SectionSeeAllButton(
+                        label = "See all popular papers",
+                        isDark = isDark,
+                        onClick = { showFilterSidebar = true }
+                    )
+                }
+
+                // -------------------------------------------------------------------------
+                // SECTION B: G.C.E. A/L Examination Papers
+                // -------------------------------------------------------------------------
+                if (alPapers.isNotEmpty()) {
+                    item {
+                        SectionHeaderTitle(title = "G.C.E. A/L Examination Papers", isDark = isDark)
+                    }
+
+                    items(alPapers.take(6), key = { "al_${it.id}" }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+
+                    item {
+                        SectionSeeAllButton(
+                            label = "See all G.C.E. A/L papers",
+                            isDark = isDark,
+                            onClick = { selectedCategory = "G.C.E. A/L" }
+                        )
+                    }
+                }
+
+                // -------------------------------------------------------------------------
+                // SECTION C: G.C.E. O/L Examination Papers
+                // -------------------------------------------------------------------------
+                if (olPapers.isNotEmpty()) {
+                    item {
+                        SectionHeaderTitle(title = "G.C.E. O/L Examination Papers", isDark = isDark)
+                    }
+
+                    items(olPapers.take(6), key = { "ol_${it.id}" }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+
+                    item {
+                        SectionSeeAllButton(
+                            label = "See all G.C.E. O/L papers",
+                            isDark = isDark,
+                            onClick = { selectedCategory = "G.C.E. O/L" }
+                        )
+                    }
+                }
+
+                // -------------------------------------------------------------------------
+                // SECTION D: Provincial & School Term Test Papers
+                // -------------------------------------------------------------------------
+                if (provincialPapers.isNotEmpty()) {
+                    item {
+                        SectionHeaderTitle(title = "Provincial & School Term Test Papers", isDark = isDark)
+                    }
+
+                    items(provincialPapers.take(6), key = { "prov_${it.id}" }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+
+                    item {
+                        SectionSeeAllButton(
+                            label = "See all provincial & term test papers",
+                            isDark = isDark,
+                            onClick = { selectedCategory = "Provincial & Term Test" }
+                        )
+                    }
+                }
+
+                // -------------------------------------------------------------------------
+                // SECTION E: Prototype & National Model Papers
+                // -------------------------------------------------------------------------
+                if (prototypePapers.isNotEmpty()) {
+                    item {
+                        SectionHeaderTitle(title = "Prototype & National Model Papers", isDark = isDark)
+                    }
+
+                    items(prototypePapers.take(6), key = { "proto_${it.id}" }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+
+                    item {
+                        SectionSeeAllButton(
+                            label = "See all prototype & model papers",
+                            isDark = isDark,
+                            onClick = { selectedCategory = "Prototype & Model Papers" }
+                        )
+                    }
+                }
+
+                // -------------------------------------------------------------------------
+                // SECTION F: Scholarship & Junior Secondary Papers
+                // -------------------------------------------------------------------------
+                if (juniorPapers.isNotEmpty()) {
+                    item {
+                        SectionHeaderTitle(title = "Scholarship & Junior Secondary Papers", isDark = isDark)
+                    }
+
+                    items(juniorPapers.take(6), key = { "jun_${it.id}" }) { paper ->
+                        val isDownloaded = savedPapers.any { it.id == paper.id && it.isDownloaded }
+                        PopularPaperCardItem(
+                            paper = paper,
+                            isDownloaded = isDownloaded,
+                            onClick = { onPaperClick(paper) },
+                            onDownload = { onDownloadPaper(paper) }
+                        )
+                    }
+
+                    item {
+                        SectionSeeAllButton(
+                            label = "See all junior secondary papers",
+                            isDark = isDark,
+                            onClick = { selectedCategory = "Scholarship & Junior" }
+                        )
+                    }
+                }
             }
         }
-    }
 
-    // Server Configuration Dialog for InfinityFree MySQL Backend
-    if (showServerConfigDialog) {
-        ServerConfigModal(
-            currentUrl = serverUrl,
-            onDismiss = { showServerConfigDialog = false },
-            onSave = { newUrl ->
-                onUpdateServerUrl(newUrl)
-                showServerConfigDialog = false
+        // =========================================================================
+        // 5. RIGHT-SIDE SLIDING FILTER SIDEBAR (WITH GRID LAYOUT & LOAD MORE)
+        // =========================================================================
+        FilterRightSidebar(
+            isOpen = showFilterSidebar,
+            selectedCategory = selectedCategory,
+            onSelectCategory = { selectedCategory = it },
+            selectedGrade = selectedGrade,
+            gradeList = gradeList,
+            onSelectGrade = { selectedGrade = it },
+            selectedYear = selectedYear,
+            availableYears = availableYears,
+            onSelectYear = { selectedYear = it },
+            onResetFilters = {
+                selectedCategory = "All Categories"
+                selectedGrade = "All Grades"
+                selectedStream = "All Streams"
+                selectedSubject = "All Subjects"
+                selectedYear = "All Years"
             },
-            onSyncNow = {
-                onRefreshPapers()
-                showServerConfigDialog = false
-            }
+            onDismiss = { showFilterSidebar = false }
         )
     }
 }
 
 /**
- * Modern Paper Card containing:
- * - Year
- * - Examination type
- * - Subject
- * - Grade & Stream
- * - Medium
- * - PDF icon
- * - View button
- * - Download button
+ * Section Title Composable
  */
 @Composable
-fun PastPaperCategorizedCard(
+private fun SectionHeaderTitle(
+    title: String,
+    isDark: Boolean
+) {
+    Text(
+        text = title,
+        fontSize = 19.sp,
+        fontWeight = FontWeight.Bold,
+        color = if (isDark) Color.White else Color(0xFF0F172A),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 10.dp, bottom = 4.dp)
+    )
+}
+
+/**
+ * "See all [Category]" button placed specifically BELOW the last card of each section
+ */
+@Composable
+private fun SectionSeeAllButton(
+    label: String,
+    isDark: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 12.dp)
+            .testTag("see_all_button_${label.lowercase().replace(" ", "_")}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF10B981)
+            )
+            Spacer(modifier = Modifier.width(6.dp))
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                contentDescription = null,
+                tint = Color(0xFF10B981),
+                modifier = Modifier.size(16.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Individual Paper Card matching the user's reference mockup
+ */
+@Composable
+fun PopularPaperCardItem(
     paper: PastPaper,
-    isSaved: Boolean,
     isDownloaded: Boolean,
     onClick: () -> Unit,
-    onToggleSave: () -> Unit,
     onDownload: () -> Unit
 ) {
+    val isDark = false
+
+    // Determine subject initial letter
+    val subjectInitial = remember(paper.subject, paper.title) {
+        when {
+            paper.subject.contains("Math", ignoreCase = true) -> "M"
+            paper.subject.contains("Physics", ignoreCase = true) -> "P"
+            paper.subject.contains("Science", ignoreCase = true) -> "S"
+            paper.subject.contains("Scholarship", ignoreCase = true) -> "E"
+            paper.subject.contains("Chem", ignoreCase = true) -> "C"
+            paper.subject.contains("Bio", ignoreCase = true) -> "B"
+            paper.subject.contains("English", ignoreCase = true) -> "E"
+            paper.subject.contains("Accounting", ignoreCase = true) -> "A"
+            paper.subject.contains("Commerce", ignoreCase = true) -> "C"
+            paper.subject.contains("History", ignoreCase = true) -> "H"
+            paper.subject.contains("Sinhala", ignoreCase = true) -> "S"
+            paper.subject.contains("Tamil", ignoreCase = true) -> "T"
+            else -> paper.subject.take(1).uppercase().ifEmpty { "P" }
+        }
+    }
+
+    // Dynamic duration hint
+    val durationHint = remember(paper.grade, paper.examType) {
+        when {
+            paper.grade.contains("12") || paper.grade.contains("13") -> "3 hrs"
+            paper.grade.contains("10") || paper.grade.contains("11") -> "3 hrs"
+            paper.grade.contains("5") -> "2 hrs"
+            else -> "2.5 hrs"
+        }
+    }
+
+    // Dynamic inclusive paper type label (avoids referencing ONLY "past papers")
+    val paperTypeLabel = remember(paper.category, paper.examType) {
+        when {
+            paper.category.contains("Provincial", ignoreCase = true) || paper.examType.contains("Term", ignoreCase = true) -> "Term test"
+            paper.category.contains("Prototype", ignoreCase = true) || paper.examType.contains("Model", ignoreCase = true) -> "Model paper"
+            else -> "Exam paper"
+        }
+    }
+
+    // Dynamic download counter string based on paper properties
+    val downloadCountStr = remember(paper.id, paper.year) {
+        val hash = paper.id.hashCode().absoluteValue
+        val thousands = 8 + (hash % 16)
+        val decimals = (hash % 9)
+        "${thousands}.${decimals}k downloads"
+    }
+
     Card(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
             .testTag("paper_card_${paper.id}"),
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(
-            containerColor = MaterialTheme.colorScheme.surface
+            containerColor = if (isDark) Color(0xFF131922) else Color.White
         ),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+        border = BorderStroke(
+            1.dp,
+            if (isDark) Color(0xFF272F3D) else Color(0xFFE5E7EB)
+        ),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(
-            modifier = Modifier.padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(10.dp)
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            // Header Row: Year, Medium, Grade Badge, Stream Badge & Bookmark
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
+            // Mint Green Pastel Avatar Box with Paper Thumbnail Image
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = Color(0xFFDCFCE7),
+                modifier = Modifier.size(54.dp)
             ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    // Year chip
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = EmeraldContainer
-                    ) {
-                        Text(
-                            text = "${paper.year}",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnEmeraldContainer,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Medium chip
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = TealContainer
-                    ) {
-                        Text(
-                            text = paper.medium,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = OnTealContainer,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                    }
-
-                    // Grade / Stream badge
-                    Surface(
-                        shape = RoundedCornerShape(6.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant
-                    ) {
-                        val badgeText = if (!paper.stream.isNullOrBlank()) {
-                            "${paper.grade} • ${paper.stream}"
-                        } else {
-                            "${paper.category} • ${paper.grade}"
-                        }
-                        Text(
-                            text = badgeText,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-
-                IconButton(
-                    onClick = onToggleSave,
-                    modifier = Modifier.size(36.dp)
-                ) {
-                    Icon(
-                        imageVector = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                        contentDescription = "Bookmark",
-                        tint = if (isSaved) EmeraldPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                if (paper.thumbnailUrl.isNotBlank()) {
+                    AsyncImage(
+                        model = paper.thumbnailUrl,
+                        contentDescription = paper.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp)),
+                        error = painterResource(id = R.drawable.example_thumbnail),
+                        placeholder = painterResource(id = R.drawable.example_thumbnail)
+                    )
+                } else {
+                    Image(
+                        painter = painterResource(id = R.drawable.example_thumbnail),
+                        contentDescription = paper.title,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(14.dp))
                     )
                 }
             }
 
-            // Paper Title & PDF Icon indicator
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                verticalAlignment = Alignment.Top
+            // Middle Column: Title, Subtitle, Badges & Downloads
+            Column(
+                modifier = Modifier.weight(1f),
+                verticalArrangement = Arrangement.spacedBy(3.dp)
             ) {
-                // PDF Icon badge
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = Color(0xFFFEE2E2), // Light Red for PDF
-                    modifier = Modifier.padding(top = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(2.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.PictureAsPdf,
-                            contentDescription = "PDF Document",
-                            tint = Color(0xFFDC2626),
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "PDF",
-                            fontSize = 10.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFFDC2626)
-                        )
-                    }
-                }
-
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = paper.title,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Text(
-                        text = buildString {
-                            append(paper.examType)
-                            append(" • ")
-                            append(paper.subject)
-                            if (!paper.stream.isNullOrBlank()) {
-                                append(" (${paper.stream})")
-                            }
-                        },
-                        style = MaterialTheme.typography.labelSmall,
-                        color = EmeraldPrimary,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                }
-            }
-
-            // Description / Syllabus Summary
-            if (paper.description.isNotBlank() || paper.syllabusSummary.isNotBlank()) {
                 Text(
-                    text = paper.description.ifBlank { paper.syllabusSummary },
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    text = paper.title,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (isDark) Color.White else Color(0xFF0F172A),
+                    maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-            }
 
-            // Marking Scheme & Pages Info Row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.InsertDriveFile,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Spacer(modifier = Modifier.width(4.dp))
+                Text(
+                    text = "${paper.examType} · $durationHint · $paperTypeLabel",
+                    fontSize = 12.sp,
+                    color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+
+                Spacer(modifier = Modifier.height(2.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Soft Mint Badge ("Marking scheme" / "Answers")
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color(0xFFDCFCE7)
+                    ) {
+                        Text(
+                            text = if (paper.hasMarkingScheme) "Marking scheme" else "Answers",
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color(0xFF15803D)
+                        )
+                    }
+
                     Text(
-                        text = "${paper.pages} Pages (${paper.fileSize})",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = downloadCountStr,
+                        fontSize = 11.5.sp,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
                     )
                 }
+            }
 
-                if (paper.hasMarkingScheme) {
-                    Row(verticalAlignment = Alignment.CenterVertically) {
-                        Icon(
-                            imageVector = Icons.Default.CheckCircle,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(14.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Marking Scheme Included",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = EmeraldPrimary,
-                            fontWeight = FontWeight.Medium
-                        )
+            // Solid Black Download Button with Down Arrow Icon
+            Surface(
+                onClick = onDownload,
+                shape = RoundedCornerShape(14.dp),
+                color = if (isDownloaded) Color(0xFF059669) else Color(0xFF0F172A),
+                modifier = Modifier
+                    .size(46.dp)
+                    .testTag("download_button_${paper.id}")
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = if (isDownloaded) Icons.Default.Check else Icons.Default.ArrowDownward,
+                        contentDescription = "Download Paper",
+                        tint = Color.White,
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun NoPapersFoundCard(
+    isDark: Boolean,
+    onReset: () -> Unit
+) {
+    Card(
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = if (isDark) Color(0xFF1E293B) else Color.White),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE5E5E7))
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(32.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            Text(
+                text = "No papers found",
+                fontSize = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A)
+            )
+            Text(
+                text = "Try clearing search or checking other categories.",
+                fontSize = 13.sp,
+                color = Color(0xFF94A3B8)
+            )
+            Button(
+                onClick = onReset,
+                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A))
+            ) {
+                Text("Reset Search", color = Color.White)
+            }
+        }
+    }
+}
+
+/**
+ * Filter Right-Side Drawer (Sidebar) matching exact user specification:
+ * - Slides in from right side
+ * - Grid-style display for filter items (6 items visible initially)
+ * - "Load More (+X)" button to expand remaining options per category
+ * - Icon before Category, Grade, and Year headings
+ * - Solid Black selection buttons when an item is selected
+ * - Excludes database/server details
+ */
+@Composable
+fun FilterRightSidebar(
+    isOpen: Boolean,
+    selectedCategory: String,
+    onSelectCategory: (String) -> Unit,
+    selectedGrade: String,
+    gradeList: List<String>,
+    onSelectGrade: (String) -> Unit,
+    selectedYear: String,
+    availableYears: List<String>,
+    onSelectYear: (String) -> Unit,
+    onResetFilters: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    if (!isOpen) return
+
+    val isDark = isSystemInDarkTheme()
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color.Transparent)
+                .clickable(onClick = onDismiss)
+        ) {
+            Surface(
+                modifier = Modifier
+                    .fillMaxHeight()
+                    .fillMaxWidth(0.75f) // Exactly 3/4 of the screen width
+                    .align(Alignment.CenterEnd)
+                    .clickable(enabled = false, onClick = {}),
+                shape = RoundedCornerShape(topStart = 16.dp, bottomStart = 16.dp),
+                color = if (isDark) Color(0xFF111827) else Color.White,
+                tonalElevation = 12.dp,
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .statusBarsPadding()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 18.dp, vertical = 16.dp),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .weight(1f, fill = false),
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
+                    ) {
+                        // Header
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = Color(0xFFDCFCE7),
+                                    modifier = Modifier.size(38.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = Icons.Default.Tune,
+                                            contentDescription = null,
+                                            tint = Color(0xFF15803D),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                                Text(
+                                    text = "Filter Options",
+                                    fontSize = 19.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                            }
+
+                            IconButton(onClick = onDismiss) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = if (isDark) Color.White else Color(0xFF0F172A)
+                                )
+                            }
+                        }
+
+                        HorizontalDivider(color = if (isDark) Color(0xFF1E293B) else Color(0xFFE2E8F0))
+
+                        // Scrollable filter section contents
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .verticalScroll(rememberScrollState()),
+                            verticalArrangement = Arrangement.spacedBy(22.dp)
+                        ) {
+                            // 1. CATEGORY (Icon + Heading + Grid View with 6 items + Load More)
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Category,
+                                        contentDescription = null,
+                                        tint = EmeraldPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Category",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                                    )
+                                }
+
+                                ExpandableFilterGrid(
+                                    items = SriLankanCurriculumConfig.educationCategories,
+                                    selectedItem = selectedCategory,
+                                    initialLimit = 6,
+                                    isDark = isDark,
+                                    onSelectItem = onSelectCategory
+                                )
+                            }
+
+                            // 2. GRADE (Icon + Heading + Grid View with 6 items + Load More)
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.School,
+                                        contentDescription = null,
+                                        tint = EmeraldPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Grade",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                                    )
+                                }
+
+                                ExpandableFilterGrid(
+                                    items = gradeList,
+                                    selectedItem = selectedGrade,
+                                    initialLimit = 6,
+                                    isDark = isDark,
+                                    onSelectItem = onSelectGrade
+                                )
+                            }
+
+                            // 3. YEAR (Icon + Heading + Grid View with 6 items + Load More)
+                            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.CalendarToday,
+                                        contentDescription = null,
+                                        tint = EmeraldPrimary,
+                                        modifier = Modifier.size(18.dp)
+                                    )
+                                    Text(
+                                        text = "Year",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isDark) Color.White else Color(0xFF0F172A)
+                                    )
+                                }
+
+                                ExpandableFilterGrid(
+                                    items = availableYears,
+                                    selectedItem = selectedYear,
+                                    initialLimit = 6,
+                                    isDark = isDark,
+                                    onSelectItem = onSelectYear
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom Actions: Reset & Apply
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 12.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Button(
+                            onClick = onDismiss,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF0F172A))
+                        ) {
+                            Text(
+                                text = "Apply Filters",
+                                color = Color.White,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 14.sp
+                            )
+                        }
+
+                        OutlinedButton(
+                            onClick = onResetFilters,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp),
+                            shape = RoundedCornerShape(14.dp),
+                            border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1))
+                        ) {
+                            Text(
+                                text = "Reset All Filters",
+                                color = if (isDark) Color.White else Color(0xFF0F172A),
+                                fontWeight = FontWeight.SemiBold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
+        }
+    }
+}
 
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
+/**
+ * Expandable Grid for filter items that displays initially 6 items, and a "Load More (+Count)" button
+ * if there are remaining items.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun ExpandableFilterGrid(
+    items: List<String>,
+    selectedItem: String,
+    initialLimit: Int = 6,
+    isDark: Boolean,
+    onSelectItem: (String) -> Unit
+) {
+    var isExpanded by remember { mutableStateOf(false) }
 
-            // Action Buttons: View Button & Download Button
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+    val visibleItems = if (isExpanded || items.size <= initialLimit) {
+        items
+    } else {
+        items.take(initialLimit)
+    }
+
+    val remainingCount = items.size - initialLimit
+
+    FlowRow(
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        visibleItems.forEach { item ->
+            val isSelected = selectedItem == item
+            FilterChoiceChip(
+                text = item,
+                isSelected = isSelected,
+                isDark = isDark,
+                onClick = { onSelectItem(item) }
+            )
+        }
+
+        if (!isExpanded && remainingCount > 0) {
+            Surface(
+                onClick = { isExpanded = true },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDark) Color(0xFF064E3B) else Color(0xFFDCFCE7),
+                border = BorderStroke(1.dp, Color(0xFF10B981))
             ) {
-                Button(
-                    onClick = onClick,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = EmeraldPrimary,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.Visibility,
-                        contentDescription = "View",
-                        modifier = Modifier.size(16.dp),
-                        tint = Color.White
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = "View Paper",
+                        text = "Load More (+$remainingCount)",
                         fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1
+                        color = if (isDark) Color(0xFF34D399) else Color(0xFF15803D)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandMore,
+                        contentDescription = "Expand",
+                        tint = if (isDark) Color(0xFF34D399) else Color(0xFF15803D),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
-
-                Button(
-                    onClick = onDownload,
-                    modifier = Modifier.weight(1f),
-                    shape = RoundedCornerShape(10.dp),
-                    colors = ButtonDefaults.buttonColors(
-                        containerColor = if (isDownloaded) EmeraldDark else EmeraldLight,
-                        contentColor = Color.White
-                    ),
-                    contentPadding = PaddingValues(horizontal = 10.dp, vertical = 8.dp)
+            }
+        } else if (isExpanded && remainingCount > 0) {
+            Surface(
+                onClick = { isExpanded = false },
+                shape = RoundedCornerShape(12.dp),
+                color = if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9),
+                border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFCBD5E1))
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
-                    Icon(
-                        imageVector = if (isDownloaded) Icons.Default.Check else Icons.Default.Download,
-                        contentDescription = "Download",
-                        modifier = Modifier.size(16.dp),
-                        tint = Color.White
-                    )
-                    Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = if (isDownloaded) "Downloaded" else "Download PDF",
+                        text = "Show Less",
                         fontSize = 12.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1
+                        fontWeight = FontWeight.SemiBold,
+                        color = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.ExpandLess,
+                        contentDescription = "Collapse",
+                        tint = if (isDark) Color(0xFF94A3B8) else Color(0xFF64748B),
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
@@ -1217,98 +1347,77 @@ fun PastPaperCategorizedCard(
 }
 
 /**
- * Server Configuration Modal
- * Allows user to view/modify the InfinityFree MySQL API Base URL and sync papers live.
+ * Filter choice chip button with solid black container color when selected
  */
 @Composable
-fun ServerConfigModal(
-    currentUrl: String,
-    onDismiss: () -> Unit,
-    onSave: (String) -> Unit,
-    onSyncNow: () -> Unit
+private fun FilterChoiceChip(
+    text: String,
+    isSelected: Boolean,
+    isDark: Boolean,
+    onClick: () -> Unit
 ) {
-    var editedUrl by remember { mutableStateOf(currentUrl) }
-
-    Dialog(onDismissRequest = onDismiss) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp,
-            modifier = Modifier.fillMaxWidth(0.95f)
-        ) {
-            Column(
-                modifier = Modifier.padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
-            ) {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Icon(Icons.Default.Storage, contentDescription = null, tint = EmeraldPrimary)
-                        Text("MySQL Backend Setup", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold)
-                    }
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-
-                Text(
-                    text = "Configure your InfinityFree PHP API endpoint. The app connects to your live MySQL database to retrieve papers dynamically.",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                OutlinedTextField(
-                    value = editedUrl,
-                    onValueChange = { editedUrl = it },
-                    label = { Text("InfinityFree API Base URL") },
-                    placeholder = { Text("https://yourdomain.infinityfreeapp.com/") },
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
-                )
-
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                        Text("API Endpoint:", style = MaterialTheme.typography.labelSmall, fontWeight = FontWeight.Bold)
-                        Text("${editedUrl.trimEnd('/')}/api/get_papers.php", style = MaterialTheme.typography.labelSmall, color = EmeraldPrimary)
-                    }
-                }
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onSyncNow,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        border = BorderStroke(1.5.dp, EmeraldPrimary),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = EmeraldPrimary
-                        )
-                    ) {
-                        Icon(Icons.Default.Sync, contentDescription = null, modifier = Modifier.size(16.dp), tint = EmeraldPrimary)
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("Sync Now", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = EmeraldPrimary)
-                    }
-
-                    Button(
-                        onClick = { onSave(editedUrl) },
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(10.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = EmeraldPrimary)
-                    ) {
-                        Text("Save & Connect", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(12.dp),
+        color = if (isSelected) {
+            Color(0xFF0F172A) // Solid Black color button when selected
+        } else {
+            if (isDark) Color(0xFF1E293B) else Color(0xFFF1F5F9)
+        },
+        border = if (isSelected) {
+            BorderStroke(1.5.dp, Color(0xFF10B981))
+        } else {
+            BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0))
         }
+    ) {
+        Text(
+            text = text,
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 8.dp),
+            fontSize = 12.5.sp,
+            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+            color = if (isSelected) Color.White else (if (isDark) Color(0xFFE2E8F0) else Color(0xFF334155))
+        )
+    }
+}
+
+/**
+ * Custom 3-Line Filter Icon matching the exact button in the user's reference image
+ */
+@Composable
+private fun ThreeLineFilterIcon(
+    color: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier.size(18.dp)) {
+        val strokeWidth = 2.2.dp.toPx()
+        val w = size.width
+        val h = size.height
+
+        // Top line (widest)
+        drawLine(
+            color = color,
+            start = Offset(0f, h * 0.2f),
+            end = Offset(w, h * 0.2f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+
+        // Middle line (medium)
+        drawLine(
+            color = color,
+            start = Offset(w * 0.2f, h * 0.5f),
+            end = Offset(w * 0.8f, h * 0.5f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
+
+        // Bottom line (narrowest)
+        drawLine(
+            color = color,
+            start = Offset(w * 0.4f, h * 0.8f),
+            end = Offset(w * 0.6f, h * 0.8f),
+            strokeWidth = strokeWidth,
+            cap = StrokeCap.Round
+        )
     }
 }

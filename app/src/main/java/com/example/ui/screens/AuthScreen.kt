@@ -55,6 +55,7 @@ fun AuthScreen(
     initialIsRegister: Boolean = false,
     onAuthSuccess: (UserProfile) -> Unit,
     onContinueAsGuest: () -> Unit,
+    onOpenAdminPanel: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
@@ -109,31 +110,68 @@ fun AuthScreen(
                     .padding(horizontal = 24.dp, vertical = 18.dp),
                 verticalArrangement = Arrangement.spacedBy(16.dp)
             ) {
-                // Circular back button
-                Surface(
-                    shape = CircleShape,
-                    color = Color.White,
-                    shadowElevation = 3.dp,
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clickable {
-                            if (authMode == AuthMode.VERIFY_OTP) {
-                                authMode = AuthMode.SIGN_IN
-                            } else if (onBack != null) {
-                                onBack()
-                            } else {
-                                onContinueAsGuest()
+                // Circular back button & Admin Panel button row
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White,
+                        shadowElevation = 3.dp,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clickable {
+                                if (authMode == AuthMode.VERIFY_OTP) {
+                                    authMode = AuthMode.SIGN_IN
+                                } else if (onBack != null) {
+                                    onBack()
+                                } else {
+                                    onContinueAsGuest()
+                                }
+                            }
+                            .testTag("auth_back_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = PureLightGreenButton,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
+
+                    if (onOpenAdminPanel != null) {
+                        Surface(
+                            shape = RoundedCornerShape(22.dp),
+                            color = Color.White,
+                            shadowElevation = 3.dp,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(22.dp))
+                                .clickable { onOpenAdminPanel() }
+                                .testTag("btn_top_admin_panel")
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AdminPanelSettings,
+                                    contentDescription = "Admin Panel",
+                                    tint = PureLightGreenButton,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Text(
+                                    text = "Admin Panel",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = PureLightGreenButton
+                                )
                             }
                         }
-                        .testTag("auth_back_button")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = PureLightGreenButton,
-                            modifier = Modifier.size(20.dp)
-                        )
                     }
                 }
 
@@ -398,7 +436,7 @@ fun AuthScreen(
                                             }
                                         )
 
-                                        OfficialAppleButton(
+                                         OfficialAppleButton(
                                             modifier = Modifier.weight(1f),
                                             onClick = {
                                                 onAuthSuccess(
@@ -417,6 +455,33 @@ fun AuthScreen(
                                                 )
                                             }
                                         )
+                                    }
+
+                                    if (onOpenAdminPanel != null) {
+                                        OutlinedButton(
+                                            onClick = onOpenAdminPanel,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .height(48.dp)
+                                                .testTag("btn_form_admin_portal"),
+                                            shape = RoundedCornerShape(24.dp),
+                                            border = BorderStroke(1.5.dp, PureLightGreenButton),
+                                            colors = ButtonDefaults.outlinedButtonColors(
+                                                contentColor = PureLightGreenButton
+                                            )
+                                        ) {
+                                            Icon(
+                                                imageVector = Icons.Default.AdminPanelSettings,
+                                                contentDescription = null,
+                                                modifier = Modifier.size(18.dp)
+                                            )
+                                            Spacer(modifier = Modifier.width(8.dp))
+                                            Text(
+                                                text = "Open App Admin Panel",
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 14.sp
+                                            )
+                                        }
                                     }
                                 }
                             }

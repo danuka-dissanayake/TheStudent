@@ -3,9 +3,11 @@ package com.example.ui.components
 import android.content.Intent
 import android.net.Uri
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.*
@@ -13,394 +15,384 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.foundation.Image
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
+import coil.compose.AsyncImage
+import com.example.R
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.PastPaper
-import com.example.ui.theme.*
 
-@OptIn(ExperimentalMaterial3Api::class)
+/**
+ * Paper Detail Bottom Sheet Card matching exact reference image (image_e6edf588.png):
+ * - Top drag handle bar
+ * - Mint subject initial avatar + Paper Title + "Marking scheme included" subtitle + Close button (X)
+ * - 4 Stat Cards Row: YEAR (2024), DURATION (3 hrs), PAGES (24), MEDIUM (Sinhala/English in mint badge)
+ * - Main Action Row:
+ *   - Solid Black "Download PDF" button displaying paper file size (e.g., 3.1 MB)
+ *   - Mint Green "Ask AI" button
+ */
 @Composable
 fun PaperDetailDialog(
     paper: PastPaper,
-    isSaved: Boolean,
-    isDownloaded: Boolean,
-    onToggleSave: () -> Unit,
-    onDownload: () -> Unit,
+    isSaved: Boolean = false,
+    isDownloaded: Boolean = false,
+    onToggleSave: () -> Unit = {},
+    onDownload: () -> Unit = {},
+    onAskAi: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
-    var selectedTab by remember { mutableIntStateOf(0) } // 0: Paper Details, 1: Marking Scheme
+    val isDark = false
+
+    // Determine subject initial letter
+    val subjectInitial = remember(paper.subject, paper.title) {
+        when {
+            paper.subject.contains("Math", ignoreCase = true) -> "M"
+            paper.subject.contains("Physics", ignoreCase = true) -> "P"
+            paper.subject.contains("Science", ignoreCase = true) -> "S"
+            paper.subject.contains("Scholarship", ignoreCase = true) -> "E"
+            paper.subject.contains("Chem", ignoreCase = true) -> "C"
+            paper.subject.contains("Bio", ignoreCase = true) -> "B"
+            paper.subject.contains("English", ignoreCase = true) -> "E"
+            paper.subject.contains("Accounting", ignoreCase = true) -> "A"
+            paper.subject.contains("Commerce", ignoreCase = true) -> "C"
+            paper.subject.contains("History", ignoreCase = true) -> "H"
+            paper.subject.contains("Sinhala", ignoreCase = true) -> "S"
+            paper.subject.contains("Tamil", ignoreCase = true) -> "T"
+            else -> paper.subject.take(1).uppercase().ifEmpty { "P" }
+        }
+    }
+
+    // Dynamic duration hint
+    val durationHint = remember(paper.grade, paper.examType) {
+        when {
+            paper.grade.contains("12") || paper.grade.contains("13") -> "3 hrs"
+            paper.grade.contains("10") || paper.grade.contains("11") -> "3 hrs"
+            paper.grade.contains("5") -> "2 hrs"
+            else -> "2.5 hrs"
+        }
+    }
 
     Dialog(
         onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
+        properties = DialogProperties(
+            usePlatformDefaultWidth = false,
+            decorFitsSystemWindows = false
+        )
     ) {
-        Surface(
+        Box(
             modifier = Modifier
-                .fillMaxWidth(0.94f)
-                .fillMaxHeight(0.88f)
-                .testTag("paper_detail_dialog"),
-            shape = RoundedCornerShape(24.dp),
-            color = MaterialTheme.colorScheme.surface,
-            tonalElevation = 6.dp
+                .fillMaxSize()
+                .background(Color.Black.copy(alpha = 0.06f))
+                .clickable(onClick = onDismiss),
+            contentAlignment = Alignment.BottomCenter
         ) {
-            Column(
+            Surface(
                 modifier = Modifier
-                    .fillMaxSize()
-                    .padding(20.dp),
-                verticalArrangement = Arrangement.spacedBy(14.dp)
+                    .fillMaxWidth()
+                    .wrapContentHeight()
+                    .clickable(enabled = false, onClick = {})
+                    .testTag("paper_detail_dialog"),
+                shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+                color = Color.White,
+                tonalElevation = 8.dp,
+                shadowElevation = 16.dp
             ) {
-                // Dialog Header
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 14.dp),
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
+                    // Drag Handle Line at top
+                    Box(
+                        modifier = Modifier
+                            .width(38.dp)
+                            .height(4.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFCBD5E1))
+                    )
+
+                    // Top Info Row: Avatar + Title/Subtitle + Close Button
                     Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        // Mint Avatar Square with Thumbnail Cover Image
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFDCFCE7),
+                            modifier = Modifier.size(52.dp)
+                        ) {
+                            if (paper.thumbnailUrl.isNotBlank()) {
+                                AsyncImage(
+                                    model = paper.thumbnailUrl,
+                                    contentDescription = paper.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(14.dp)),
+                                    error = painterResource(id = R.drawable.example_thumbnail),
+                                    placeholder = painterResource(id = R.drawable.example_thumbnail)
+                                )
+                            } else {
+                                Image(
+                                    painter = painterResource(id = R.drawable.example_thumbnail),
+                                    contentDescription = paper.title,
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .clip(RoundedCornerShape(14.dp))
+                                )
+                            }
+                        }
+
+                        // Title & Subtitle Column
+                        Column(
+                            modifier = Modifier.weight(1f),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            Text(
+                                text = paper.title,
+                                fontSize = 16.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color(0xFF0F172A),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+
+                            Text(
+                                text = "Paper I · ${if (paper.hasMarkingScheme) "Marking scheme included" else "Answers included"}",
+                                fontSize = 12.5.sp,
+                                color = Color(0xFF64748B),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+
+                        // Light Rounded Close Button (X)
+                        Surface(
+                            onClick = onDismiss,
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFF1F5F9),
+                            modifier = Modifier.size(42.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Default.Close,
+                                    contentDescription = "Close",
+                                    tint = Color(0xFF0F172A),
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
+
+                    // 4 Stat Cards Row: YEAR, DURATION, PAGES, MEDIUM
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        // YEAR Stat Card
+                        PaperStatCard(
+                            label = "YEAR",
+                            value = "${paper.year}",
+                            isDark = false,
+                            modifier = Modifier.weight(1f)
+                        )
+
+                        // DURATION Stat Card
+                        PaperStatCard(
+                            label = "DURATION",
+                            value = durationHint,
+                            isDark = false,
+                            modifier = Modifier.weight(1.1f)
+                        )
+
+                        // PAGES Stat Card
+                        PaperStatCard(
+                            label = "PAGES",
+                            value = "${paper.pages}",
+                            isDark = false,
+                            modifier = Modifier.weight(0.9f)
+                        )
+
+                        // MEDIUM Stat Card (Pastel Mint Highlight Box with Green Border)
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = Color(0xFFDCFCE7),
+                            border = BorderStroke(1.dp, Color(0xFF10B981)),
+                            modifier = Modifier
+                                .weight(1.2f)
+                                .height(58.dp)
+                        ) {
+                            Column(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 8.dp, vertical = 8.dp),
+                                verticalArrangement = Arrangement.Center
+                            ) {
+                                Text(
+                                    text = "MEDIUM",
+                                    fontSize = 10.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF15803D)
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = paper.medium,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF15803D),
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // Bottom Action Row: Black "Download PDF" Button (with Icon) + Vibrant Green "Ask AI" Button (with Spark Icon)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(top = 2.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        // Solid Black Download PDF Button with Icon & Subtitle File Size
                         Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = EmeraldContainer
+                            onClick = {
+                                onDownload()
+                                if (paper.pdfUrl.isNotBlank()) {
+                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(paper.pdfUrl))
+                                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                    try {
+                                        context.startActivity(intent)
+                                    } catch (_: Exception) {}
+                                }
+                            },
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isDownloaded) Color(0xFF059669) else Color(0xFF0F172A),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(54.dp)
                         ) {
-                            Text(
-                                text = "${paper.year}",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = OnEmeraldContainer,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = TealContainer
-                        ) {
-                            Text(
-                                text = paper.medium,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = OnTealContainer,
-                                fontWeight = FontWeight.Bold
-                            )
-                        }
-                        Surface(
-                            shape = RoundedCornerShape(6.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant
-                        ) {
-                            Text(
-                                text = "${paper.category} (${paper.grade})",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp),
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                    }
-
-                    IconButton(onClick = onDismiss) {
-                        Icon(Icons.Default.Close, contentDescription = "Close")
-                    }
-                }
-
-                Text(
-                    text = paper.title,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold
-                )
-
-                Text(
-                    text = "${paper.examination} • ${paper.subject} • ${paper.pages} Pages • ${paper.fileSize}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // Sub-tabs: Questions vs Marking Scheme
-                SecondaryTabRow(
-                    selectedTabIndex = selectedTab,
-                    containerColor = MaterialTheme.colorScheme.surfaceVariant
-                ) {
-                    Tab(
-                        selected = selectedTab == 0,
-                        onClick = { selectedTab = 0 },
-                        text = { Text("Paper & Syllabus") }
-                    )
-                    Tab(
-                        selected = selectedTab == 1,
-                        onClick = { selectedTab = 1 },
-                        text = { Text("Marking Scheme") }
-                    )
-                }
-
-                // Tab content
-                Box(modifier = Modifier.weight(1f)) {
-                    if (selectedTab == 0) {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
-                        ) {
-                            item {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = MaterialTheme.colorScheme.surfaceVariant,
-                                    modifier = Modifier.fillMaxWidth()
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = if (isDownloaded) Icons.Default.CheckCircle else Icons.Default.FileDownload,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Column(
+                                    verticalArrangement = Arrangement.Center
                                 ) {
-                                    Column(modifier = Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                                        Text(
-                                            text = "Syllabus Coverage & Overview",
-                                            style = MaterialTheme.typography.labelMedium,
-                                            fontWeight = FontWeight.Bold,
-                                            color = EmeraldPrimary
-                                        )
-                                        Text(
-                                            text = paper.description.ifBlank { paper.syllabusSummary },
-                                            style = MaterialTheme.typography.bodySmall,
-                                            lineHeight = 18.sp,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                }
-                            }
-
-                            if (paper.pdfUrl.isNotBlank()) {
-                                item {
-                                    Card(
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.cardColors(containerColor = EmeraldContainer.copy(alpha = 0.4f))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                Icon(
-                                                    imageVector = Icons.Default.PictureAsPdf,
-                                                    contentDescription = null,
-                                                    tint = Color(0xFFDC2626)
-                                                )
-                                                Column {
-                                                    Text(
-                                                        text = "Official PDF Document",
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = "Server hosted: ${paper.fileSize}",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(paper.pdfUrl))
-                                                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                                    context.startActivity(intent)
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = EmeraldPrimary,
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Text("Open PDF", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (paper.sampleQuestions.isNotEmpty()) {
-                                item {
                                     Text(
-                                        text = "Sample Question Previews",
-                                        style = MaterialTheme.typography.labelLarge,
-                                        fontWeight = FontWeight.Bold
+                                        text = if (isDownloaded) "PDF Downloaded" else "Download PDF",
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                    Text(
+                                        text = paper.fileSize,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Medium,
+                                        color = Color(0xFFCBD5E1)
                                     )
                                 }
-                                items(paper.sampleQuestions) { q ->
-                                    Card(
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
-                                    ) {
-                                        Text(
-                                            text = q,
-                                            modifier = Modifier.padding(12.dp),
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            lineHeight = 20.sp
-                                        )
-                                    }
-                                }
                             }
                         }
-                    } else {
-                        LazyColumn(
-                            verticalArrangement = Arrangement.spacedBy(10.dp),
-                            modifier = Modifier.fillMaxSize()
+
+                        // Rich Darker Green "Ask AI" Button with Sparkles Icon + White Text
+                        Surface(
+                            onClick = onAskAi,
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color(0xFF059669),
+                            modifier = Modifier
+                                .width(115.dp)
+                                .height(54.dp)
                         ) {
-                            if (!paper.markingSchemeUrl.isNullOrBlank()) {
-                                item {
-                                    Card(
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.cardColors(containerColor = TealContainer.copy(alpha = 0.5f))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .padding(12.dp),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                                                Icon(
-                                                    imageVector = Icons.Default.CheckCircle,
-                                                    contentDescription = null,
-                                                    tint = TealSecondary
-                                                )
-                                                Column {
-                                                    Text(
-                                                        text = "Official Marking Scheme PDF",
-                                                        style = MaterialTheme.typography.labelMedium,
-                                                        fontWeight = FontWeight.Bold
-                                                    )
-                                                    Text(
-                                                        text = "Step-by-step marking guide available",
-                                                        style = MaterialTheme.typography.labelSmall,
-                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                    )
-                                                }
-                                            }
-                                            Button(
-                                                onClick = {
-                                                    val intent = Intent(Intent.ACTION_VIEW, Uri.parse(paper.markingSchemeUrl))
-                                                    intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                                    context.startActivity(intent)
-                                                },
-                                                shape = RoundedCornerShape(8.dp),
-                                                colors = ButtonDefaults.buttonColors(
-                                                    containerColor = EmeraldPrimary,
-                                                    contentColor = Color.White
-                                                )
-                                            ) {
-                                                Text("Open Scheme", fontSize = 12.sp, fontWeight = FontWeight.Bold)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (paper.markingSchemeNotes.isNotEmpty()) {
-                                items(paper.markingSchemeNotes) { note ->
-                                    Card(
-                                        shape = RoundedCornerShape(12.dp),
-                                        colors = CardDefaults.cardColors(containerColor = EmeraldContainer.copy(alpha = 0.5f))
-                                    ) {
-                                        Row(
-                                            modifier = Modifier.padding(12.dp),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Icon(
-                                                Icons.Default.CheckCircle,
-                                                contentDescription = null,
-                                                tint = EmeraldPrimary,
-                                                modifier = Modifier.size(18.dp)
-                                            )
-                                            Text(
-                                                text = note,
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                lineHeight = 20.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            } else {
-                                item {
-                                    Surface(
-                                        shape = RoundedCornerShape(12.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant,
-                                        modifier = Modifier.fillMaxWidth()
-                                    ) {
-                                        Column(
-                                            modifier = Modifier.padding(16.dp),
-                                            horizontalAlignment = Alignment.CenterHorizontally,
-                                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            Icon(Icons.Default.Info, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
-                                            Text(
-                                                text = "Marking criteria and allocation are embedded in the official PDF.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                    }
-                                }
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "Ask AI",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             }
                         }
-                    }
-                }
-
-                HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.3f))
-
-                // Bottom Action buttons
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = onToggleSave,
-                        modifier = Modifier.weight(1f),
-                        shape = RoundedCornerShape(12.dp),
-                        border = BorderStroke(1.5.dp, EmeraldPrimary),
-                        colors = ButtonDefaults.outlinedButtonColors(
-                            contentColor = EmeraldPrimary
-                        )
-                    ) {
-                        Icon(
-                            if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(18.dp)
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isSaved) "Saved" else "Save",
-                            fontWeight = FontWeight.Bold,
-                            color = EmeraldPrimary
-                        )
-                    }
-
-                    Button(
-                        onClick = onDownload,
-                        modifier = Modifier.weight(1.5f),
-                        shape = RoundedCornerShape(12.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = if (isDownloaded) EmeraldDark else EmeraldPrimary,
-                            contentColor = Color.White
-                        )
-                    ) {
-                        Icon(
-                            if (isDownloaded) Icons.Default.Check else Icons.Default.Download,
-                            contentDescription = null,
-                            modifier = Modifier.size(18.dp),
-                            tint = Color.White
-                        )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isDownloaded) "Downloaded" else "Download PDF (${paper.fileSize})",
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
-                        )
                     }
                 }
             }
+        }
+    }
+}
+
+@Composable
+private fun PaperStatCard(
+    label: String,
+    value: String,
+    isDark: Boolean,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = if (isDark) Color(0xFF1E293B) else Color(0xFFF8FAFC),
+        border = BorderStroke(1.dp, if (isDark) Color(0xFF334155) else Color(0xFFE2E8F0)),
+        modifier = modifier.height(58.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(horizontal = 8.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.Center
+        ) {
+            Text(
+                text = label,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = Color(0xFF64748B)
+            )
+            Spacer(modifier = Modifier.height(2.dp))
+            Text(
+                text = value,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = if (isDark) Color.White else Color(0xFF0F172A),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
     }
 }

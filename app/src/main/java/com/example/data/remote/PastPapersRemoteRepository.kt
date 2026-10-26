@@ -26,14 +26,23 @@ class PastPapersRemoteRepository(private val context: Context) {
 
     companion object {
         private const val TAG = "PastPapersRemoteRepo"
-        const val KEY_BACKEND_URL = "custom_infinityfree_url"
-        const val DEFAULT_BACKEND_URL = "https://dzdlearn.infinityfreeapp.com/"
+        const val KEY_BACKEND_URL = "custom_database_api_url"
+        const val DEFAULT_BACKEND_URL = "https://api.thestudent.lk/"
     }
 
     var backendBaseUrl: String
         get() = prefs.getString(KEY_BACKEND_URL, DEFAULT_BACKEND_URL) ?: DEFAULT_BACKEND_URL
         set(value) {
-            val sanitized = if (!value.endsWith("/")) "$value/" else value
+            var sanitized = value.trim()
+            if (sanitized.contains(".php")) {
+                val lastSlash = sanitized.lastIndexOf('/')
+                if (lastSlash != -1) {
+                    sanitized = sanitized.substring(0, lastSlash + 1)
+                }
+            }
+            if (!sanitized.endsWith("/")) {
+                sanitized = "$sanitized/"
+            }
             prefs.edit().putString(KEY_BACKEND_URL, sanitized).apply()
             cachedService = null
         }
@@ -108,6 +117,72 @@ class PastPapersRemoteRepository(private val context: Context) {
         } catch (e: Exception) {
             Log.w(TAG, "Error connecting to InfinityFree MySQL API ($backendBaseUrl): ${e.message}")
             return@withContext Pair(getFallbackPapers(category, grade, stream, subject, year, search), false)
+        }
+    }
+
+    /**
+     * Test connection to the DirectAdmin MySQL API and return verification status.
+     */
+    suspend fun testConnection(): Pair<Boolean, String> = withContext(Dispatchers.IO) {
+        try {
+            val service = getApiService()
+            val response = service.getPapers()
+            if (response.status == "success") {
+                Pair(true, "Connection Verified Successfully! Connected to MySQL API at $backendBaseUrl (${response.data?.size ?: 0} papers loaded from DirectAdmin database).")
+            } else {
+                Pair(false, "Connected to server, but API response status was '${response.status}'. Please check your PHP scripts in public_html/api/.")
+            }
+        } catch (e: Exception) {
+            val msg = e.localizedMessage ?: e.message ?: ""
+            if (msg.contains("Unable to resolve host") || msg.contains("No address associated")) {
+                Pair(false, "DNS Resolution Failed: '$backendBaseUrl' is a mock or unregistered domain name. Android cannot resolve it on the public internet. If testing locally, use http://10.0.2.2/api/ or your local server IP. Otherwise, the app will use its built-in offline demo database.")
+            } else {
+                Pair(false, "Connection Failed to $backendBaseUrl: $msg")
+            }
+        }
+    }
+
+    /**
+     * Upload paper details to the DirectAdmin / MySQL server API.
+     */
+    suspend fun uploadPaperRemote(paper: PastPaper): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val service = getApiService()
+            val req = PaperUploadRequest(
+                title = paper.title,
+                year = paper.year,
+                duration = "3 Hours",
+                pages = paper.pages,
+                medium = paper.medium,
+                hasMarkingScheme = paper.hasMarkingScheme,
+                thumbnailUrl = paper.thumbnailUrl,
+                category = paper.category,
+                grade = paper.grade,
+                stream = paper.stream,
+                subject = paper.subject,
+                pdfUrl = paper.pdfUrl,
+                markingSchemeUrl = paper.markingSchemeUrl,
+                description = paper.description
+            )
+            val res = service.uploadPaper(req)
+            res.status == "success"
+        } catch (e: Exception) {
+            Log.e(TAG, "Error uploading paper to remote API ($backendBaseUrl): ${e.message}")
+            false
+        }
+    }
+
+    /**
+     * Delete paper from the remote server database.
+     */
+    suspend fun deletePaperRemote(paperId: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val service = getApiService()
+            val res = service.deletePaper(PaperDeleteRequest(paperId))
+            res.status == "success"
+        } catch (e: Exception) {
+            Log.e(TAG, "Error deleting paper from remote API: ${e.message}")
+            false
         }
     }
 

@@ -62,7 +62,7 @@ fun AuthDialog(
                 }
 
                 Text(
-                    text = if (isSignUp) "Create DZD Learn Account" else "Sign in to DZD Learn",
+                    text = if (isSignUp) "Create TheStudent Account" else "Sign in to TheStudent",
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold
                 )
@@ -136,7 +136,7 @@ fun AuthDialog(
                 Button(
                     onClick = {
                         val displayName = if (isSignUp && name.isNotBlank()) name else "Logged in"
-                        onSuccess(if (isSignUp) "Welcome to DZD Learn, $displayName!" else "Welcome back!")
+                        onSuccess(if (isSignUp) "Welcome to TheStudent, $displayName!" else "Welcome back!")
                         onDismiss()
                     },
                     modifier = Modifier.fillMaxWidth(),

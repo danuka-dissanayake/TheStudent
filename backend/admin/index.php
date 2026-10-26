@@ -169,7 +169,7 @@ $papers = $stmt->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DZD Learn - Past Papers Admin Panel</title>
+    <title>TheStudent - Past Papers Admin Panel</title>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css">
     <style>
@@ -223,7 +223,7 @@ $papers = $stmt->fetchAll();
     <div class="container-fluid px-4">
         <a class="navbar-brand d-flex align-items-center gap-2 fw-bold" href="index.php">
             <i class="bi bi-file-earmark-pdf-fill fs-3"></i>
-            <span>DZD Learn - Past Papers Admin</span>
+            <span>TheStudent - Past Papers Admin</span>
         </a>
         <div class="d-flex align-items-center gap-3">
             <a href="../api/get_papers.php" target="_blank" class="btn btn-sm btn-outline-light">

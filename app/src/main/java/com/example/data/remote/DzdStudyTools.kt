@@ -649,7 +649,7 @@ object DzdStudyTools {
             val wikiUrl = "https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch=$encodedQuery&utf8=&format=json"
             val wikiReq = Request.Builder()
                 .url(wikiUrl)
-                .header("User-Agent", "DZD-AI-Study/1.0 (Android Educational App)")
+                .header("User-Agent", "TheStudent-AI-Study/1.0 (Android Educational App)")
                 .build()
 
             val wikiResp = mcpHttpClient.newCall(wikiReq).execute()
@@ -730,7 +730,7 @@ object DzdStudyTools {
         return try {
             val req = Request.Builder()
                 .url(url)
-                .header("User-Agent", "Mozilla/5.0 (Android; Mobile) DZD-AI-Study/1.0")
+                .header("User-Agent", "Mozilla/5.0 (Android; Mobile) TheStudent-AI-Study/1.0")
                 .build()
             val resp = mcpHttpClient.newCall(req).execute()
             val html = resp.body?.string().orEmpty()

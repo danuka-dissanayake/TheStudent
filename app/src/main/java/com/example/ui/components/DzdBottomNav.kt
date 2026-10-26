@@ -41,7 +41,7 @@ enum class DzdNavTab(
     val testTag: String
 ) {
     HOME("Home", Icons.Filled.Home, Icons.Outlined.Home, "nav_tab_home"),
-    LEARN("Learn", Icons.Filled.School, Icons.Outlined.School, "nav_tab_learn"),
+    CHAT("Chat", Icons.Filled.Chat, Icons.Outlined.Chat, "nav_tab_chat"),
     AI_TUTOR("AI Tutor", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_tab_ai_tutor"),
     PAPERS("Papers", Icons.Filled.Description, Icons.Outlined.Description, "nav_tab_papers"),
     PROFILE("Profile", Icons.Filled.Person, Icons.Outlined.Person, "nav_tab_profile")
@@ -102,11 +102,11 @@ fun DzdBottomNavigationBar(
                     modifier = Modifier.weight(1f)
                 )
 
-                // Tab 2: Learn
+                // Tab 2: Chat
                 NavTabItem(
-                    tab = DzdNavTab.LEARN,
-                    isSelected = currentTab == DzdNavTab.LEARN,
-                    onClick = { onTabSelected(DzdNavTab.LEARN) },
+                    tab = DzdNavTab.CHAT,
+                    isSelected = currentTab == DzdNavTab.CHAT,
+                    onClick = { onTabSelected(DzdNavTab.CHAT) },
                     modifier = Modifier.weight(1f)
                 )
 

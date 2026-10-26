@@ -1,5 +1,7 @@
 package com.example.data.model
 
+import androidx.compose.ui.graphics.Color
+
 enum class EducationLevel(val displayName: String) {
     ALL("All Levels"),
     SCHOOL("School Students"),
@@ -29,6 +31,7 @@ data class PastPaper(
     val examType: String = examination,
     val pdfUrl: String = "",
     val markingSchemeUrl: String? = null,
+    val thumbnailUrl: String = "",
     val description: String = "",
     val createdAt: String? = null,
     val status: String = "published",
@@ -128,6 +131,7 @@ data class ConversationScenario(
     val sampleDialogue: List<Pair<String, String>>
 )
 
+// ... (existing content)
 data class UserProfile(
     val name: String = "Kavindu Perera",
     val email: String = "kavindu.p@dzdlearn.lk",
@@ -140,4 +144,39 @@ data class UserProfile(
     val totalPapersSolved: Int = 42,
     val points: Int = 1280,
     val isLoggedIn: Boolean = true
+)
+
+data class OnlineStudent(
+    val id: String,
+    val name: String,
+    val initials: String,
+    val backgroundColor: Color,
+    val isOnline: Boolean = true
+)
+
+data class ChatMessageItem(
+    val id: String,
+    val senderName: String,
+    val text: String,
+    val timestamp: String,
+    val isUser: Boolean,
+    val attachmentName: String? = null,
+    val attachmentSize: String? = null,
+    val attachmentPages: String? = null,
+    val paperSnippetTitle: String? = null,
+    val paperSnippetSubtitle: String? = null
+)
+
+data class ChatConversation(
+    val id: String,
+    val name: String,
+    val lastMessage: String,
+    val time: String,
+    val unreadCount: Int = 0,
+    val isGroup: Boolean = false,
+    val isAi: Boolean = false,
+    val initials: String,
+    val avatarColor: Color,
+    val isTyping: Boolean = false,
+    val messages: List<ChatMessageItem> = emptyList()
 )

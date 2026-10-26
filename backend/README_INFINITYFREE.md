@@ -1,6 +1,6 @@
-# InfinityFree MySQL & PHP Backend Setup Guide for DZD Learn
+# InfinityFree MySQL & PHP Backend Setup Guide for TheStudent
 
-This backend powers the dynamic **Past Papers** catalog for the DZD Learn Android application.
+This backend powers the dynamic **Past Papers** catalog for the TheStudent Android application.
 
 ## Directory Structure
 ```

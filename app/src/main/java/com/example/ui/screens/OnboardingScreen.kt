@@ -116,7 +116,7 @@ fun OnboardingScreen(
                     TrustBadge("Fast answers", Icons.Default.AccessTime)
                 ),
                 headline = "Find verified resources\navailable to help you",
-                description = "DZD Learn connects you with syllabus-aligned past papers, marking schemes, and expert guidance ready for any exam.",
+                description = "TheStudent connects you with syllabus-aligned past papers, marking schemes, and expert guidance ready for any exam.",
                 fallbackGradient = listOf(Color(0xFFDCFCE7), Color(0xFFBBF7D0))
             ),
             OnboardingCardData(
@@ -637,13 +637,13 @@ fun WelcomeAuthLandingContent(
                         .fillMaxSize()
                         .padding(horizontal = 26.dp, vertical = 22.dp) // Generous padding so text & cap inside logo fit completely without clipping
                 ) {
-                    // Actual DZD Learn Logo centered inside circular frame with ContentScale.Fit
+                    // Actual TheStudent Logo centered inside circular frame with ContentScale.Fit
                     Image(
-                        painter = painterResource(id = R.drawable.dzd_learn_logo),
-                        contentDescription = "DZD Learn Logo",
+                        painter = painterResource(id = R.drawable.the_student_logo),
+                        contentDescription = "TheStudent Logo",
                         modifier = Modifier
                             .fillMaxSize()
-                            .testTag("dzd_learn_circular_logo"),
+                            .testTag("the_student_circular_logo"),
                         contentScale = ContentScale.Fit
                     )
                 }
@@ -671,7 +671,7 @@ fun WelcomeAuthLandingContent(
 
         Spacer(modifier = Modifier.height(20.dp))
 
-        // --- MODERN DISPLAY TYPOGRAPHY WITH TRULY BOLD DZD LEARN TEXT ---
+        // --- MODERN DISPLAY TYPOGRAPHY WITH TRULY BOLD THESTUDENT TEXT ---
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
             modifier = Modifier.fillMaxWidth()
@@ -689,18 +689,17 @@ fun WelcomeAuthLandingContent(
 
             Text(
                 text = buildAnnotatedString {
-                    append("DZD ")
                     withStyle(SpanStyle(color = OnboardingLimeGreenButton)) {
-                        append("L")
+                        append("The")
                     }
-                    append("earn")
+                    append("Student.")
                 },
                 fontFamily = MaisonNeueFontFamily,
                 fontWeight = FontWeight.Black, // Explicit Black weight for prominent bold look
                 style = TextStyle(
                     fontFamily = MaisonNeueFontFamily,
                     fontWeight = FontWeight.Black,
-                    fontSize = 36.sp,
+                    fontSize = 38.sp,
                     letterSpacing = (-0.8).sp,
                     color = OnboardingDarkText
                 )
@@ -710,7 +709,7 @@ fun WelcomeAuthLandingContent(
 
             // Subtitle caption with clean modern tracking
             Text(
-                text = "The Modern AI Exam Prep & Academic Suite",
+                text = "Everything a Student Needs • AI Study Suite",
                 fontFamily = MaisonNeueFontFamily,
                 fontWeight = FontWeight.Normal,
                 fontSize = 13.5.sp,

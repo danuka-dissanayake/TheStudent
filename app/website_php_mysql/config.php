@@ -24,7 +24,7 @@ define('DB_PASS', 'your_vpanel_password');   // your vPanel account password
 define('DB_CHARSET', 'utf8mb4');
 
 // Base Paths
-define('SITE_NAME', 'DZD Learn - Past Papers');
+define('SITE_NAME', 'TheStudent - Past Papers');
 define('BASE_URL', '/'); // Set to your domain root, e.g., 'http://yourdomain.infinityfreeapp.com/'
 define('UPLOAD_DIR', __DIR__ . '/uploads/papers/');
 

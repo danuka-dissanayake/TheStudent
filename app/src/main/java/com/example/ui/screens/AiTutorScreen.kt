@@ -444,7 +444,7 @@ fun AiTutorScreen(
                                 color = OnEmeraldContainer
                             )
                             Text(
-                                text = "DZD Learn AI Model Engine",
+                                text = "TheStudent AI Model Engine",
                                 fontSize = 12.sp,
                                 color = EmeraldDark,
                                 fontWeight = FontWeight.Medium

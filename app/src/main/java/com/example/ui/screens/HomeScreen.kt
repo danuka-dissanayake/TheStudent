@@ -542,7 +542,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    TextButton(onClick = { onNavigateTab(DzdNavTab.LEARN) }) {
+                    TextButton(onClick = { onNavigateTab(DzdNavTab.PAPERS) }) {
                         Text("View All", color = EmeraldPrimary, fontWeight = FontWeight.Bold)
                     }
                 }

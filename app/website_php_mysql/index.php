@@ -18,7 +18,7 @@ $defaultGrade = $grades[5] ?? $grades[0];
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Past Papers | DZD Learn - Official Examination Portal</title>
+    <title>Past Papers | TheStudent - Official Examination Portal</title>
     <!-- Tailwind CSS CDN for high-end modern styling -->
     <script src="https://cdn.tailwindcss.com"></script>
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -57,7 +57,7 @@ $defaultGrade = $grades[5] ?? $grades[0];
                     <i class="fa-solid fa-graduation-cap text-lg"></i>
                 </div>
                 <div>
-                    <span class="text-xl font-extrabold tracking-tight text-slate-900">DZD <span class="text-brand-600">Learn</span></span>
+                    <span class="text-xl font-extrabold tracking-tight text-slate-900"><span class="text-brand-600">The</span>Student.</span>
                     <span class="hidden sm:inline-block ml-2 px-2 py-0.5 text-xs font-semibold bg-brand-100 text-brand-800 rounded-md">Past Papers Portal</span>
                 </div>
             </div>
@@ -194,7 +194,7 @@ $defaultGrade = $grades[5] ?? $grades[0];
     <!-- Footer -->
     <footer class="bg-white border-t border-slate-200 mt-16 py-8 text-center text-xs text-slate-500">
         <div class="max-w-7xl mx-auto px-4">
-            <p class="font-semibold text-slate-700">DZD Learn — Sri Lanka's Premier Digital Examination & Learning Platform</p>
+            <p class="font-semibold text-slate-700">TheStudent — Everything a Student Needs (Sri Lanka's Premier Digital Examination & Learning Platform)</p>
             <p class="mt-1">Providing syllabus-aligned G.C.E. A/L, O/L, and Junior Secondary past papers with marking schemes.</p>
         </div>
     </footer>

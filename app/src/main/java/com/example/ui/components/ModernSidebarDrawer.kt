@@ -222,10 +222,10 @@ fun ModernSidebarDrawer(
             )
 
             DrawerNavTile(
-                title = "Learn & Courses",
-                icon = Icons.Filled.School,
-                isSelected = currentTab == DzdNavTab.LEARN,
-                onClick = { onSelectTab(DzdNavTab.LEARN) }
+                title = "Student Chats & Groups",
+                icon = Icons.Filled.Chat,
+                isSelected = currentTab == DzdNavTab.CHAT,
+                onClick = { onSelectTab(DzdNavTab.CHAT) }
             )
 
             DrawerNavTile(

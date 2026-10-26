@@ -2,7 +2,7 @@ package com.example.ui.theme
 
 import androidx.compose.ui.graphics.Color
 
-// DZD Learn Brand Colors
+// TheStudent Brand Colors
 // Primary: Emerald / Modern Green
 val EmeraldPrimary = Color(0xFF059669)
 val EmeraldLight = Color(0xFF10B981)

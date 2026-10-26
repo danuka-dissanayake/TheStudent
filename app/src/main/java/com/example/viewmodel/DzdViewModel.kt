@@ -105,7 +105,11 @@ data class DzdUiState(
     val ocrExtractedText: String? = null,
     val ocrDetectedLanguage: String? = null,
     val ocrEngineUsed: String? = null,
-    val isOcrFastMode: Boolean = true
+    val isOcrFastMode: Boolean = true,
+
+    // Admin Panel State
+    val isAdminPanelOpen: Boolean = false,
+    val activeChatConversation: ChatConversation? = null
 )
 
 class DzdViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
@@ -135,6 +139,12 @@ class DzdViewModel(application: Application) : AndroidViewModel(application), Te
 
     private val _serverUrlState = MutableStateFlow(pastPapersRepository.backendBaseUrl)
     val serverUrlState: StateFlow<String> = _serverUrlState.asStateFlow()
+
+    private val _isTestingConnection = MutableStateFlow(false)
+    val isTestingConnection: StateFlow<Boolean> = _isTestingConnection.asStateFlow()
+
+    private val _connectionTestResult = MutableStateFlow<Pair<Boolean, String>?>(null)
+    val connectionTestResult: StateFlow<Pair<Boolean, String>?> = _connectionTestResult.asStateFlow()
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
@@ -309,9 +319,76 @@ class DzdViewModel(application: Application) : AndroidViewModel(application), Te
     }
 
     fun updateBackendUrl(newUrl: String) {
-        pastPapersRepository.backendBaseUrl = newUrl
-        _serverUrlState.value = pastPapersRepository.backendBaseUrl
-        loadDynamicPapers(forceRefresh = true)
+        testAndSaveServerUrl(newUrl)
+    }
+
+    fun testAndSaveServerUrl(newUrl: String) {
+        viewModelScope.launch {
+            _isTestingConnection.value = true
+            _connectionTestResult.value = null
+            pastPapersRepository.backendBaseUrl = newUrl
+            _serverUrlState.value = pastPapersRepository.backendBaseUrl
+
+            val result = pastPapersRepository.testConnection()
+            _connectionTestResult.value = result
+            _isTestingConnection.value = false
+
+            if (result.first) {
+                _isLiveDatabaseConnected.value = true
+                loadDynamicPapers(forceRefresh = true)
+                showSnackbar("✅ DirectAdmin API Connected Successfully!")
+            } else {
+                _isLiveDatabaseConnected.value = false
+                showSnackbar("❌ API Connection Failed. Check domain & api folder.")
+            }
+        }
+    }
+
+    fun openAdminPanel() {
+        _uiState.update { it.copy(isAdminPanelOpen = true) }
+    }
+
+    fun closeAdminPanel() {
+        _uiState.update { it.copy(isAdminPanelOpen = false) }
+    }
+
+    fun openChat(conversation: ChatConversation) {
+        _uiState.update { it.copy(activeChatConversation = conversation) }
+    }
+
+    fun closeChat() {
+        _uiState.update { it.copy(activeChatConversation = null) }
+    }
+
+    fun uploadNewPaper(paper: PastPaper) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingContent = true) }
+            val isRemoteSuccess = pastPapersRepository.uploadPaperRemote(paper)
+            
+            // Immediately insert at the top of the local flow so the app's papers screen instantly displays the new paper
+            val currentList = _dynamicPapers.value.toMutableList()
+            currentList.removeAll { it.id == paper.id }
+            currentList.add(0, paper)
+            _dynamicPapers.value = currentList
+            
+            _uiState.update { it.copy(isLoadingContent = false) }
+            if (isRemoteSuccess) {
+                showSnackbar("Uploaded '${paper.title}' to DirectAdmin MySQL Database!")
+            } else {
+                showSnackbar("Saved '${paper.title}' locally in app catalog! (Check API URL in Admin Settings)")
+            }
+        }
+    }
+
+    fun deletePaper(paperId: String) {
+        viewModelScope.launch {
+            _uiState.update { it.copy(isLoadingContent = true) }
+            pastPapersRepository.deletePaperRemote(paperId)
+            val currentList = _dynamicPapers.value.filter { it.id != paperId }
+            _dynamicPapers.value = currentList
+            _uiState.update { it.copy(isLoadingContent = false) }
+            showSnackbar("Paper removed from catalog.")
+        }
     }
 
     val allCourses = SampleEducationalData.courses
@@ -328,7 +405,7 @@ class DzdViewModel(application: Application) : AndroidViewModel(application), Te
                 id = "welcome-ai",
                 sender = MessageSender.AI,
                 content = """
-                    **Ayubowan! I am your DZD Academic Tutor.**
+                    **Ayubowan! I am your TheStudent Academic Tutor.**
                     
                     I am trained on the complete Sri Lankan curriculum (G.C.E. O/L, A/L Bio/Maths/Commerce/Arts/Tech streams, and University degree modules).
                     
@@ -367,7 +444,7 @@ class DzdViewModel(application: Application) : AndroidViewModel(application), Te
         viewModelScope.launch {
             repository.saveUserProfile(profile)
             _uiState.update { it.copy(screenFlow = AppScreenFlow.MAIN) }
-            showSnackbar("Welcome to DZD Learn, ${profile.name.split(" ").first()}!")
+            showSnackbar("Welcome to TheStudent, ${profile.name.split(" ").first()}!")
             simulateSkeletonRefresh()
         }
     }
@@ -389,7 +466,7 @@ class DzdViewModel(application: Application) : AndroidViewModel(application), Te
     fun setTab(tab: DzdNavTab) {
         val wasDifferent = _uiState.value.currentTab != tab
         _uiState.update { it.copy(currentTab = tab, isLanguageLabOpen = false) }
-        if (wasDifferent && (tab == DzdNavTab.HOME || tab == DzdNavTab.LEARN || tab == DzdNavTab.PAPERS)) {
+        if (wasDifferent && (tab == DzdNavTab.HOME || tab == DzdNavTab.CHAT || tab == DzdNavTab.PAPERS)) {
             simulateSkeletonRefresh()
         }
     }

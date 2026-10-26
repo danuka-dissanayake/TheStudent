@@ -318,12 +318,12 @@ object DzdDocumentHandler {
                 contentValues.put(MediaStore.MediaColumns.IS_PENDING, 0)
                 context.contentResolver.update(uri, contentValues, null, null)
 
-                Log.i(TAG, "Successfully saved $cleanName to Downloads/DZD Learn via MediaStore")
+                Log.i(TAG, "Successfully saved $cleanName to Downloads/TheStudent via MediaStore")
                 Pair(true, cleanName)
             } else {
                 val publicDownloads = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS)
-                val dzdDir = File(publicDownloads, "DZD Learn").apply { if (!exists()) mkdirs() }
-                val destFile = File(dzdDir, cleanName)
+                val theStudentDir = File(publicDownloads, "TheStudent").apply { if (!exists()) mkdirs() }
+                val destFile = File(theStudentDir, cleanName)
 
                 if (sourceFile != null && sourceFile.exists()) {
                     sourceFile.copyTo(destFile, overwrite = true)
@@ -498,7 +498,7 @@ object DzdDocumentHandler {
         val fileName = if (matchedPaper != null) {
             "${matchedPaper.title.replace(Regex("[^a-zA-Z0-9_ -]"), "_").take(40)}.pdf"
         } else {
-            "DZD_${q.replace(Regex("[^a-zA-Z0-9_ -]"), "_").take(30)}.pdf"
+            "TheStudent_${q.replace(Regex("[^a-zA-Z0-9_ -]"), "_").take(30)}.pdf"
         }
         val targetPdf = File(targetDir, fileName)
 
@@ -523,7 +523,7 @@ object DzdDocumentHandler {
             markingScheme = matchedPaper?.markingSchemeNotes ?: generateMarkingSchemeForSubject(subjectParsed, medium)
         )
 
-        // Save into public Downloads/DZD Learn so user can access immediately via File Manager
+        // Save into public Downloads/TheStudent so user can access immediately via File Manager
         savePdfToPublicDownloads(context, targetPdf, null, targetPdf.name)
 
         val fileSizeFormatted = formatFileSize(targetPdf.length())
@@ -539,7 +539,7 @@ object DzdDocumentHandler {
             localFilePath = targetPdf.absolutePath,
             contentUri = contentUri.toString(),
             downloadUrl = contentUri.toString(),
-            summary = matchedPaper?.syllabusSummary ?: "Authentic examination document saved to Download/DZD Learn/.",
+            summary = matchedPaper?.syllabusSummary ?: "Authentic examination document saved to Download/TheStudent/.",
             chatActionTag = buildChatActionTag(title, contentUri.toString(), targetPdf.absolutePath, fileSizeFormatted, medium, pages, docType)
         )
     }
@@ -727,7 +727,7 @@ object DzdDocumentHandler {
 
             val req = Request.Builder()
                 .url(pdfUrl)
-                .header("User-Agent", "Mozilla/5.0 (Android; Mobile) DZD-AI-Study/1.0")
+                .header("User-Agent", "Mozilla/5.0 (Android; Mobile) TheStudent-AI-Study/1.0")
                 .build()
             val resp = httpClient.newCall(req).execute()
 
@@ -769,7 +769,7 @@ object DzdDocumentHandler {
                 localFilePath = destFile.absolutePath,
                 contentUri = contentUri.toString(),
                 downloadUrl = pdfUrl,
-                summary = "Real educational document retrieved via $domainLabel and saved to Download/DZD Learn/.",
+                summary = "Real educational document retrieved via $domainLabel and saved to Download/TheStudent/.",
                 chatActionTag = buildChatActionTag(resolvedTitle, contentUri.toString(), destFile.absolutePath, fileSize, medium ?: "Sinhala", pageCount, docType ?: "Past Paper")
             )
         } catch (e: Exception) {
@@ -846,7 +846,7 @@ object DzdDocumentHandler {
         canvas1.drawRoundRect(25f, 25f, 570f, 105f, 8f, 8f, headerBoxPaint)
         canvas1.drawRoundRect(25f, 25f, 570f, 105f, 8f, 8f, borderPaint)
 
-        canvas1.drawText("DEPARTMENT OF EXAMINATIONS, SRI LANKA / DZD STUDY ACADEMY", 40f, 48f, subPaint)
+        canvas1.drawText("DEPARTMENT OF EXAMINATIONS, SRI LANKA / THESTUDENT ACADEMY", 40f, 48f, subPaint)
         canvas1.drawText("$examination - $year", 40f, 68f, titlePaint)
         canvas1.drawText("Subject: $subject | Medium: $medium | Official Paper & Study Guide", 40f, 88f, subPaint)
 
@@ -885,7 +885,7 @@ object DzdDocumentHandler {
         }
 
         // Footer Page 1
-        canvas1.drawText("Page 1 of 2 • Certified Sri Lankan Educational Document • DZD AI Study", 170f, pageHeight - 25f, subPaint)
+        canvas1.drawText("Page 1 of 2 • Certified Sri Lankan Educational Document • TheStudent AI Study", 170f, pageHeight - 25f, subPaint)
         pdfDoc.finishPage(page1)
 
         // PAGE 2: Marking Scheme / Evaluation Criteria
@@ -916,7 +916,7 @@ object DzdDocumentHandler {
             yPos2 += 8f
         }
 
-        canvas2.drawText("Page 2 of 2 • Prepared for DZD Study Academy Student Success", 175f, pageHeight - 25f, subPaint)
+        canvas2.drawText("Page 2 of 2 • Prepared for TheStudent Academy Student Success", 175f, pageHeight - 25f, subPaint)
         pdfDoc.finishPage(page2)
 
         FileOutputStream(file).use { out ->

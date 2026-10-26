@@ -20,6 +20,7 @@ data class PastPaperApiDto(
     @Json(name = "title") val title: String? = null,
     @Json(name = "pdf_url") val pdfUrl: String? = null,
     @Json(name = "marking_scheme_url") val markingSchemeUrl: String? = null,
+    @Json(name = "thumbnail_url") val thumbnailUrl: String? = null,
     @Json(name = "description") val description: String? = null,
     @Json(name = "file_size") val fileSize: String? = null,
     @Json(name = "pages") val pages: Any? = null,
@@ -80,6 +81,7 @@ data class PastPaperApiDto(
             examType = examType ?: "G.C.E. Examination",
             pdfUrl = pdfUrl ?: "",
             markingSchemeUrl = markingSchemeUrl?.takeIf { it.isNotBlank() },
+            thumbnailUrl = thumbnailUrl ?: "",
             description = description ?: "",
             createdAt = createdAt,
             status = status ?: "published",
@@ -105,6 +107,36 @@ data class PastPapersApiResponse(
     @Json(name = "message") val message: String? = null
 )
 
+@JsonClass(generateAdapter = true)
+data class PaperUploadRequest(
+    @Json(name = "title") val title: String,
+    @Json(name = "year") val year: Int,
+    @Json(name = "duration") val duration: String = "3 Hours",
+    @Json(name = "pages") val pages: Int = 16,
+    @Json(name = "medium") val medium: String = "English",
+    @Json(name = "has_marking_scheme") val hasMarkingScheme: Boolean = false,
+    @Json(name = "thumbnail_url") val thumbnailUrl: String = "",
+    @Json(name = "category") val category: String = "A/L",
+    @Json(name = "grade") val grade: String = "Grade 13",
+    @Json(name = "stream") val stream: String? = null,
+    @Json(name = "subject") val subject: String = "General",
+    @Json(name = "pdf_url") val pdfUrl: String = "",
+    @Json(name = "marking_scheme_url") val markingSchemeUrl: String? = null,
+    @Json(name = "description") val description: String = ""
+)
+
+@JsonClass(generateAdapter = true)
+data class PaperUploadResponse(
+    @Json(name = "status") val status: String? = null,
+    @Json(name = "message") val message: String? = null,
+    @Json(name = "paper_id") val paperId: String? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class PaperDeleteRequest(
+    @Json(name = "paper_id") val paperId: String
+)
+
 interface PastPapersApiService {
     @GET("api/get_papers.php")
     suspend fun getPapers(
@@ -117,4 +149,14 @@ interface PastPapersApiService {
         @Query("search") search: String? = null,
         @Query("status") status: String? = "published"
     ): PastPapersApiResponse
+
+    @retrofit2.http.POST("api/upload_paper.php")
+    suspend fun uploadPaper(
+        @retrofit2.http.Body request: PaperUploadRequest
+    ): PaperUploadResponse
+
+    @retrofit2.http.POST("api/delete_paper.php")
+    suspend fun deletePaper(
+        @retrofit2.http.Body request: PaperDeleteRequest
+    ): PaperUploadResponse
 }

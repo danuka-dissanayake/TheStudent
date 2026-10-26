@@ -403,8 +403,8 @@ fun SplashScreen(
                             .padding(horizontal = 24.dp, vertical = 20.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.dzd_learn_logo),
-                            contentDescription = "DZD Learn Real Logo",
+                            painter = painterResource(id = R.drawable.the_student_logo),
+                            contentDescription = "TheStudent Logo",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()
                         )
@@ -414,19 +414,18 @@ fun SplashScreen(
 
             Spacer(modifier = Modifier.height(18.dp))
 
-            // Main Brand Display Name with Roboto Black and highlighted green 'L'
+            // Main Brand Display Name with Roboto Black and highlighted green 'The'
             Text(
                 text = buildAnnotatedString {
-                    append("DZD ")
                     withStyle(SpanStyle(color = Color(0xFF16A34A))) { // Emerald green for distinctive branding
-                        append("L")
+                        append("The")
                     }
-                    append("earn")
+                    append("Student.")
                 },
                 style = TextStyle(
                     fontFamily = RobotoFontFamily,
                     fontWeight = FontWeight.Black,
-                    fontSize = 36.sp,
+                    fontSize = 38.sp,
                     letterSpacing = (-0.8).sp,
                     color = Color(0xFF0F172A)
                 ),
@@ -453,7 +452,7 @@ fun SplashScreen(
                             .background(Color(0xFF22C55E))
                     )
                     Text(
-                        text = "Next-Gen AI Exam Prep Suite",
+                        text = "Everything a Student Needs",
                         fontFamily = RobotoFontFamily,
                         fontWeight = FontWeight.Bold,
                         fontSize = 12.5.sp,

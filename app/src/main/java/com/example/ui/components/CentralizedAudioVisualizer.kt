@@ -285,7 +285,7 @@ fun MinimalVisualizerStatus(
     val statusText = when (state) {
         AssistantVoiceState.IDLE -> "Ready to practice English"
         AssistantVoiceState.LISTENING -> "Listening..."
-        AssistantVoiceState.THINKING -> "Thinking with DZD Learn AI..."
+        AssistantVoiceState.THINKING -> "Thinking with TheStudent AI..."
         AssistantVoiceState.SPEAKING -> "AI Speaking..."
     }
 

@@ -327,7 +327,7 @@ class DzdRepository(private val dao: DzdDao) {
             }
             else -> {
                 content = """
-                    **DZD Academic Tutor (Sri Lankan Curricula):**
+                    **TheStudent Academic Tutor (Sri Lankan Curricula):**
                     
                     I can assist you across all educational levels:
                     * **School (G.C.E. O/L & A/L):** Combined Maths, Physics, Chemistry, Biology, ICT, Accounting, Economics.

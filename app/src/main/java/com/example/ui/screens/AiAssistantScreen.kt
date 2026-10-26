@@ -1903,7 +1903,7 @@ private fun ChatGptDocumentCard(
                         fontSize = 15.sp
                     )
                     Text(
-                        text = "Destination: Download > DZD Learn",
+                        text = "Destination: Download > TheStudent",
                         color = Color(0xFFE4E4E7),
                         fontSize = 12.5.sp,
                         fontWeight = FontWeight.Medium
@@ -1954,7 +1954,7 @@ private fun ChatGptDocumentCard(
                                 kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Main) {
                                     if (success) {
                                         downloadState = DocDownloadState.COMPLETED
-                                        Toast.makeText(context, "Saved to Downloads > DZD Learn", Toast.LENGTH_SHORT).show()
+                                        Toast.makeText(context, "Saved to Downloads > TheStudent", Toast.LENGTH_SHORT).show()
                                     } else {
                                         downloadState = DocDownloadState.IDLE
                                         Toast.makeText(context, "Could not save document", Toast.LENGTH_SHORT).show()
@@ -3261,7 +3261,7 @@ private fun buildFormattedAnnotatedString(
     var sanitized = normalizeStreamingMarkdown(raw)
         .replace(Regex("""\[([^\]]+)\]\((https?://[^\)]+)\)"""), "🌐 $1")
         .replace(Regex("""\[([^\]]+)\]\((/[^\)]+)\)"""), "📄 $1")
-        .replace(Regex("""/storage/emulated/0/Android/data/[^/\s\)]+/files/documents/studypapers/"""), "Download/DZD Learn/")
+        .replace(Regex("""/storage/emulated/0/Android/data/[^/\s\)]+/files/documents/studypapers/"""), "Download/TheStudent/")
         .replace(Regex("""/storage/emulated/0/[^\s\)]+"""), "")
         .replace(Regex("""com\.aistudio\.[a-zA-Z0-9_\.]*"""), "")
         .replace(Regex("""(^|\s)#{1,6}\s*"""), "$1")
@@ -3582,7 +3582,8 @@ fun parseChainOfThoughtSteps(rawText: String, isThinking: Boolean): List<ChainOf
     val steps = mutableListOf<ChainOfThoughtStepData>()
 
     // Check if rawText contains tool calling markers
-    val hasToolCalls = rawText.contains("[DZD AI Live Tool Calling]") ||
+    val hasToolCalls = rawText.contains("[TheStudent AI Live Tool Calling]") ||
+            rawText.contains("[DZD AI Live Tool Calling]") ||
             rawText.contains("Searching Web") ||
             rawText.contains("Searching the web") ||
             rawText.contains("Tools_Web_Search") ||
@@ -3600,6 +3601,7 @@ fun parseChainOfThoughtSteps(rawText: String, isThinking: Boolean): List<ChainOf
             rawText.indexOf("⚡") >= 0 -> rawText.indexOf("⚡")
             rawText.indexOf("• 🔍") >= 0 -> rawText.indexOf("• 🔍")
             rawText.indexOf("• Searching") >= 0 -> rawText.indexOf("• Searching")
+            rawText.indexOf("[TheStudent AI") >= 0 -> rawText.indexOf("[TheStudent AI")
             rawText.indexOf("[DZD AI") >= 0 -> rawText.indexOf("[DZD AI")
             else -> -1
         }

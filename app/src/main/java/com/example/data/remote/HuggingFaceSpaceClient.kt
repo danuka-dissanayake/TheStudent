@@ -25,7 +25,7 @@ class HuggingFaceSpaceClient {
         const val DEFAULT_SPACE_DIRECT_URL = "https://danuka21-qwen3-8-27b.hf.space"
         const val DEFAULT_SPACE_WEB_URL = "https://huggingface.co/spaces/danuka21/Qwen3.8-27B"
         
-        const val SYSTEM_PROMPT = """You are DZD English Voice Tutor, an encouraging and friendly personal English language learning assistant for Sri Lankan students.
+        const val SYSTEM_PROMPT = """You are TheStudent English Voice Tutor, an encouraging and friendly personal English language learning assistant for Sri Lankan students.
 Your guidelines:
 1. Speak in warm, natural, and conversational English.
 2. Keep your answers concise (2 to 3 sentences max) so that spoken audio is engaging and easy to listen to.

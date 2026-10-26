@@ -3,34 +3,36 @@ package com.example.data.model
 /**
  * Sri Lankan National Curriculum Configuration
  *
- * Configurable curriculum structure for Grade 6 to Grade 13:
- * - Junior Secondary: Grade 6, Grade 7, Grade 8, Grade 9
+ * Configurable curriculum structure for Grade 5 to Grade 13:
+ * - Scholarship & Junior Secondary: Grade 5, Grade 6, Grade 7, Grade 8, Grade 9
  * - Ordinary Level (O/L): Grade 10, Grade 11
  * - Advanced Level (A/L): Grade 12, Grade 13 with Streams:
  *     Physical Science, Biological Science, Commerce, Arts, Technology
- *
- * Subject lists are fully customizable and dynamically incorporate
- * any new subjects added to the InfinityFree MySQL database.
  */
 object SriLankanCurriculumConfig {
 
     const val CAT_ALL = "All Categories"
-    const val CAT_JUNIOR = "Junior Secondary"
-    const val CAT_OL = "Ordinary Level (O/L)"
-    const val CAT_AL = "Advanced Level (A/L)"
+    const val CAT_JUNIOR = "Scholarship & Junior"
+    const val CAT_OL = "G.C.E. O/L"
+    const val CAT_AL = "G.C.E. A/L"
+    const val CAT_PROVINCIAL = "Provincial & Term Test"
+    const val CAT_PROTOTYPE = "Prototype & Model Papers"
 
     val educationCategories = listOf(
-        CAT_ALL,
-        CAT_JUNIOR,
-        CAT_OL,
-        CAT_AL
+        "All Categories",
+        "G.C.E. A/L",
+        "G.C.E. O/L",
+        "Provincial & Term Test",
+        "Prototype & Model Papers",
+        "Scholarship & Junior",
+        "National Model Exams",
+        "Target & Revision Papers"
     )
 
     val allGrades = listOf(
         "All Grades",
-        "Grade 6", "Grade 7", "Grade 8", "Grade 9",
-        "Grade 10", "Grade 11",
-        "Grade 12", "Grade 13"
+        "Grade 13", "Grade 12", "Grade 11", "Grade 10",
+        "Grade 9", "Grade 8", "Grade 7", "Grade 6", "Grade 5"
     )
 
     // A/L Streams and configurable subjects
@@ -110,7 +112,7 @@ object SriLankanCurriculumConfig {
         "Home Economics"
     )
 
-    // Configurable Junior Secondary Subjects (Grades 6 to 9)
+    // Configurable Junior Secondary Subjects (Grades 5 to 9)
     val juniorSecondarySubjects: List<String> = listOf(
         "Mathematics",
         "Science",
@@ -133,7 +135,7 @@ object SriLankanCurriculumConfig {
 
     fun isOlGrade(grade: String): Boolean = grade == "Grade 10" || grade == "Grade 11"
 
-    fun isJuniorGrade(grade: String): Boolean = grade in listOf("Grade 6", "Grade 7", "Grade 8", "Grade 9")
+    fun isJuniorGrade(grade: String): Boolean = grade in listOf("Grade 5", "Grade 6", "Grade 7", "Grade 8", "Grade 9")
 
     fun getCategoryForGrade(grade: String): String {
         return when {

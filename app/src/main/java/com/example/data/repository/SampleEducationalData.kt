@@ -1009,7 +1009,7 @@ object SampleEducationalData {
             id = "c-al-math-mechanics",
             title = "A/L Mechanics Mastery: Vectors to Projectiles",
             instructor = "Prof. Senaka Jayatillake",
-            institution = "University of Colombo / DZD Academy",
+            institution = "University of Colombo / TheStudent Academy",
             level = EducationLevel.SCHOOL,
             category = "Physical Science",
             durationHours = 24,

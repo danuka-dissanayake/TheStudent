@@ -121,9 +121,9 @@ fun DzdTopAppBar(
                 ) { tab ->
                     val titleText = when (tab) {
                         DzdNavTab.HOME -> "Dashboard"
-                        DzdNavTab.LEARN -> "Courses & Notes"
+                        DzdNavTab.CHAT -> "Student Chats"
                         DzdNavTab.AI_TUTOR -> "AI Voice Tutor"
-                        DzdNavTab.PAPERS -> "Past Papers"
+                        DzdNavTab.PAPERS -> "Papers & Exams"
                         DzdNavTab.PROFILE -> "My Profile"
                     }
                     Text(

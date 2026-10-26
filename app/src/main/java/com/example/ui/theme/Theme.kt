@@ -64,18 +64,11 @@ private val LightColorScheme = lightColorScheme(
 
 @Composable
 fun MyApplicationTheme(
-    darkTheme: Boolean = isSystemInDarkTheme(),
+    darkTheme: Boolean = false,
     dynamicColor: Boolean = false,
     content: @Composable () -> Unit
 ) {
-    val colorScheme = when {
-        dynamicColor && Build.VERSION.SDK_INT >= Build.VERSION_CODES.S -> {
-            val context = LocalContext.current
-            if (darkTheme) dynamicDarkColorScheme(context) else dynamicLightColorScheme(context)
-        }
-        darkTheme -> DarkColorScheme
-        else -> LightColorScheme
-    }
+    val colorScheme = LightColorScheme
 
     val view = LocalView.current
     if (!view.isInEditMode) {
@@ -87,9 +80,9 @@ fun MyApplicationTheme(
                 window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
                 val windowInsetsController = WindowCompat.getInsetsController(window, view)
-                // When darkTheme is false, use dark status bar icons (black/gray icons on light canvas)
-                windowInsetsController.isAppearanceLightStatusBars = !darkTheme
-                windowInsetsController.isAppearanceLightNavigationBars = !darkTheme
+                // Always use dark status bar icons for clean light theme canvas
+                windowInsetsController.isAppearanceLightStatusBars = true
+                windowInsetsController.isAppearanceLightNavigationBars = true
             }
         }
     }

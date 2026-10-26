@@ -23,6 +23,6 @@ dependencyResolutionManagement {
   }
 }
 
-rootProject.name = "DZD Learn"
+rootProject.name = "TheStudent"
 
 include(":app")

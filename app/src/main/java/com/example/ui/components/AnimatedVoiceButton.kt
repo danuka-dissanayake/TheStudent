@@ -211,7 +211,7 @@ fun AnimatedVoiceButton(
             text = when (state) {
                 AssistantVoiceState.IDLE -> if (isHandsFree) "Hands-Free Mode Active • Tap to Speak" else "Tap microphone to speak English"
                 AssistantVoiceState.LISTENING -> "Listening to your voice..."
-                AssistantVoiceState.THINKING -> "Thinking with DZD Learn AI..."
+                AssistantVoiceState.THINKING -> "Thinking with TheStudent AI..."
                 AssistantVoiceState.SPEAKING -> "Speaking • Tap to interrupt"
             },
             style = MaterialTheme.typography.labelMedium,
