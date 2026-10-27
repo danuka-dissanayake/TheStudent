@@ -261,7 +261,9 @@ Open each URL. You don't need curl — the browser shows the JSON.
 | `https://app.quizontal.site/api/auth.php?action=nope` | `{"status":"error","message":"Invalid API action."}` |
 | `https://app.quizontal.site/config.secrets.php` | 403 / 404, never source code |
 
-**Reading the failures**
+**Reading the failures** (a `500` instead of JSON? see `docs/DEBUGGING.md`, or open
+`https://app.quizontal.site/api/health.php?token=…` after setting `DIAG_TOKEN` in
+`config.secrets.php` — it names the exact missing table/column)
 
 | What you see | Meaning | Fix |
 |---|---|---|

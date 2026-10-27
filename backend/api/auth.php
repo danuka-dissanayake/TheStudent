@@ -152,6 +152,102 @@ function readJsonBody(): array
  */
 function ensureAuthSchema(PDO $pdo): void
 {
+    // -----------------------------------------------------------------------
+    // Create anything that is missing.
+    //
+    // A fresh DirectAdmin install often has the old `users` table but none of
+    // the auth tables, and importing database_auth.sql needs phpMyAdmin access.
+    // Without this, the very first sign-up died on the first query
+    // (`login_attempts` for rate limiting) with a fatal PDOException -> an
+    // empty 500 response -> "Request failed (500)" in the app.
+    // -----------------------------------------------------------------------
+    $tables = [
+        'users' => "CREATE TABLE IF NOT EXISTS `users` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `google_id` VARCHAR(100) NULL UNIQUE,
+            `email` VARCHAR(191) NOT NULL UNIQUE,
+            `password_hash` VARCHAR(255) NULL,
+            `full_name` VARCHAR(150) NOT NULL,
+            `profile_picture` TEXT NULL,
+            `auth_provider` ENUM('email','google') NOT NULL DEFAULT 'email',
+            `target_exam` VARCHAR(100) NOT NULL DEFAULT 'G.C.E. A/L',
+            `institution` VARCHAR(191) NULL,
+            `stream_or_degree` VARCHAR(150) NULL,
+            `role` ENUM('student','admin') NOT NULL DEFAULT 'student',
+            `is_email_verified` TINYINT(1) NOT NULL DEFAULT 0,
+            `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+            `last_login_ip` VARCHAR(45) NULL,
+            `last_login_at` DATETIME NULL,
+            `suspicious_flag` TINYINT(1) NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            INDEX `idx_email` (`email`),
+            INDEX `idx_last_login_ip` (`last_login_ip`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'email_verifications' => "CREATE TABLE IF NOT EXISTS `email_verifications` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NULL DEFAULT NULL,
+            `email` VARCHAR(191) NOT NULL,
+            `otp_code` VARCHAR(128) NOT NULL,
+            `otp_type` ENUM('registration','unverified_account','login_challenge','ip_change','password_reset') NOT NULL DEFAULT 'registration',
+            `pending_data` LONGTEXT NULL DEFAULT NULL,
+            `requested_ip` VARCHAR(45) NULL DEFAULT NULL,
+            `attempts` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `is_used` TINYINT(1) NOT NULL DEFAULT 0,
+            `expires_at` DATETIME NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_email_otp` (`email`, `otp_code`, `is_used`),
+            INDEX `idx_user_verification` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'user_tokens' => "CREATE TABLE IF NOT EXISTS `user_tokens` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `token` VARCHAR(128) NOT NULL UNIQUE,
+            `last_used_at` DATETIME NULL DEFAULT NULL,
+            `device_info` VARCHAR(255) NULL,
+            `ip_address` VARCHAR(45) NULL,
+            `expires_at` DATETIME NOT NULL,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_user_token` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
+        'login_attempts' => "CREATE TABLE IF NOT EXISTS `login_attempts` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `ip_address` VARCHAR(45) NOT NULL,
+            `email` VARCHAR(191) NOT NULL,
+            `attempted_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            INDEX `idx_ip_attempt` (`ip_address`, `attempted_at`),
+            INDEX `idx_email_attempt` (`email`, `attempted_at`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+    ];
+
+    foreach ($tables as $tableName => $ddl) {
+        try {
+            $pdo->exec($ddl);
+        } catch (Throwable $e) {
+            // 1142 = no CREATE privilege on a shared host: report it clearly
+            // instead of failing later with a confusing query error.
+            error_log('[TheStudent][auth] could not create table ' . $tableName . ': ' . $e->getMessage());
+        }
+    }
+
+    // Columns an older `users` table is likely to be missing.
+    ts_ensure_column($pdo, 'users', 'role', "ENUM('student','admin') NOT NULL DEFAULT 'student'");
+    ts_ensure_column($pdo, 'users', 'is_active', 'TINYINT(1) NOT NULL DEFAULT 1');
+    ts_ensure_column($pdo, 'users', 'is_email_verified', 'TINYINT(1) NOT NULL DEFAULT 0');
+    ts_ensure_column($pdo, 'users', 'suspicious_flag', 'TINYINT(1) NOT NULL DEFAULT 0');
+    ts_ensure_column($pdo, 'users', 'last_login_ip', 'VARCHAR(45) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'last_login_at', 'DATETIME NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'google_id', 'VARCHAR(100) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'auth_provider', "ENUM('email','google') NOT NULL DEFAULT 'email'");
+    ts_ensure_column($pdo, 'users', 'target_exam', "VARCHAR(100) NOT NULL DEFAULT 'G.C.E. A/L'");
+    ts_ensure_column($pdo, 'users', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+
+    ts_ensure_column($pdo, 'email_verifications', 'attempts', 'TINYINT UNSIGNED NOT NULL DEFAULT 0');
+    ts_ensure_column($pdo, 'email_verifications', 'is_used', 'TINYINT(1) NOT NULL DEFAULT 0');
+    ts_ensure_column($pdo, 'email_verifications', 'otp_type', "ENUM('registration','unverified_account','login_challenge','ip_change','password_reset') NOT NULL DEFAULT 'registration'");
     ts_ensure_column($pdo, 'email_verifications', 'pending_data', 'LONGTEXT NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'email_verifications', 'requested_ip', 'VARCHAR(45) NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'user_tokens', 'last_used_at', 'DATETIME NULL DEFAULT NULL');

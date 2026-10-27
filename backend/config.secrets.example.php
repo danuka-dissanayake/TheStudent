@@ -69,6 +69,13 @@ define('SMTP_FROM_NAME', 'TheStudent Security');
 // Comma separated allowed browser origins (the Android app needs none).
 define('ALLOWED_ORIGINS', 'https://app.quizontal.site');
 
+// --- Diagnostics -------------------------------------------------------------
+// Token for api/health.php?token=... — a read-only self-check that reports PHP
+// version, DB connectivity, missing tables/columns and the tail of the error log.
+// Any 24+ random characters. LEAVE IT EMPTY when you are done debugging: the
+// endpoint answers 404 while this is empty.
+define('DIAG_TOKEN', '');
+
 // Reject every plain-HTTP request (default 1). Set to 0 only for local dev.
 // If your host terminates TLS at a proxy that does not forward HTTPS=on, enable
 // TRUST_PROXY_HEADERS below instead of disabling this flag.

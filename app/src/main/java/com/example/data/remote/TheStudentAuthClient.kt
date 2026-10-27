@@ -361,10 +361,32 @@ object TheStudentAuthClient {
         return try {
             httpClient.newCall(builder.build()).execute().use { response ->
                 val bodyString = response.body?.string().orEmpty()
-                val json = runCatching { JSONObject(bodyString) }.getOrElse { JSONObject() }
+                val parsedJson = runCatching { JSONObject(bodyString) }.getOrNull()
+                val json = parsedJson ?: JSONObject()
                 val status = json.optString("status")
+
+                // A non-JSON body on a failure almost always means PHP died before
+                // it could answer (missing table, syntax error, memory limit).
+                // Log what the server actually sent so `adb logcat` shows it, and
+                // surface a readable message instead of a bare status code.
+                if (parsedJson == null && !response.isSuccessful) {
+                    Log.e(
+                        TAG,
+                        "Non-JSON error response: HTTP ${response.code} from ${response.request.url} " +
+                            "body=${bodyString.take(600).ifBlank { "<empty>" }}"
+                    )
+                }
+
                 val message = json.optString("message").ifBlank {
-                    if (response.isSuccessful) "Success" else "Request failed (${response.code})"
+                    if (response.isSuccessful) {
+                        "Success"
+                    } else if (parsedJson == null) {
+                        // Nothing readable came back from the server.
+                        "The server could not process this request (HTTP ${response.code}). " +
+                            "Please try again in a moment."
+                    } else {
+                        "Request failed (${response.code})"
+                    }
                 }
                 val retryAfter = extractRetryAfter(json, response.headers["Retry-After"])
 

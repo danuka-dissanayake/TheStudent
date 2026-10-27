@@ -147,6 +147,7 @@ php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"      # → APP_KEY (64 hex cha
 | `REQUIRE_HTTPS` | `1` (default). Set `0` only for local testing. |
 | `TRUST_PROXY_HEADERS` | `1` **only** behind Cloudflare/a reverse proxy, otherwise clients can spoof IPs. |
 | `TRUSTED_PROXIES` | Optional comma-separated proxy IPs. |
+| `DIAG_TOKEN` | 24+ random chars to unlock `api/health.php?token=…` (read-only self-check: DB, tables, error log). Leave empty to disable. |
 
 `config.php` fails closed: if `DB_NAME`, `DB_USER` or a ≥32-character `APP_KEY` is missing, every
 API call returns `503` instead of running with an empty key.
