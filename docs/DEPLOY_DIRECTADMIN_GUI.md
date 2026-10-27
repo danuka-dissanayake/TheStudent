@@ -173,7 +173,16 @@ The GitHub repo is local to you; the host has no git. Use **File Manager upload*
 1. Open the repo folder.
 2. Go into `backend/`.
 3. Select **everything inside it** (`api`, `admin`, `legal`, `uploads`, `config.php`,
-   `config.secrets.example.php`, `smtp_mailer.php`) and compress it to `backend-upload.zip`.
+   `config.secrets.example.php`, `error_handlers.php`, `smtp_mailer.php`) and compress it to
+   `backend-upload.zip`.
+
+   > `error_handlers.php` and `api/health.php` are **required** — without the first, errors come
+   > back as an empty `500` you cannot debug; without the second you have no way to see the
+   > server error log over the web.
+
+   > Updating an existing install? Re-upload at minimum: `config.php`, `error_handlers.php`,
+   > `api/auth.php`, `api/health.php`. Then confirm with
+   > `https://app.quizontal.site/api/auth.php?action=version` (see `docs/DEBUGGING.md`).
 
 **Do not** include `database.sql`, `database_auth.sql` or `README_INFINITYFREE.md` — they don't
 need to be on the web server at all.
@@ -190,9 +199,10 @@ need to be on the web server at all.
 public_html/
 ├── config.php
 ├── config.secrets.example.php
+├── error_handlers.php
 ├── smtp_mailer.php
-├── api/       (auth.php, get_papers.php, upload_paper.php, delete_paper.php,
-│               _admin_guard.php)
+├── api/       (auth.php, health.php, get_papers.php, upload_paper.php,
+│               delete_paper.php, _admin_guard.php)
 ├── admin/     (index.php, _guard.php)
 ├── legal/     (terms.html, privacy.html)
 └── uploads/   (.htaccess, + the paper PDFs)

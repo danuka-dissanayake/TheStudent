@@ -42,6 +42,9 @@ if (!hash_equals($__expected, $__provided)) {
     exit();
 }
 
+require_once __DIR__ . '/../error_handlers.php';
+ts_install_error_handlers();
+
 require_once __DIR__ . '/../config.php';
 
 if (!headers_sent()) {
@@ -173,6 +176,57 @@ try {
     $report['database']['error_code'] = $e instanceof PDOException ? ($e->errorInfo[1] ?? null) : null;
 }
 
+// --- Sign-up dry run --------------------------------------------------------
+/**
+ * Replays the exact queries `register` performs, in order, against a throw-away
+ * e-mail address. The first step that throws is the cause of the 500 — this is
+ * the whole point of this endpoint on a host with no shell.
+ */
+$report['signup_dry_run'] = [];
+if (!empty($report['database']['connected'])) {
+    $probeEmail = 'health-probe@example.invalid';
+    $steps = [
+        '1. rate-limit read (login_attempts)' => [
+            "SELECT COUNT(*) AS c FROM login_attempts
+             WHERE email = :value AND attempted_at >= (NOW() - INTERVAL 15 MINUTE)",
+            ['value' => $probeEmail],
+        ],
+        '2. OTP throttle read (email_verifications)' => [
+            "SELECT COUNT(*) AS c FROM email_verifications
+             WHERE email = :value AND created_at >= (NOW() - INTERVAL 15 MINUTE)",
+            ['value' => $probeEmail],
+        ],
+        '3. existing-user lookup (users)' => [
+            'SELECT id, is_email_verified, is_active FROM users WHERE email = :email LIMIT 1',
+            ['email' => $probeEmail],
+        ],
+        '4. OTP column width check' => [
+            "SHOW COLUMNS FROM email_verifications LIKE 'otp_code'",
+            [],
+        ],
+        '5. password_resets table' => [
+            'SELECT COUNT(*) AS c FROM password_resets',
+            [],
+        ],
+        '6. user_tokens table' => [
+            'SELECT COUNT(*) AS c FROM user_tokens',
+            [],
+        ],
+    ];
+
+    foreach ($steps as $label => $definition) {
+        [$sql, $params] = $definition;
+        try {
+            $stmt = $pdo->prepare($sql);
+            $stmt->execute($params);
+            $stmt->fetchAll();
+            $report['signup_dry_run'][$label] = 'ok';
+        } catch (Throwable $e) {
+            $report['signup_dry_run'][$label] = 'FAILED: ' . $e->getMessage();
+        }
+    }
+}
+
 // --- Uploads directory ------------------------------------------------------
 $uploads = dirname(__DIR__) . '/uploads';
 $report['uploads'] = [
@@ -220,6 +274,11 @@ foreach (($report['database']['columns'] ?? []) as $table => $state) {
 }
 if (empty($report['config']['smtp_pass_set'])) {
     $problems[] = 'SMTP_PASS is empty — verification e-mails will not be sent.';
+}
+foreach (($report['signup_dry_run'] ?? []) as $step => $outcome) {
+    if (strpos((string) $outcome, 'FAILED') === 0) {
+        $problems[] = 'Sign-up step "' . $step . '" failed: ' . substr((string) $outcome, 8);
+    }
 }
 $report['problems'] = $problems;
 $report['ok'] = empty($problems);

@@ -28,21 +28,10 @@ error_reporting(E_ALL);
 ini_set('display_errors', '0');
 ini_set('log_errors', '1');
 
-/*
- * Write PHP errors to a file the account owner can open in the DirectAdmin File
- * Manager, placed ONE LEVEL ABOVE public_html so it is never web-reachable.
- *
- *   /home/USER/domains/app.quizontal.site/php-error.log
- *
- * Override with define('ERROR_LOG_PATH', '/some/other/path'); in config.secrets.php.
- * This is how you debug a 500 without SSH.
- */
-if (!defined('ERROR_LOG_PATH')) {
-    define('ERROR_LOG_PATH', dirname(__DIR__) . '/php-error.log');
-}
-if (is_dir(dirname(ERROR_LOG_PATH))) {
-    ini_set('error_log', ERROR_LOG_PATH);
-}
+// PHP errors go to <domain>/php-error.log (one level above public_html) and a
+// fatal-error handler turns blank 500s into JSON + a reference id.
+require_once __DIR__ . '/error_handlers.php';
+ts_install_error_handlers();
 
 // ---------------------------------------------------------------------------
 // Environment loading
@@ -344,71 +333,3 @@ function ts_ensure_column(PDO $pdo, string $table, string $column, string $defin
         error_log("[TheStudent] ensure_column($table.$column) skipped: " . $e->getMessage());
     }
 }
-
-// ---------------------------------------------------------------------------
-// Never answer with an empty 500
-// ---------------------------------------------------------------------------
-/**
- * API callers must always receive JSON, even when PHP dies. Without these two
- * handlers a fatal error (missing table, syntax error in an include, memory
- * limit) produced a blank/HTML 500, which the app could only report as
- * "Request failed (500)".
- *
- * The technical detail goes to the error log; the client gets a reference code
- * that matches the log line, so the cause can be found without an attacker
- * learning anything about the server.
- */
-function ts_is_api_request(): bool
-{
-    $script = (string) ($_SERVER['SCRIPT_NAME'] ?? '');
-    return strpos($script, '/api/') !== false;
-}
-
-function ts_emit_fatal_json(string $detail): void
-{
-    // Always log first: the log entry is the only way to see the cause when the
-    // response has already started streaming.
-    $ref = bin2hex(random_bytes(4));
-    error_log('[TheStudent][fatal][' . $ref . '] ' . $detail);
-
-    if (headers_sent() || !ts_is_api_request()) {
-        return; // HTML pages keep the normal (blank) behaviour.
-    }
-    http_response_code(500);
-    header('Content-Type: application/json; charset=utf-8');
-    header('Cache-Control: no-store');
-    echo json_encode([
-        'status'  => 'error',
-        'message' => 'The server hit an unexpected error. Reference: ' . $ref,
-        'ref'     => $ref,
-    ]);
-}
-
-if (!function_exists('ts_install_error_handlers')) {
-    function ts_install_error_handlers(): void
-    {
-        static $installed = false;
-        if ($installed) {
-            return;
-        }
-        $installed = true;
-
-        set_exception_handler(static function (Throwable $e): void {
-            ts_emit_fatal_json(get_class($e) . ': ' . $e->getMessage()
-                . ' in ' . $e->getFile() . ':' . $e->getLine());
-        });
-
-        register_shutdown_function(static function (): void {
-            $error = error_get_last();
-            if ($error === null) {
-                return;
-            }
-            if (!in_array($error['type'], [E_ERROR, E_PARSE, E_CORE_ERROR, E_COMPILE_ERROR, E_USER_ERROR], true)) {
-                return;
-            }
-            ts_emit_fatal_json($error['message'] . ' in ' . $error['file'] . ':' . $error['line']);
-        });
-    }
-}
-
-ts_install_error_handlers();

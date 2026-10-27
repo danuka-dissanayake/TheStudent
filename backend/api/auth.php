@@ -40,6 +40,13 @@
 
 declare(strict_types=1);
 
+// Install the fatal-error safety net BEFORE anything else so that even an
+// uncaught PDOException becomes JSON + a log line instead of an empty 500.
+// (config.php does this too; requiring it here keeps this endpoint safe even
+// when an older config.php is still deployed.)
+require_once __DIR__ . '/../error_handlers.php';
+ts_install_error_handlers();
+
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../smtp_mailer.php';
 
@@ -62,6 +69,9 @@ const TS_PASSWORD_MIN_LENGTH        = 8;
 const TS_PASSWORD_MAX_BYTES         = 72;   // bcrypt hard limit
 const TS_RESET_TOKEN_TTL_MINUTES    = 15;
 const TS_MAX_BODY_BYTES             = 65536;
+
+/** Bump whenever the API contract changes; exposed by ?action=version. */
+const TS_API_VERSION                = '3.1.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -87,6 +97,30 @@ if (ts_requires_https() && !ts_is_https()) {
 $pdo      = getDbConnection();
 $clientIp = ts_client_ip();
 $action   = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
+
+/**
+ * Deploy fingerprint — lets you confirm from a browser that the files you
+ * uploaded are the files being executed (FTP half-uploads and cached copies are
+ * the most common reason a fix "does not work").
+ *
+ *   GET /api/auth.php?action=version
+ */
+if ($action === 'version') {
+    header('Content-Type: application/json; charset=utf-8');
+    header('Cache-Control: no-store');
+    echo json_encode([
+        'status'      => 'success',
+        'api_version' => TS_API_VERSION,
+        'php_version' => PHP_VERSION,
+        'features'    => [
+            'fatal_handler'  => function_exists('ts_install_error_handlers'),
+            'schema_selfheal' => function_exists('ensureAuthSchema'),
+            'secrets_outside_webroot' => !is_file(__DIR__ . '/../config.secrets.php'),
+        ],
+        'auth_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
+    ], JSON_PRETTY_PRINT);
+    exit();
+}
 
 /**
  * Standard JSON envelope.

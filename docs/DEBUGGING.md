@@ -6,6 +6,26 @@ catches everything else.
 
 ---
 
+## 0. First: is my upload actually live?
+
+```
+https://app.quizontal.site/api/auth.php?action=version
+```
+
+```json
+{ "status": "success", "api_version": "3.1.0", "php_version": "8.1.x",
+  "features": { "fatal_handler": true, "schema_selfheal": true,
+                "secrets_outside_webroot": true },
+  "auth_php_modified": "2026-10-27T12:10:00+00:00" }
+```
+
+* `404` / "Invalid API action" → the **old** `auth.php` is still on the server (upload did not
+  take effect: wrong folder, FTP failed, or a different docroot).
+* `fatal_handler: false` → the **old** `config.php` / missing `error_handlers.php` is deployed.
+* `secrets_outside_webroot: false` → `config.secrets.php` is still inside `public_html`.
+
+Checking this first saves an hour of chasing a bug that is really a stale file.
+
 ## 1. The self-check endpoint (no SSH, 30 seconds)
 
 Add a diagnostic token to `config.secrets.php` (File Manager → Edit), then open the URL:
@@ -20,6 +40,9 @@ https://app.quizontal.site/api/health.php?token=paste-any-32-random-characters-h
 
 It answers with a JSON report:
 
+* **`signup_dry_run`** — the exact queries `register` runs, in order, against a throw-away
+  address. The first entry that says `FAILED: …` is your 500. Example:
+  `"1. rate-limit read (login_attempts)": "FAILED: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.login_attempts' doesn't exist"`
 * PHP version + loaded extensions (`pdo_mysql`, `openssl`, `curl`…)
 * where `config.secrets.php` was found, and whether `APP_KEY` is long enough
 * DB connection result — **including the exact MySQL error**
