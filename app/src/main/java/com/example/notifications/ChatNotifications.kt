@@ -27,10 +27,11 @@ import com.example.R
  * The look mirrors what students expect from a messaging app:
  *
  *  * **One notification per conversation**, built with `MessagingStyle`: it
- *    arrives **collapsed** (student's name + the newest line) and expands, on the
- *    usual drag, into the recent messages of that conversation.
- *  * **The student's photo is the large icon**, falling back to a coloured
- *    initial so a student without a picture still looks deliberate.
+ *    arrives **collapsed** (app icon · student name · time, newest message under
+ *    it) and expands, on the usual drag, into the recent messages of that
+ *    conversation.
+ *  * **The student's photo appears once per message row**, falling back to a
+ *    coloured initial so a student without a picture still looks deliberate.
  *  * **All conversations grouped** under one summary, so five active chats do
  *    not fill the shade. With a single conversation no summary is posted at all,
  *    which is why one chat looks like a plain, clean notification.
@@ -156,6 +157,8 @@ object ChatNotifications {
             return
         }
 
+        // Used for the message-row avatar and the conversation shortcut — not as
+        // the notification's large icon, which would duplicate it.
         val largeIcon = avatar ?: ChatNotificationAvatars.initials(peerName, peerId)
 
         // androidx Person, not android.app.Person: the framework class only
@@ -174,8 +177,11 @@ object ChatNotifications {
             )
             .build()
 
+        // No conversation title: this is a 1:1 thread, so the student's name
+        // belongs on the message rows, not printed again above them. That (plus
+        // the per-message sender label) is what used to show the name twice.
         val style = NotificationCompat.MessagingStyle(me)
-            .setConversationTitle(peerName)
+            .setConversationTitle(null)
             .setGroupConversation(true)
 
         messages.takeLast(MAX_MESSAGES_IN_NOTIFICATION).forEach { message ->
@@ -187,15 +193,18 @@ object ChatNotifications {
         }
 
         val last = messages.last()
+        // Titles and text are left to MessagingStyle on purpose. Setting
+        // setContentTitle(peerName) as well made the name appear in the header
+        // AND on the row; setLargeIcon(avatar) made the photo appear twice
+        // (thumbnail on the left, sender avatar on the row).
+        //
+        // Collapsed  : app icon | student name | time, newest message underneath.
+        // Expanded   : app icon | app name | time, then one row per message with
+        //              the student's photo, name and text.
         val builder = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_chat_notification)
             .setColor(ACCENT)
             .setColorized(false)
-            // Collapsed view: name + newest message. Dragging expands it into the
-            // MessagingStyle history above.
-            .setContentTitle(peerName)
-            .setContentText(last.text)
-            .setLargeIcon(largeIcon)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
