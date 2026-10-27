@@ -40,6 +40,15 @@ sealed class ChatResult<out T> {
     val failureMessage: String? get() = (this as? Failure)?.message
 
     /**
+     * True when the call never reached the server (no connection, DNS, timeout).
+     *
+     * Lives on the sealed type because callers only ever hold a [ChatResult], and
+     * "offline" has to be told apart from "the server refused this": the first is
+     * queued silently, the second is shown to the student.
+     */
+    val isNetworkFailure: Boolean get() = (this as? Failure)?.isNetworkError == true
+
+    /**
      * Payload for a successful call.
      *
      * The cast is unchecked but always correct: [Success] is only ever built

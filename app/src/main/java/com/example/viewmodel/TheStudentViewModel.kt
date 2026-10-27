@@ -968,7 +968,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     // is not an error the student has to read: the file stays in
                     // the composer and can be sent with one tap once there is data.
                     _chatState.update {
-                        if (uploaded.isNetworkError) {
+                        if (uploaded.isNetworkFailure) {
                             it.copy(isSending = false, isUploadingAttachment = false)
                         } else {
                             it.copy(
@@ -1037,7 +1037,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             if (serverId != null) {
                 chatDao.markChatMessageSent(localId, serverId, sentAt)
                 _chatState.update { it.copy(isSending = false, pendingReply = null) }
-            } else if (result.isNetworkError) {
+            } else if (result.isNetworkFailure) {
                 // No connection: this is not an error the student has to act on.
                 // The bubble stays in the conversation marked pending (clock
                 // icon) and is re-sent automatically once the network is back —
@@ -1113,7 +1113,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     chatDao.markChatMessageSent(row.localId, serverId, row.sentAtEpoch)
                     continue
                 }
-                if (result.isNetworkError) return // still offline
+                if (result.isNetworkFailure) return // still offline
 
                 // The server refused it: stop showing a clock that will never
                 // clear, and say why — but only in the conversation it belongs to.
