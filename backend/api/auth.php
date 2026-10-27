@@ -116,6 +116,7 @@ if ($action === 'version') {
             'fatal_handler'  => function_exists('ts_install_error_handlers'),
             'schema_selfheal' => function_exists('ensureAuthSchema'),
             'secrets_outside_webroot' => !is_file(__DIR__ . '/../config.secrets.php'),
+            'diag_token_length' => defined('DIAG_TOKEN') ? strlen(trim((string) DIAG_TOKEN)) : 0,
         ],
         'auth_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ], JSON_PRETTY_PRINT);
@@ -481,12 +482,19 @@ function countLoginAttempts(PDO $pdo, string $column, string $value, int $minute
         return 0;
     }
     $safeMinutes = max(1, (int) $minutes);
-    $stmt = $pdo->prepare(
-        "SELECT COUNT(*) AS c FROM login_attempts
-         WHERE `$column` = :value AND attempted_at >= (NOW() - INTERVAL {$safeMinutes} MINUTE)"
-    );
-    $stmt->execute(['value' => $value]);
-    return (int) ($stmt->fetch()['c'] ?? 0);
+    try {
+        $stmt = $pdo->prepare(
+            "SELECT COUNT(*) AS c FROM login_attempts
+             WHERE `$column` = :value AND attempted_at >= (NOW() - INTERVAL {$safeMinutes} MINUTE)"
+        );
+        $stmt->execute(['value' => $value]);
+        return (int) ($stmt->fetch()['c'] ?? 0);
+    } catch (Throwable $e) {
+        // A missing `login_attempts` table must not turn every sign-up into a
+        // blank 500: fail open (no limit known) and log the real reason.
+        error_log('[TheStudent][auth] rate-limit check failed (' . $column . '): ' . $e->getMessage());
+        return 0;
+    }
 }
 
 function recordFailedAttempt(PDO $pdo, string $ip, string $email): void
@@ -715,26 +723,39 @@ function publicUser(array $user): array
  */
 function issueEmailOtp(PDO $pdo, ?int $userId, string $email, string $type = 'registration', ?array $pendingData = null, string $ip = ''): array
 {
-    // Only one live code per email - prevents "try every code ever sent".
-    $pdo->prepare('UPDATE email_verifications SET is_used = 1 WHERE email = :email AND is_used = 0')
-        ->execute(['email' => $email]);
-
     $code = (string) random_int(100000, 999999);
     $expiresAt = date('Y-m-d H:i:s', strtotime('+' . TS_OTP_TTL_MINUTES . ' minutes'));
 
-    $stmt = $pdo->prepare(
-        'INSERT INTO email_verifications (user_id, email, otp_code, otp_type, pending_data, requested_ip, expires_at)
-         VALUES (:user_id, :email, :code, :type, :pending, :ip, :expires_at)'
-    );
-    $stmt->execute([
-        'user_id'    => $userId,
-        'email'      => $email,
-        'code'       => hmacOtp($code),
-        'type'       => $type,
-        'pending'    => $pendingData !== null ? json_encode($pendingData, JSON_UNESCAPED_UNICODE) : null,
-        'ip'         => substr($ip, 0, 45),
-        'expires_at' => $expiresAt,
-    ]);
+    try {
+        // Only one live code per email - prevents "try every code ever sent".
+        $pdo->prepare('UPDATE email_verifications SET is_used = 1 WHERE email = :email AND is_used = 0')
+            ->execute(['email' => $email]);
+
+        $stmt = $pdo->prepare(
+            'INSERT INTO email_verifications (user_id, email, otp_code, otp_type, pending_data, requested_ip, expires_at)
+             VALUES (:user_id, :email, :code, :type, :pending, :ip, :expires_at)'
+        );
+        $stmt->execute([
+            'user_id'    => $userId,
+            'email'      => $email,
+            'code'       => hmacOtp($code),
+            'type'       => $type,
+            'pending'    => $pendingData !== null ? json_encode($pendingData, JSON_UNESCAPED_UNICODE) : null,
+            'ip'         => substr($ip, 0, 45),
+            'expires_at' => $expiresAt,
+        ]);
+    } catch (Throwable $e) {
+        // Never let a schema problem become an empty 500. Log the SQL error
+        // against a short reference and hand the same reference to the client.
+        $ref = bin2hex(random_bytes(4));
+        error_log('[TheStudent][auth][' . $ref . '] could not store OTP: ' . $e->getMessage());
+        sendJsonResponse(
+            'error',
+            'Verification is temporarily unavailable. Reference: ' . $ref,
+            ['ref' => $ref, 'retry_after' => 60],
+            503
+        );
+    }
 
     $sent = sendVerificationEmail($email, $code, $type, TS_OTP_TTL_MINUTES);
 

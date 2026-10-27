@@ -21,31 +21,71 @@
 
 declare(strict_types=1);
 
-// 404 unless the caller knows the token defined in config.secrets.php.
-$__expected = defined('DIAG_TOKEN') ? (string) DIAG_TOKEN : '';
-if ($__expected === '' || strlen($__expected) < 24) {
-    if (!headers_sent()) {
-        http_response_code(404);
-        header('Content-Type: text/plain; charset=utf-8');
-    }
-    echo 'Not found';
-    exit();
-}
-
-$__provided = isset($_GET['token']) ? (string) $_GET['token'] : '';
-if (!hash_equals($__expected, $__provided)) {
-    if (!headers_sent()) {
-        http_response_code(404);
-        header('Content-Type: text/plain; charset=utf-8');
-    }
-    echo 'Not found';
-    exit();
-}
-
+/*
+ * IMPORTANT: config.php must run FIRST — it is what loads config.secrets.php,
+ * and DIAG_TOKEN lives in there. Checking the token before loading the config
+ * (as an earlier revision did) makes this endpoint answer 404 forever, no
+ * matter how carefully DIAG_TOKEN is defined.
+ */
 require_once __DIR__ . '/../error_handlers.php';
 ts_install_error_handlers();
 
 require_once __DIR__ . '/../config.php';
+
+/** Answer 404 with a machine-readable reason so setup mistakes are visible. */
+function ts_health_deny(string $code, string $hint): void
+{
+    if (!headers_sent()) {
+        http_response_code(404);
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: no-store');
+        header('X-Diag-Status: ' . $code);
+    }
+    // The hint is about *this file's* setup, never about secrets or the DB.
+    echo json_encode([
+        'status' => 'not_found',
+        'code'   => $code,
+        'hint'   => $hint,
+    ], JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES);
+    exit();
+}
+
+$__expected = defined('DIAG_TOKEN') ? trim((string) DIAG_TOKEN) : '';
+if ($__expected === '') {
+    ts_health_deny(
+        'token_not_configured',
+        "DIAG_TOKEN is empty or not defined. Add this line to config.secrets.php, the file ONE LEVEL ABOVE public_html "
+        . "(e.g. /home/USER/domains/yourdomain/config.secrets.php - not inside public_html, and not config.secrets.example.php): "
+        . "define('DIAG_TOKEN', 'any-32-random-characters'); then reload this page. "
+        . "Check https://yourdomain/api/auth.php?action=version - its \"diag_token_length\" shows whether the server sees it."
+    );
+}
+if (strlen($__expected) < 24) {
+    ts_health_deny(
+        'token_too_short',
+        'DIAG_TOKEN has only ' . strlen($__expected) . ' characters; at least 24 are required. '
+        . 'Use 32+ random characters (letters and digits only, no quotes, no spaces).'
+    );
+}
+
+// Accept ?token=… or an X-Diag-Token header (handy for curl).
+$__provided = '';
+if (isset($_GET['token'])) {
+    $__provided = (string) $_GET['token'];
+} elseif (isset($_SERVER['HTTP_X_DIAG_TOKEN'])) {
+    $__provided = (string) $_SERVER['HTTP_X_DIAG_TOKEN'];
+}
+$__provided = trim($__provided);
+
+if (!hash_equals($__expected, $__provided)) {
+    ts_health_deny(
+        'token_mismatch',
+        'The token in the URL does not match DIAG_TOKEN on the server (server token: '
+        . strlen($__expected) . ' chars, yours: ' . strlen($__provided) . ' chars). '
+        . 'They must match exactly - watch for a trailing space or a smart quote '
+        . 'copied from a phone. A mismatch in length means the value in config.secrets.php is different.'
+    );
+}
 
 if (!headers_sent()) {
     header('Content-Type: application/json; charset=utf-8');
@@ -86,6 +126,7 @@ $report = [
             'inside_web_root' => is_file(__DIR__ . '/../config.secrets.php'),
         ],
         'app_env'          => defined('APP_ENV') ? APP_ENV : '(unset)',
+        'diag_token_length' => defined('DIAG_TOKEN') ? strlen(trim((string) DIAG_TOKEN)) : 0,
         'app_key_length'   => defined('APP_KEY') ? strlen((string) APP_KEY) : 0,
         'db_name_set'      => defined('DB_NAME') && (string) DB_NAME !== '',
         'db_user_set'      => defined('DB_USER') && (string) DB_USER !== '',
@@ -238,8 +279,11 @@ $report['uploads'] = [
 
 // --- Tail of the PHP error log ---------------------------------------------
 $logPath = defined('ERROR_LOG_PATH') ? ERROR_LOG_PATH : dirname(__DIR__) . '/php-error.log';
-$report['error_log']['path']   = $logPath;
-$report['error_log']['exists'] = is_file($logPath);
+$report['error_log']['path']          = $logPath;
+$report['error_log']['exists']        = is_file($logPath);
+$report['error_log']['dir_writable']  = is_dir(dirname($logPath)) && is_writable(dirname($logPath));
+$report['error_log']['log_errors']    = (string) ini_get('log_errors');
+$report['error_log']['ini_error_log'] = (string) ini_get('error_log');
 if (is_file($logPath) && is_readable($logPath)) {
     $lines = @file($logPath);
     if (is_array($lines)) {
@@ -271,6 +315,10 @@ foreach (($report['database']['columns'] ?? []) as $table => $state) {
     if (!empty($state['missing_columns'])) {
         $problems[] = 'Missing columns in ' . $table . ': ' . implode(', ', $state['missing_columns']);
     }
+}
+if (empty($report['error_log']['dir_writable'])) {
+    $problems[] = 'The folder for php-error.log is not writable, so fatal errors cannot be logged. '
+        . 'Set ERROR_LOG_PATH in config.secrets.php to a directory you own and can write to.';
 }
 if (empty($report['config']['smtp_pass_set'])) {
     $problems[] = 'SMTP_PASS is empty — verification e-mails will not be sent.';

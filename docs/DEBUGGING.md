@@ -26,6 +26,20 @@ https://app.quizontal.site/api/auth.php?action=version
 
 Checking this first saves an hour of chasing a bug that is really a stale file.
 
+### If `health.php` answers 404
+
+It now says **why** in the body (and in the `X-Diag-Status` header):
+
+| `code` | Meaning | Fix |
+|---|---|---|
+| `token_not_configured` | `DIAG_TOKEN` is empty or undefined | add `define('DIAG_TOKEN', '32-random-chars');` to **`config.secrets.php`** — the one *above* `public_html`, not `config.secrets.example.php` |
+| `token_too_short` | fewer than 24 characters | use 32+ letters/digits, no quotes or spaces |
+| `token_mismatch` | the URL token ≠ the server value (the message shows both lengths) | copy the value exactly; the length tells you it is a different string |
+| plain HTML "404 Not Found" (no JSON) | `health.php` is **not on the server** | upload `api/health.php` |
+
+Cross-check with the ungated endpoint: `api/auth.php?action=version` reports
+`diag_token_length` — `0` means PHP does not see your `DIAG_TOKEN` at all.
+
 ## 1. The self-check endpoint (no SSH, 30 seconds)
 
 Add a diagnostic token to `config.secrets.php` (File Manager → Edit), then open the URL:
@@ -40,6 +54,10 @@ https://app.quizontal.site/api/health.php?token=paste-any-32-random-characters-h
 
 It answers with a JSON report:
 
+* **`error_log.last_lines`** — the tail of `php-error.log`, including the
+  `[TheStudent][fatal][<ref>]` line that matches the reference the API returned.
+  A `dir_writable: false` here means logging is impossible and you must fix
+  `ERROR_LOG_PATH`.
 * **`signup_dry_run`** — the exact queries `register` runs, in order, against a throw-away
   address. The first entry that says `FAILED: …` is your 500. Example:
   `"1. rate-limit read (login_attempts)": "FAILED: SQLSTATE[42S02]: Base table or view not found: 1146 Table 'db.login_attempts' doesn't exist"`
@@ -158,6 +176,15 @@ curl -s 'https://app.quizontal.site/api/health.php?token=YOUR_DIAG_TOKEN' | tail
 | `.htaccess` 500 (syntax error) | every URL on the site is 500, `php-error.log` is empty | Check *Advanced Features → Error Logs*; remove the last `.htaccess` edit |
 
 ---
+
+### Sign-up no longer dies silently
+
+* A missing `login_attempts` table now only disables rate limiting (logged, request continues).
+* A failure to **store** the OTP answers
+  `503 {"status":"error","message":"Verification is temporarily unavailable. Reference: <ref>","ref":"<ref>"}`
+  instead of a blank 500 — search that ref in `php-error.log` (or in `health.php`) for the SQL error.
+* Anything still fatal returns `{"status":"error", "ref": "<8 hex>"}` plus the header
+  `X-TheStudent-Error-Ref`, and the same ref is written to the log.
 
 ## 6. The `.htaccess` trap
 
