@@ -26,3 +26,7 @@ app/website_php_mysql/config.secrets.php
 # Deployment bundles / archives: they get built locally from backend/ and used to
 # contain live credentials. Never commit them.
 *.zip
+
+# Firebase service account key for push notifications (never commit)
+backend/api/chat-fcm-service-account.json
+backend/fcm-service-account.json

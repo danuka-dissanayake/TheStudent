@@ -324,6 +324,35 @@ object TheStudentChatClient {
         ) { true }
     }
 
+    /**
+     * Hand this device's push token to the relay.
+     *
+     * The token is what lets the server wake this phone with a data message the
+     * moment a message is queued. It is stored per account and replaced on every
+     * refresh, because FCM can rotate it at any time.
+     */
+    suspend fun registerDevice(
+        backendBaseUrl: String,
+        token: String,
+        fcmToken: String,
+        platform: String = "android"
+    ): ChatResult<Unit> = withContext(Dispatchers.IO) {
+        post(
+            backendBaseUrl,
+            token,
+            "register_device",
+            JSONObject().put("fcm_token", fcmToken).put("platform", platform)
+        ) { }
+    }
+
+    /** Stop pushes for this account (called on sign-out). */
+    suspend fun unregisterDevice(
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<Unit> = withContext(Dispatchers.IO) {
+        post(backendBaseUrl, token, "unregister_device", JSONObject()) { }
+    }
+
     // -----------------------------------------------------------------------
     // Attachments
     // -----------------------------------------------------------------------

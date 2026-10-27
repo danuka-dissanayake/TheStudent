@@ -15,6 +15,7 @@ import com.example.data.local.ChatMediaPrep
 import com.example.data.local.ChatMessageEntity
 import com.example.data.local.ChatVoiceRecorder
 import com.example.data.local.ChatSummaryRow
+import com.example.data.local.TheStudentPreferences
 import com.example.data.local.LearningActivityEntity
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
@@ -22,6 +23,8 @@ import com.example.data.model.*
 import com.example.data.repository.TheStudentRepository
 import com.example.data.repository.SampleEducationalData
 import com.example.notifications.ChatNotifications
+import com.example.notifications.ChatNotifier
+import com.google.firebase.messaging.FirebaseMessaging
 import com.example.ui.components.TheStudentNavTab
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
@@ -490,15 +493,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Peer directory from the last successful `threads` call. */
     private var chatPeers: List<ChatPeer> = emptyList()
-    /** Conversations that currently have a device notification showing. */
-    private var notifiedChatPeers: Set<Int> = emptySet()
-    /**
-     * What each posted notification currently says, so the 2 s reconciliation
-     * does not re-post (and re-buzz) an unchanged one.
-     */
-    private val notifiedSignatures = HashMap<Int, String>()
-    /** Same idea for the grouped summary notification. */
-    private var notifiedSummarySignature: String? = null
     /** Set when a notification was tapped before the directory had loaded. */
     private var pendingNotificationPeerId: Int? = null
     /** Conversation previews, straight from the device database. */
@@ -1158,125 +1152,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /**
      * Bring the notification shade in line with the device database.
      *
-     * Idempotent on purpose: it is called after every inbox poll, after opening a
-     * conversation and when the app moves between foreground and background, so
-     * the shade always reflects the unread rows and nothing has to be tracked
-     * across process death. Per conversation there is one notification holding
-     * its unread messages; they are all children of one summary notification.
+     * Called after every inbox poll, after opening a conversation and when the
+     * app moves between foreground and background. The heavy lifting lives in
+     * [ChatNotifier], which the FCM service uses too, so a pushed message and a
+     * polled one produce exactly the same notification.
      */
     private suspend fun refreshChatNotifications() {
-        // Never let notification bookkeeping break chat itself.
-        runCatching {
-            val context = appContext
-            if (!ChatNotifications.canPost(context)) {
-                ChatNotifications.clearAll(context)
-                notifiedChatPeers = emptySet()
-                return
-            }
-
-            // Names come from the peer directory. If the app is polling from the
-            // background and the directory was never loaded in this process, fetch
-            // it once so notifications are not titled "Student".
-            if (chatPeers.isEmpty()) {
-                runCatching { refreshChatDirectory(showSpinner = false) }
-            }
-
-            val unread = chatDao.unreadMessages()
-            val byPeer = unread.groupBy { it.peerId }
-
-            // Looking at the chat list already shows the badges; a banner on top
-            // of that is just noise.
-            if (ChatNotifications.isAppVisible && chatIsDirectoryVisible) {
-                (notifiedChatPeers + byPeer.keys).forEach { peerId ->
-                    ChatNotifications.clearForPeer(context, peerId)
-                }
-                ChatNotifications.clearSummary(context)
-                notifiedChatPeers = emptySet()
-                notifiedSignatures.clear()
-                notifiedSummarySignature = null
-                return
-            }
-
-            var totalUnread = 0
-            val summaryLines = mutableListOf<String>()
-            val showing = mutableSetOf<Int>()
-
-            // Newest conversation first in the summary, oldest message first
-            // inside each conversation.
-            byPeer.entries
-                .sortedByDescending { (_, rows) -> rows.lastOrNull()?.sentAtEpoch ?: 0L }
-                .forEach { (peerId, rows) ->
-                    totalUnread += rows.size
-                    val peerName = chatPeers.firstOrNull { it.id == peerId }?.name ?: "Student"
-                    val messages = rows.map { row ->
-                        ChatNotifications.Message(
-                            text = row.notificationText(),
-                            sentAtEpoch = row.sentAtEpoch,
-                            fromMe = row.isMine
-                        )
-                    }
-                    summaryLines += "$peerName: ${messages.last().text}"
-
-                    // The open conversation is on screen: no notification for it.
-                    if (chatActivePeerId == peerId) {
-                        ChatNotifications.clearForPeer(context, peerId)
-                        notifiedSignatures.remove(peerId)
-                    } else {
-                        // Only post when the notification would actually change:
-                        // re-posting the same content every 2 s would sound the
-                        // alert again and again.
-                        val signature = "${rows.size}|${messages.last().text}|" +
-                            messages.last().sentAtEpoch
-                        if (notifiedSignatures[peerId] != signature) {
-                            ChatNotifications.showForPeer(
-                                context = context,
-                                peerId = peerId,
-                                peerName = peerName,
-                                messages = messages,
-                                unreadCount = rows.size
-                            )
-                            notifiedSignatures[peerId] = signature
-                        }
-                        showing += peerId
-                    }
-                }
-
-            // Conversations that are no longer unread lose their notification.
-            (notifiedChatPeers - showing).forEach { peerId ->
-                ChatNotifications.clearForPeer(context, peerId)
-                notifiedSignatures.remove(peerId)
-            }
-            notifiedChatPeers = showing
-
-            if (showing.isEmpty()) {
-                ChatNotifications.clearSummary(context)
-                notifiedSummarySignature = null
-            } else {
-                val summarySignature = summaryLines.joinToString("\u0000") +
-                    "|$totalUnread|${showing.size}"
-                if (notifiedSummarySignature != summarySignature) {
-                    ChatNotifications.showSummary(
-                        context = context,
-                        lines = summaryLines,
-                        conversationCount = showing.size,
-                        messageCount = totalUnread
-                    )
-                    notifiedSummarySignature = summarySignature
-                }
-            }
+        // Names come from the peer directory. If the app is polling from the
+        // background and the directory was never loaded in this process, fetch
+        // it once so notifications are not titled "Student".
+        if (chatPeers.isEmpty()) {
+            runCatching { refreshChatDirectory(showSpinner = false) }
         }
-    }
-
-    /** One line of a message as it should appear in a notification. */
-    private fun ChatMessageEntity.notificationText(): String {
-        val text = body.trim()
-        if (text.isNotBlank()) return text
-        return when (attachmentKind) {
-            ChatAttachment.IMAGE -> "📷 Photo"
-            ChatAttachment.AUDIO -> "🎤 Voice note"
-            null -> "Message"
-            else -> "📎 " + (attachmentName ?: "Attachment")
-        }
+        ChatNotifier.reconcile(
+            context = appContext,
+            dao = chatDao,
+            names = { peerId -> chatPeers.firstOrNull { it.id == peerId }?.name },
+            activePeerId = chatActivePeerId,
+            // Looking at the chat list already shows the badges.
+            quiet = ChatNotifications.isAppVisible && chatIsDirectoryVisible
+        )
     }
 
     /** Post/reconcile notifications right now (app entering background, etc.). */
@@ -1300,12 +1195,45 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             // body would otherwise run before the lazily-declared chat state.
             yield()
             ChatNotifications.ensureChannel(appContext)
+            syncPushToken()
             while (true) {
                 delay(CHAT_BACKGROUND_POLL_MS)
                 if (chatIsDirectoryVisible) continue // the chat tab polls faster
                 if (preferences.sessionToken.isNullOrBlank()) continue
                 runCatching { fetchChatInbox() }
             }
+        }
+    }
+
+    /**
+     * Make sure the relay knows this device's push token.
+     *
+     * Without it the server has no way to wake this phone, and delivery falls
+     * back to the 10 s polling loop. Wrapped end to end: if the Firebase files
+     * are missing (a build without `google-services.json`) chat still works.
+     */
+    fun syncPushToken() {
+        runCatching {
+            FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+                val token = runCatching { if (task.isSuccessful) task.result else null }.getOrNull()
+                if (token.isNullOrBlank()) return@addOnCompleteListener
+                TheStudentPreferences(appContext).fcmToken = token
+                viewModelScope.launch { registerPushToken(token) }
+            }
+        }.onFailure { error ->
+            Log.w("TheStudentViewModel", "Push messaging unavailable", error)
+        }
+    }
+
+    private suspend fun registerPushToken(fcmToken: String) {
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        runCatching {
+            TheStudentChatClient.registerDevice(
+                backendBaseUrl = baseUrl,
+                token = token,
+                fcmToken = fcmToken
+            )
         }
     }
 
@@ -1988,6 +1916,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             val token = preferences.sessionToken
             val serverUrl = serverUrlState.value
+            // Stop pushes to this phone before the session disappears.
+            if (!token.isNullOrBlank()) {
+                runCatching { TheStudentChatClient.unregisterDevice(serverUrl, token) }
+            }
             preferences.logout()
             stopChatSync()
             ChatCrypto.clearSessionCache()
@@ -1997,9 +1929,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             runCatching { ChatAttachmentStore.clearAll(appContext) }
             chatSummaries = emptyList()
             chatPeers = emptyList()
-            notifiedChatPeers = emptySet()
-            notifiedSignatures.clear()
-            notifiedSummarySignature = null
+            ChatNotifier.reset()
             pendingNotificationPeerId = null
             ChatNotifications.clearAll(appContext)
             _chatState.value = ChatUiState()

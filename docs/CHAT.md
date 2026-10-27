@@ -206,10 +206,12 @@ window:
 * chat tab open — 2 s loop, and no notification for the open conversation;
 * anywhere else in the app, or the app in the background — the extra
   `CHAT_BACKGROUND_POLL_MS` (10 s) loop keeps fetching and notifying;
-* app **not running** — nothing can be delivered until it starts again. There is
-  no push service: the relay has no way to wake a killed app. Real
-  background-when-closed delivery needs FCM (a Firebase project plus a key on the
-  server) and is not part of this implementation.
+* app **not running** — the server sends an FCM data message, which starts the
+  app's `ChatMessagingService`, fetches and decrypts the message and posts the
+  notification. The payload carries no text (only "a chat message is waiting"),
+  so nothing readable passes through Firebase. Push needs a Firebase project plus
+  a service-account key on the server; without the key the app falls back to the
+  polling window above.
 
 Android 13+ asks for `POST_NOTIFICATIONS` on first launch; declining is harmless
 — chat still works, just silently.

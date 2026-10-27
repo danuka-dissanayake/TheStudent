@@ -22,6 +22,10 @@
  *   POST delete_message  {peer_id, server_id}  delete one of my messages for
  *                     both sides (relayed as a 'delete' envelope)
  *   POST typing       {peer_id, is_typing?}
+ *   POST register_device  {fcm_token, platform}  Push token for this install
+ *                     (optional: without a service-account key nothing is sent
+ *                     and the app falls back to polling).
+ *   POST unregister_device  Drop this account's push tokens (sign-out).
  *   POST ack_safety   First-visit chat safety notice acknowledgement.
  *   POST heartbeat    Presence ping (every ~2 s from the app).
  *   POST set_key      {public_key}  publish the E2EE identity public key.
@@ -58,7 +62,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.2.0';
+const TS_CHAT_API_VERSION          = '2.3.0';
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -69,6 +73,9 @@ const TS_CHAT_RELAY_TTL_DAYS       = 7;     // undelivered messages expire
 const TS_CHAT_MAX_ATTACHMENT_BYTES = 27262976;  // 26 MB encrypted blob (25 MB file)
 const TS_CHAT_ATTACHMENT_DIR       = 'uploads/chat/';  // encrypted blobs only
 const TS_CHAT_MAX_UPLOADS_PER_MIN  = 12;    // per student
+/** Push (FCM) is optional: without a service-account key the app still polls. */
+const TS_CHAT_FCM_SCOPE            = 'https://www.googleapis.com/auth/firebase.messaging';
+const TS_CHAT_FCM_TIMEOUT_SEC       = 4;
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -238,6 +245,261 @@ function ts_chat_public_peer(array $row, int $now): array
     ];
 }
 
+/**
+ * Push notification helpers (Firebase Cloud Messaging, HTTP v1).
+ *
+ * Push is strictly optional. The service account key is looked up in this order:
+ *
+ *   1. the TS_FCM_SERVICE_ACCOUNT environment variable (inline JSON),
+ *   2. the TS_FCM_SERVICE_ACCOUNT_FILE environment variable (path),
+ *   3. `backend/api/chat-fcm-service-account.json`,
+ *   4. `backend/fcm-service-account.json`.
+ *
+ * With no key the functions below do nothing at all and the app simply keeps
+ * polling. The key must never be committed to the repository.
+ */
+function ts_chat_fcm_config(): ?array
+{
+    static $config = null;
+    static $loaded = false;
+    if ($loaded) {
+        return $config;
+    }
+    $loaded = true;
+
+    $raw = getenv('TS_FCM_SERVICE_ACCOUNT') ?: '';
+    if ($raw === '') {
+        $path = getenv('TS_FCM_SERVICE_ACCOUNT_FILE') ?: '';
+        $candidates = $path !== '' ? [$path] : [];
+        $candidates[] = __DIR__ . '/chat-fcm-service-account.json';
+        $candidates[] = dirname(__DIR__) . '/fcm-service-account.json';
+        foreach ($candidates as $candidate) {
+            if (is_readable($candidate)) {
+                $raw = (string) file_get_contents($candidate);
+                break;
+            }
+        }
+    }
+    if ($raw === '') {
+        return null;
+    }
+
+    $decoded = json_decode($raw, true);
+    if (!is_array($decoded)
+        || empty($decoded['client_email'])
+        || empty($decoded['private_key'])
+        || empty($decoded['project_id'])
+    ) {
+        error_log('[TheStudent] FCM service account JSON is incomplete; push disabled.');
+        return null;
+    }
+    $decoded['token_uri'] = $decoded['token_uri'] ?? 'https://oauth2.googleapis.com/token';
+    $config = $decoded;
+    return $config;
+}
+
+/** Base64url without padding, as JWT requires. */
+function ts_chat_b64url(string $bytes): string
+{
+    return rtrim(strtr(base64_encode($bytes), '+/', '-_'), '=');
+}
+
+/**
+ * OAuth2 access token for FCM, signed with the service account key (RS256).
+ *
+ * Cached in the system temp directory until shortly before it expires, because
+ * minting one costs a network round trip.
+ */
+function ts_chat_fcm_access_token(array $config): ?string
+{
+    $cacheFile = sys_get_temp_dir() . '/ts_fcm_' . md5((string) $config['client_email']) . '.json';
+    if (is_readable($cacheFile)) {
+        $cached = json_decode((string) file_get_contents($cacheFile), true);
+        if (is_array($cached)
+            && !empty($cached['token'])
+            && (int) ($cached['expires_at'] ?? 0) > time() + 60
+        ) {
+            return (string) $cached['token'];
+        }
+    }
+
+    $now = time();
+    $header = ts_chat_b64url(json_encode(['alg' => 'RS256', 'typ' => 'JWT']));
+    $claims = ts_chat_b64url(json_encode([
+        'iss'   => $config['client_email'],
+        'scope' => TS_CHAT_FCM_SCOPE,
+        'aud'   => $config['token_uri'],
+        'iat'   => $now,
+        'exp'   => $now + 3600,
+    ]));
+    $signingInput = $header . '.' . $claims;
+
+    $signature = '';
+    if (!openssl_sign($signingInput, $signature, (string) $config['private_key'], OPENSSL_ALGO_SHA256)) {
+        error_log('[TheStudent] FCM JWT signing failed.');
+        return null;
+    }
+    $assertion = $signingInput . '.' . ts_chat_b64url($signature);
+
+    $response = ts_chat_http_post_form((string) $config['token_uri'], [
+        'grant_type' => 'urn:ietf:params:oauth:grant-type:jwt-bearer',
+        'assertion'  => $assertion,
+    ]);
+    if ($response === null) {
+        return null;
+    }
+    $json = json_decode($response, true);
+    $token = is_array($json) ? (string) ($json['access_token'] ?? '') : '';
+    if ($token === '') {
+        error_log('[TheStudent] FCM token exchange failed: ' . substr($response, 0, 300));
+        return null;
+    }
+    $expiresIn = is_array($json) ? (int) ($json['expires_in'] ?? 3600) : 3600;
+    @file_put_contents(
+        $cacheFile,
+        json_encode(['token' => $token, 'expires_at' => time() + $expiresIn]),
+        LOCK_EX
+    );
+    return $token;
+}
+
+/** POST a form body; returns the response body or null. */
+function ts_chat_http_post_form(string $url, array $fields): ?string
+{
+    $payload = http_build_query($fields);
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $payload,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => TS_CHAT_FCM_TIMEOUT_SEC,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_HTTPHEADER     => ['Content-Type: application/x-www-form-urlencoded'],
+        ]);
+        $out = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        if ($out === false || $code >= 400) {
+            return null;
+        }
+        return (string) $out;
+    }
+    $context = stream_context_create(['http' => [
+        'method'        => 'POST',
+        'header'        => "Content-Type: application/x-www-form-urlencoded\r\n",
+        'content'       => $payload,
+        'timeout'       => TS_CHAT_FCM_TIMEOUT_SEC,
+        'ignore_errors' => true,
+    ]]);
+    $out = @file_get_contents($url, false, $context);
+    return $out === false ? null : (string) $out;
+}
+
+/** POST a JSON body with a bearer token; returns [httpCode, body]. */
+function ts_chat_http_post_json(string $url, string $json, string $bearer): array
+{
+    $headers = [
+        'Content-Type: application/json',
+        'Authorization: Bearer ' . $bearer,
+    ];
+    if (function_exists('curl_init')) {
+        $ch = curl_init($url);
+        curl_setopt_array($ch, [
+            CURLOPT_POST           => true,
+            CURLOPT_POSTFIELDS     => $json,
+            CURLOPT_RETURNTRANSFER => true,
+            CURLOPT_TIMEOUT        => TS_CHAT_FCM_TIMEOUT_SEC,
+            CURLOPT_CONNECTTIMEOUT => 2,
+            CURLOPT_HTTPHEADER     => $headers,
+        ]);
+        $out = curl_exec($ch);
+        $code = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        return [$code, $out === false ? '' : (string) $out];
+    }
+    $context = stream_context_create(['http' => [
+        'method'        => 'POST',
+        'header'        => implode("\r\n", $headers) . "\r\n",
+        'content'       => $json,
+        'timeout'       => TS_CHAT_FCM_TIMEOUT_SEC,
+        'ignore_errors' => true,
+    ]]);
+    $out = @file_get_contents($url, false, $context);
+    $code = 0;
+    if (isset($http_response_header[0]) && preg_match('#\s(\d{3})\s#', $http_response_header[0], $m)) {
+        $code = (int) $m[1];
+    }
+    return [$code, $out === false ? '' : (string) $out];
+}
+
+/**
+ * Wake the recipient's device(s) so the app can fetch and decrypt.
+ *
+ * The payload deliberately carries **no message text**: only "there is a chat
+ * message waiting". The app pulls it from the relay and decrypts on the device,
+ * so Google never sees anything readable and the E2EE promise survives push.
+ * Never throws: a failed push must not fail the send.
+ */
+function ts_chat_push_message(PDO $pdo, int $recipientId, int $senderId, int $serverId): void
+{
+    try {
+        $config = ts_chat_fcm_config();
+        if ($config === null) {
+            return;
+        }
+        $stmt = $pdo->prepare('SELECT token FROM chat_devices WHERE user_id = :id LIMIT 10');
+        $stmt->execute(['id' => $recipientId]);
+        $tokens = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        if (empty($tokens)) {
+            return;
+        }
+
+        $accessToken = ts_chat_fcm_access_token($config);
+        if ($accessToken === null) {
+            return;
+        }
+
+        $endpoint = 'https://fcm.googleapis.com/v1/projects/' . $config['project_id'] . '/messages:send';
+        foreach ($tokens as $deviceToken) {
+            $payload = json_encode([
+                'message' => [
+                    'token'        => (string) $deviceToken,
+                    // Data-only: the system must not render anything itself.
+                    'data'         => [
+                        'type'      => 'chat_message',
+                        'peer_id'   => (string) $senderId,
+                        'server_id' => (string) $serverId,
+                    ],
+                    'android'      => [
+                        'priority' => 'high',
+                        'ttl'      => '600s',
+                    ],
+                ],
+            ]);
+            [$code, $body] = ts_chat_http_post_json($endpoint, (string) $payload, $accessToken);
+            if ($code === 200 || $code === 201) {
+                continue;
+            }
+            // The token is dead (app uninstalled, data cleared, rotated): drop it
+            // so the next send does not wait on it.
+            if ($code === 404 || $code === 400 || stripos($body, 'UNREGISTERED') !== false
+                || stripos($body, 'INVALID_ARGUMENT') !== false
+            ) {
+                try {
+                    $pdo->prepare('DELETE FROM chat_devices WHERE token = :token')
+                        ->execute(['token' => (string) $deviceToken]);
+                } catch (Throwable $e) {
+                    error_log('[TheStudent] FCM dead token cleanup failed: ' . $e->getMessage());
+                }
+            }
+            error_log('[TheStudent] FCM push failed (' . $code . '): ' . substr($body, 0, 300));
+        }
+    } catch (Throwable $e) {
+        error_log('[TheStudent] FCM push error: ' . $e->getMessage());
+    }
+}
+
 function ts_chat_safety_acknowledged(array $user): bool
 {
     return !empty($user['chat_safety_ack_at']);
@@ -318,6 +580,21 @@ function ts_chat_ensure_schema(PDO $pdo): void
                 INDEX `idx_relay_inbox` (`recipient_id`, `id`),
                 INDEX `idx_relay_sender` (`sender_id`, `created_at`),
                 INDEX `idx_relay_created` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
+        // Push tokens: one row per install. A token can move between accounts
+        // (same phone, different student signing in), so it is UNIQUE and the
+        // owner is updated on every registration.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `chat_devices` (
+                `id` INT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `user_id` INT UNSIGNED NOT NULL,
+                `token` VARCHAR(255) NOT NULL,
+                `platform` VARCHAR(16) NOT NULL DEFAULT 'android',
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE KEY `uniq_chat_device_token` (`token`),
+                INDEX `idx_chat_device_user` (`user_id`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
@@ -628,11 +905,36 @@ switch ($action) {
             error_log('[TheStudent] chat typing clear failed: ' . $e->getMessage());
         }
 
-        ts_chat_json('success', 'Message queued.', [
+        $response = [
             'server_id'    => $relayId,
             'sent_epoch'   => $now,
             'server_epoch' => $now,
-        ]);
+        ];
+
+        // Wake the recipient's phone. Data-only push, so the app fetches and
+        // decrypts and no message content ever passes through Firebase.
+        //
+        // The push costs a round trip to Google. Where the server supports it
+        // (PHP-FPM, which is what shared hosting runs) the reply goes out first
+        // and the push happens afterwards, so sending stays instant even if
+        // Firebase is slow or unreachable.
+        if (function_exists('fastcgi_finish_request')) {
+            http_response_code(200);
+            if (!headers_sent()) {
+                header('Content-Type: application/json');
+                header('Cache-Control: no-store');
+            }
+            echo json_encode(
+                array_merge(['status' => 'success', 'message' => 'Message queued.'], $response),
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+            @fastcgi_finish_request();
+            ts_chat_push_message($pdo, (int) $peerId, $meId, $relayId);
+            exit();
+        }
+
+        ts_chat_push_message($pdo, (int) $peerId, $meId, $relayId);
+        ts_chat_json('success', 'Message queued.', $response);
         break;
     }
 
@@ -901,6 +1203,58 @@ switch ($action) {
     // -----------------------------------------------------------------------
     // Chat safety notice acknowledgement
     // -----------------------------------------------------------------------
+    // -----------------------------------------------------------------------
+    // Push token registration (Firebase Cloud Messaging)
+    // -----------------------------------------------------------------------
+    case 'register_device': {
+        ts_chat_require_post('register_device');
+        $body     = ts_chat_read_body();
+        $fcmToken = isset($body['fcm_token']) && is_string($body['fcm_token'])
+            ? trim($body['fcm_token'])
+            : '';
+        $platform = isset($body['platform']) && is_string($body['platform'])
+            ? substr(preg_replace('/[^a-z]/', '', strtolower($body['platform'])) ?? 'android', 0, 16)
+            : 'android';
+
+        if ($fcmToken === '' || strlen($fcmToken) > 255) {
+            ts_chat_json('error', 'A valid push token is required.', [], 422);
+        }
+
+        try {
+            // One row per install: the same phone signing in as another student
+            // takes the token over instead of leaving a stale owner behind.
+            $stmt = $pdo->prepare(
+                'INSERT INTO chat_devices (user_id, token, platform)
+                 VALUES (:user, :token, :platform)
+                 ON DUPLICATE KEY UPDATE user_id = VALUES(user_id), platform = VALUES(platform)'
+            );
+            $stmt->execute([
+                'user'     => $meId,
+                'token'    => $fcmToken,
+                'platform' => $platform,
+            ]);
+            ts_chat_json('success', 'Push enabled.', []);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat device registration failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not enable push right now.', [], 500);
+        }
+        break;
+    }
+
+    case 'unregister_device': {
+        ts_chat_require_post('unregister_device');
+        try {
+            // Signing out must stop pushes to this phone.
+            $pdo->prepare('DELETE FROM chat_devices WHERE user_id = :user')
+                ->execute(['user' => $meId]);
+            ts_chat_json('success', 'Push disabled for this account.', []);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat device unregister failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not disable push right now.', [], 500);
+        }
+        break;
+    }
+
     case 'ack_safety': {
         ts_chat_require_post('ack_safety');
         try {

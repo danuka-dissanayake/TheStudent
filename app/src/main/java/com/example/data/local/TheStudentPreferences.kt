@@ -89,6 +89,16 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getString(KEY_SESSION_EXPIRES_AT, null)
         set(value) = prefs.edit().putString(KEY_SESSION_EXPIRES_AT, value).apply()
 
+    /**
+     * Last push (FCM) token this device received. Kept in plain preferences: it
+     * is only an opaque routing id for this install, not a secret.
+     */
+    var fcmToken: String?
+        get() = prefs.getString(KEY_FCM_TOKEN, null)
+        set(value) {
+            prefs.edit().putString(KEY_FCM_TOKEN, value).apply()
+        }
+
     var userEmail: String?
         get() = prefs.getString(KEY_USER_EMAIL, null)
         set(value) = prefs.edit().putString(KEY_USER_EMAIL, value).apply()
@@ -127,6 +137,7 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_IS_GUEST = "is_guest"
         private const val KEY_SESSION_TOKEN = "session_token"      // ciphertext only
+        private const val KEY_FCM_TOKEN = "fcm_token"
         private const val KEY_SESSION_EXPIRES_AT = "session_expires_at"
         private const val KEY_USER_ROLE = "user_role"
         private const val KEY_USER_EMAIL = "user_email"
