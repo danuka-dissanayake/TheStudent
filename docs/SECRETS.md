@@ -106,9 +106,22 @@ way, and keep the `.jks` outside the repo.
 
 ---
 
+> **DirectAdmin hosting without SSH?** Every server-side step in this section has a click-through
+> version in **`docs/DEPLOY_DIRECTADMIN_GUI.md`** (File Manager, phpMyAdmin, no terminal).
+
 ## 2. Backend — `backend/config.secrets.php`
 
-### 2.1 Create it on the server (not in the repo)
+### 2.1 Where it goes (first match wins, see `config.php`)
+
+| Priority | Path | Web-reachable? |
+|---|---|---|
+| 1 (recommended) | `/home/USER/domains/app.quizontal.site/config.secrets.php` — one level **above** `public_html` | **no** |
+| 2 | `/home/USER/domains/config.secrets.php` (two levels above) | no |
+| 3 | `public_html/config.secrets.php` | yes — only safe because `.htaccess` denies it |
+
+`config.php` logs a warning if it finds the file inside the web root.
+
+### 2.2 Create it on the server (not in the repo)
 
 ```bash
 cd /home/USER/domains/app.quizontal.site/public_html/backend
@@ -120,7 +133,7 @@ php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"      # → APP_KEY (64 hex cha
 `config.secrets.php` is git-ignored, and `backend/.htaccess` **denies web access** to it, to
 `*.sql`, to `README*` and to dotfiles, so it cannot be downloaded even if PHP is misconfigured.
 
-### 2.2 Fill in
+### 2.3 Fill in
 
 | Constant | Notes |
 |---|---|
@@ -138,7 +151,7 @@ php -r "echo bin2hex(random_bytes(32)), PHP_EOL;"      # → APP_KEY (64 hex cha
 `config.php` fails closed: if `DB_NAME`, `DB_USER` or a ≥32-character `APP_KEY` is missing, every
 API call returns `503` instead of running with an empty key.
 
-### 2.3 Alternative: real environment variables
+### 2.4 Alternative: real environment variables
 
 Every constant can also come from the environment, so you never need a file at all. The lookup
 order per setting is: **`getenv(NAME)` → constant `THESTUDENT_NAME` → built-in default**.
@@ -158,7 +171,7 @@ SetEnv ADMIN_EMAILS  you@example.com
 
 Pick **one** mechanism per server. If both exist, the environment wins.
 
-### 2.4 Verify
+### 2.5 Verify
 
 ```bash
 php -r "require 'config.php'; echo 'APP_KEY length: ', strlen(APP_KEY), PHP_EOL;"

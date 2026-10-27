@@ -53,9 +53,35 @@ if (!function_exists('ts_env')) {
     }
 }
 
-$__tsSecretsFile = __DIR__ . '/config.secrets.php';
-if (is_file($__tsSecretsFile)) {
+/*
+ * Secrets file discovery, in priority order:
+ *
+ *   1. one level ABOVE public_html  <- recommended: the web server never serves it
+ *      e.g. /home/USER/domains/app.quizontal.site/config.secrets.php
+ *   2. two levels above            e.g. /home/USER/domains/config.secrets.php
+ *   3. next to this file           <- legacy; only safe thanks to .htaccess
+ *
+ * DirectAdmin's File Manager can edit files in the domain folder, so option 1
+ * needs no SSH at all. See docs/DEPLOY_DIRECTADMIN_GUI.md.
+ */
+$__tsSecretsCandidates = [
+    dirname(__DIR__) . '/config.secrets.php',
+    dirname(__DIR__, 2) . '/config.secrets.php',
+    __DIR__ . '/config.secrets.php',
+];
+$__tsSecretsFile = null;
+foreach ($__tsSecretsCandidates as $__tsCandidate) {
+    if (is_file($__tsCandidate)) {
+        $__tsSecretsFile = $__tsCandidate;
+        break;
+    }
+}
+if ($__tsSecretsFile !== null) {
     require_once $__tsSecretsFile;
+    // Warn (server log only) when the secrets sit inside the web root.
+    if (strpos((string) realpath($__tsSecretsFile), (string) realpath(__DIR__)) === 0) {
+        error_log('[TheStudent] config.secrets.php is inside the web root - move it one level above public_html.');
+    }
 }
 
 // Legacy constant names (kept so older deploy scripts keep working).

@@ -216,7 +216,9 @@ Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_b
    (server; or `THESTUDENT_*` / plain env vars). Committed templates: `.env.example`,
    `backend/config.secrets.example.php`. Full instructions, rotation table and the
    "new feature needs a key" checklist: **`docs/SECRETS.md`**. A pre-commit leak scanner lives at
-   `scripts/check-secrets.sh`.
+   `scripts/check-secrets.sh`, and for **GUI-only DirectAdmin deploys** (no SSH) follow
+   `docs/DEPLOY_DIRECTADMIN_GUI.md` — preferred secrets location is one level above `public_html`
+   (`domains/app.quizontal.site/config.secrets.php`); `config.php` searches there first.
 8. **No real chat backend** — the CHAT tab is entirely local demo data despite looking production-ready.
 9. **Auth is mandatory** (guest deprecated) yet `MainActivity` still contains a fallback white-box + `openAuthScreen()` effect — a slightly awkward safety net.
 10. **Test coverage ≈ 0**, and nothing guards the 70-field UI state or the AI routing.

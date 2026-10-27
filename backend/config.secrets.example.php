@@ -3,9 +3,20 @@
  * TheStudent - Local secrets template
  * ==================================
  *
- * 1. Copy this file to `config.secrets.php` (same folder, NOT committed to git).
- * 2. Fill in real values and `chmod 600 config.secrets.php`.
+ * 1. Copy this file to `config.secrets.php` and NEVER commit it to git.
+ *
+ *    WHERE to put it (first match wins, see config.php):
+ *      A. one level ABOVE public_html  <-- RECOMMENDED, never web-reachable
+ *         /home/USER/domains/app.quizontal.site/config.secrets.php
+ *      B. two levels above             /home/USER/domains/config.secrets.php
+ *      C. next to this file            public_html/config.secrets.php
+ *                                      (only safe because .htaccess denies it)
+ *
+ * 2. Fill in real values and set permissions to 600.
  * 3. Rotate any credential that has ever been committed to the repository.
+ *
+ * No SSH needed: docs/DEPLOY_DIRECTADMIN_GUI.md walks through all of this in the
+ * DirectAdmin File Manager.
  *
  * ---------------------------------------------------------------------------
  * REQUIRED IMMEDIATE ACTION (credentials that leaked in git history):
