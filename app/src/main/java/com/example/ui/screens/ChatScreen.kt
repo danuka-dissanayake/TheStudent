@@ -766,9 +766,45 @@ private fun ChatConversationScreen(
         if (searchTerm.isNotEmpty()) jumpToMatch(0)
     }
 
-    // Follow the conversation as new messages arrive (unless searching).
-    LaunchedEffect(rows.size, searchActive) {
-        if (rows.isNotEmpty() && !searchActive) {
+    // The chat is only revealed once the list is already parked at the newest
+    // message, so the student never watches it fly down the screen.
+    var conversationSettled by remember(peer.id) { mutableStateOf(false) }
+
+    LaunchedEffect(rows.size, state.isLoadingMessages, peer.id) {
+        if (conversationSettled) return@LaunchedEffect
+
+        if (rows.isEmpty()) {
+            // Nothing stored yet: only settle once the database has answered,
+            // otherwise the empty state would flash before the history arrives.
+            if (!state.isLoadingMessages) {
+                withFrameNanos { }
+                conversationSettled = true
+            }
+            return@LaunchedEffect
+        }
+
+        // Jump (not animate) to the last message while the loader still covers
+        // the list, give the frame a chance to lay out at that position, then
+        // let the caller fade the loader away onto a conversation that is
+        // already at the bottom.
+        listState.scrollToItem(rows.lastIndex)
+        withFrameNanos { }
+        withFrameNanos { }
+        conversationSettled = true
+    }
+
+    // Safety net: never leave the student behind the spinner.
+    LaunchedEffect(peer.id) {
+        delay(4_000)
+        if (!conversationSettled) conversationSettled = true
+    }
+
+    // Follow the conversation as new messages arrive — but only when the reader
+    // is already near the bottom, so history browsing and search are not yanked.
+    LaunchedEffect(rows.size, searchActive, conversationSettled) {
+        if (rows.isEmpty() || searchActive || !conversationSettled) return@LaunchedEffect
+        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: rows.lastIndex
+        if (lastVisible >= rows.size - 3) {
             listState.animateScrollToItem(rows.lastIndex)
         }
     }
@@ -1009,12 +1045,10 @@ private fun ChatConversationScreen(
                 }
 
                 // ── messages ─────────────────────────────────────────────────
+                // The list is composed even while the loader is up: it gets parked
+                // at the newest message underneath, then the overlay fades away.
                 Box(modifier = Modifier.weight(1f)) {
                     when {
-                        state.isLoadingMessages && state.messages.isEmpty() -> {
-                            ChatLoadingState()
-                        }
-
                         state.messages.isEmpty() -> {
                             Box(
                                 modifier = Modifier
@@ -1114,6 +1148,24 @@ private fun ChatConversationScreen(
                                     item { TypingIndicator() }
                                 }
                             }
+                        }
+                    }
+
+                    // Overlay inside the list container: the conversation is
+                    // already parked at the bottom underneath when this fades out.
+                    AnimatedVisibility(
+                        visible = !conversationSettled,
+                        enter = fadeIn(),
+                        exit = fadeOut(animationSpec = tween(220))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                // Opaque, so the parked list is not visible popping
+                                // into place behind the spinner.
+                                .background(Color(0xFFF8FAFC))
+                        ) {
+                            ChatLoadingState()
                         }
                     }
                 }

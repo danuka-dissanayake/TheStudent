@@ -105,6 +105,9 @@ plus a local Room table that owns the actual history.
   metadata; decrypted bytes live in `filesDir/chat_attachments` through
   `ChatAttachmentStore` (120 MB cap, wiped on sign-out) and open through a
   `FileProvider`.
+* Opening a conversation holds the orbit loader until the list has been jumped to
+  the last message underneath it, so nothing visibly scrolls on entry; later
+  auto-scroll only happens while the reader is near the bottom.
 * Bubbles render **Markdown** through `ui/screens/ChatMarkdown.kt` (bold, italic,
   strike, code, headings, lists, quotes, links) as a single `AnnotatedString`.
 * **Replies** (left→right swipe) quote a message through the encrypted envelope (`r`), and
