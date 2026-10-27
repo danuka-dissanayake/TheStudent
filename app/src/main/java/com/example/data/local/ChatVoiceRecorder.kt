@@ -4,6 +4,8 @@ import android.content.Context
 import android.media.MediaRecorder
 import android.os.Build
 import android.util.Log
+import com.example.data.model.ChatAttachment
+import com.example.data.model.ChatAttachmentDraft
 import java.io.File
 
 /**
@@ -84,7 +86,7 @@ class ChatVoiceRecorder(context: Context) {
             name = "Voice note",
             mime = "audio/mp4",
             size = file.length(),
-            kind = com.example.data.model.ChatAttachment.AUDIO,
+            kind = ChatAttachment.AUDIO,
             durationMs = duration
         )
     }

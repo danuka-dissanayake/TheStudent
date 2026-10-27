@@ -105,10 +105,9 @@ object ChatMediaPrep {
      */
     private fun applyExifRotation(source: File, bitmap: Bitmap): Bitmap {
         val degrees = try {
-            @Suppress("DEPRECATION")
+            val exif = ExifInterface(source.absolutePath)
             when (
-                ExifInterface(source.absolutePath)
-                    .getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
+                exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL)
             ) {
                 ExifInterface.ORIENTATION_ROTATE_90 -> 90f
                 ExifInterface.ORIENTATION_ROTATE_180 -> 180f
