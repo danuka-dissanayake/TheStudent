@@ -15,8 +15,6 @@ import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
-import androidx.core.content.pm.ShortcutInfoCompat
-import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.example.MainActivity
 import com.example.R
@@ -80,8 +78,6 @@ object ChatNotifications {
     )
 
     private fun idForPeer(peerId: Int): Int = PER_PEER_ID_BASE + peerId
-
-    private fun shortcutIdForPeer(peerId: Int): String = "chat_peer_$peerId"
 
     /** Create the channel once; calling it repeatedly is safe. */
     fun ensureChannel(context: Context) {
@@ -157,8 +153,9 @@ object ChatNotifications {
             return
         }
 
-        // Used for the message-row avatar and the conversation shortcut — not as
-        // the notification's large icon, which would duplicate it.
+        // Used only for the message-row avatar (and the Person icon on those
+        // rows) — never as the notification's large icon, which would duplicate
+        // it in the header.
         val largeIcon = avatar ?: ChatNotificationAvatars.initials(peerName, peerId)
 
         // androidx Person, not android.app.Person: the framework class only
@@ -177,12 +174,15 @@ object ChatNotifications {
             )
             .build()
 
-        // No conversation title: this is a 1:1 thread, so the student's name
-        // belongs on the message rows, not printed again above them. That (plus
-        // the per-message sender label) is what used to show the name twice.
+        // A 1:1 chat is NOT a group conversation. Saying it was (true) makes
+        // Android print the sender's name above every message *and* keep the
+        // conversation title, which is exactly the doubled name.
+        //
+        // The title is set here, once: that is the name Android shows in the
+        // collapsed row (app icon · name · time).
         val style = NotificationCompat.MessagingStyle(me)
-            .setConversationTitle(null)
-            .setGroupConversation(true)
+            .setConversationTitle(peerName)
+            .setGroupConversation(false)
 
         messages.takeLast(MAX_MESSAGES_IN_NOTIFICATION).forEach { message ->
             style.addMessage(
@@ -220,13 +220,11 @@ object ChatNotifications {
             .setContentIntent(conversationIntent(context, peerId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
 
-        // Lets launchers treat the thread as a conversation (and offer it as a
-        // bubble where supported). Purely cosmetic, so failures are ignored.
-        runCatching {
-            builder.setShortcutId(shortcutIdForPeer(peerId))
-            publishConversationShortcut(context, peerId, peerName, largeIcon, them)
-        }
-
+        // Deliberately NO setShortcutId / dynamic shortcut here. From Android 11
+        // a notification carrying a shortcut id is rendered as a "conversation",
+        // and the system draws the shortcut's icon — the student's photo — in the
+        // header beside the app icon, and their name beside the app name. That
+        // was the second copy of the photo and of the name.
         post(context, idForPeer(peerId), builder.build())
     }
 
@@ -285,33 +283,6 @@ object ChatNotifications {
     /** Remove every chat notification (sign-out, or "clear all"). */
     fun clearAll(context: Context) {
         runCatching { NotificationManagerCompat.from(context).cancelAll() }
-    }
-
-    // ── conversation shortcut ─────────────────────────────────────────────────
-
-    private fun publishConversationShortcut(
-        context: Context,
-        peerId: Int,
-        peerName: String,
-        avatar: android.graphics.Bitmap?,
-        person: androidx.core.app.Person
-    ) {
-        val icon = avatar?.let { runCatching { IconCompat.createWithBitmap(it) }.getOrNull() }
-            ?: IconCompat.createWithResource(context, R.drawable.ic_chat_notification)
-        val shortcut = ShortcutInfoCompat.Builder(context, shortcutIdForPeer(peerId))
-            .setShortLabel(peerName)
-            .setLongLabel(peerName)
-            .setIcon(icon)
-            .setPerson(person)
-            .setLongLived(true)
-            .setIntent(
-                Intent(context, MainActivity::class.java).apply {
-                    action = "com.thestudent.sl.OPEN_CHAT_$peerId"
-                    putExtra(EXTRA_PEER_ID, peerId)
-                }
-            )
-            .build()
-        ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
     }
 
     // ── intents ───────────────────────────────────────────────────────────────
