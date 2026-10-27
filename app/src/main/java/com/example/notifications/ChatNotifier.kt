@@ -80,9 +80,9 @@ object ChatNotifier {
 
             // Newest conversation first in the summary, oldest message first
             // inside each conversation.
-            byPeer.entries
+            val conversations = byPeer.entries
                 .sortedByDescending { (_, rows) -> rows.lastOrNull()?.sentAtEpoch ?: 0L }
-                .forEach { (peerId, rows) ->
+                .map { (peerId, rows) ->
                     totalUnread += rows.size
                     val peer = peers(peerId)
                     val peerName = peer?.name ?: "Student"
@@ -94,28 +94,43 @@ object ChatNotifier {
                         )
                     }
                     summaryLines += "$peerName: ${messages.last().text}"
-
-                    if (activePeerId == peerId) {
-                        // On screen: no notification for this conversation.
-                        ChatNotifications.clearForPeer(context, peerId)
-                        signatures.remove(peerId)
-                    } else {
-                        val last = messages.last()
-                        val signature = "${rows.size}|${last.text}|${last.sentAtEpoch}"
-                        if (signatures[peerId] != signature) {
-                            ChatNotifications.showForPeer(
-                                context = context,
-                                peerId = peerId,
-                                peerName = peerName,
-                                messages = messages,
-                                unreadCount = rows.size,
-                                avatar = ChatNotificationAvatars.photo(peer?.avatarUrl)
-                            )
-                            signatures[peerId] = signature
-                        }
-                        showing += peerId
-                    }
+                    Conversation(peerId, peerName, messages, rows.size, peer?.avatarUrl)
                 }
+
+            // Grouping is decided up front: a lone notification must not be a
+            // group child, or the shade will not let it expand.
+            val visible = conversations.filter { it.peerId != activePeerId }
+            val grouped = visible.size > 1
+
+            conversations.forEach { conversation ->
+                val peerId = conversation.peerId
+                if (activePeerId == peerId) {
+                    // On screen: no notification for this conversation.
+                    ChatNotifications.clearForPeer(context, peerId)
+                    signatures.remove(peerId)
+                } else {
+                    val last = conversation.messages.last()
+                    // The grouping flag is part of the signature: going from two
+                    // unread conversations to one must repost the survivor
+                    // *without* group chrome, which is what makes it expandable
+                    // again.
+                    val signature =
+                        "${conversation.unreadCount}|${last.text}|${last.sentAtEpoch}|$grouped"
+                    if (signatures[peerId] != signature) {
+                        ChatNotifications.showForPeer(
+                            context = context,
+                            peerId = peerId,
+                            peerName = conversation.peerName,
+                            messages = conversation.messages,
+                            unreadCount = conversation.unreadCount,
+                            avatar = ChatNotificationAvatars.photo(conversation.avatarUrl),
+                            grouped = grouped
+                        )
+                        signatures[peerId] = signature
+                    }
+                    showing += peerId
+                }
+            }
 
             // Conversations that are no longer unread lose their notification.
             (notifiedPeers - showing).forEach { peerId ->
@@ -148,6 +163,15 @@ object ChatNotifier {
             Log.w(TAG, "Could not reconcile chat notifications", error)
         }
     }
+
+    /** One conversation, assembled once so grouping can be decided up front. */
+    private data class Conversation(
+        val peerId: Int,
+        val peerName: String,
+        val messages: List<ChatNotifications.Message>,
+        val unreadCount: Int,
+        val avatarUrl: String?
+    )
 
     /** One line of a message as it should appear in a notification. */
     private fun ChatMessageEntity.notificationText(): String {

@@ -9,7 +9,7 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.media.AudioAttributes
-import android.media.RingtoneManager
+import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -46,8 +46,17 @@ object ChatNotifications {
 
     private const val TAG = "ChatNotifications"
 
-    /** Channel shown in system settings. Users can mute just chat here. */
-    const val CHANNEL_MESSAGES = "chat_messages"
+    /**
+     * Channel shown in system settings. Users can mute just chat here.
+     *
+     * The `_v2` suffix is deliberate: Android freezes a channel's sound and
+     * vibration pattern once it exists, so changing the alert requires a new id.
+     * The previous `chat_messages` channel is deleted in [ensureChannel].
+     */
+    const val CHANNEL_MESSAGES = "chat_messages_v2"
+
+    /** Superseded channel id, removed so it disappears from system settings. */
+    private const val CHANNEL_LEGACY = "chat_messages"
 
     /** Notification group: one summary, many per-conversation children. */
     private const val GROUP_CHAT = "com.thestudent.sl.CHAT"
@@ -83,9 +92,17 @@ object ChatNotifications {
     fun ensureChannel(context: Context) {
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return
         val manager = context.getSystemService(NotificationManager::class.java) ?: return
+
+        // Drop the old channel so the stale sound/pattern cannot linger in
+        // system settings next to the new one.
+        runCatching { manager.deleteNotificationChannel(CHANNEL_LEGACY) }
+
         if (manager.getNotificationChannel(CHANNEL_MESSAGES) != null) return
 
-        val sound = RingtoneManager.getDefaultUri(RingtoneManager.TYPE_NOTIFICATION)
+        // Two short, bright tones ("beep … beep") shipped with the app, rather
+        // than whatever the phone's default notification sound happens to be.
+        val sound = Uri.parse("android.resource://" + context.packageName + "/" + R.raw.chat_beep)
+
         val channel = NotificationChannel(
             CHANNEL_MESSAGES,
             "Messages",
@@ -96,7 +113,8 @@ object ChatNotifications {
             enableLights(true)
             lightColor = ACCENT
             enableVibration(true)
-            vibrationPattern = longArrayOf(0, 120, 80, 120)
+            // Two pulses, timed with the two beeps: buzz, gap, buzz.
+            vibrationPattern = longArrayOf(0, VIBRATION_PULSE_MS, VIBRATION_GAP_MS, VIBRATION_PULSE_MS)
             setShowBadge(true)
             setSound(
                 sound,
@@ -108,6 +126,12 @@ object ChatNotifications {
         }
         runCatching { manager.createNotificationChannel(channel) }
     }
+
+    /** Length of each buzz in the "beep beep" alert. */
+    private const val VIBRATION_PULSE_MS = 70L
+
+    /** Silence between the two buzzes, matching the gap between the two tones. */
+    private const val VIBRATION_GAP_MS = 80L
 
     /**
      * Android 13+ needs an explicit runtime grant; below that the user can still
@@ -138,7 +162,13 @@ object ChatNotifications {
         peerName: String,
         messages: List<Message>,
         unreadCount: Int,
-        avatar: android.graphics.Bitmap? = null
+        avatar: android.graphics.Bitmap? = null,
+        /**
+         * True only when a summary is also posted (2+ unread conversations).
+         * A group child with no summary cannot be expanded — the shade keeps it
+         * inside group chrome — so a single chat is posted with no group at all.
+         */
+        grouped: Boolean = false
     ) {
         if (messages.isEmpty()) {
             clearForPeer(context, peerId)
@@ -213,12 +243,19 @@ object ChatNotifications {
             .setNumber(unreadCount)
             .setAutoCancel(true)
             .setOnlyAlertOnce(false)
-            .setGroup(GROUP_CHAT)
-            // The conversation itself is the thing that rings; the summary is
-            // silent so a message never buzzes the phone twice.
-            .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
             .setContentIntent(conversationIntent(context, peerId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+
+        if (grouped) {
+            // Only when there is a summary above it: then expanding the group
+            // shows each conversation, and expanding a conversation shows its
+            // messages. Alone, group chrome would swallow the expand affordance.
+            builder
+                .setGroup(GROUP_CHAT)
+                // The conversation itself rings; the summary stays silent so a
+                // message never buzzes the phone twice.
+                .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
+        }
 
         // Deliberately NO setShortcutId / dynamic shortcut here. From Android 11
         // a notification carrying a shortcut id is rendered as a "conversation",
