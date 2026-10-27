@@ -95,13 +95,16 @@ plus a local Room table that owns the actual history.
 * End-to-end encryption: `data/local/ChatCrypto.kt` (EC P-256 ECDH + AES-256-GCM,
   Keystore-sealed private key). The server rejects anything that is not
   `e2ee:v1:…`.
-* **Attachments** (photos + documents, ≤5 MB): the file is encrypted with the
+* **Attachments** (photos + documents, ≤25 MB): the file is encrypted with the
   same ECDH conversation key, uploaded as an opaque blob to
   `upload_attachment`, and deleted from the server when the recipient downloads
   it. Bubbles carry only an encrypted JSON envelope with the caption and file
   metadata; decrypted bytes live in `filesDir/chat_attachments` through
   `ChatAttachmentStore` (120 MB cap, wiped on sign-out) and open through a
   `FileProvider`.
+* **Delete for everyone**: long-press → the row is removed locally (and its cached
+  file), then `delete_message` queues a `delete` envelope the peer applies to its
+  own copy on the next inbox poll.
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
 * Only full names and avatars are ever exposed about another student.

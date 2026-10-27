@@ -137,4 +137,14 @@ interface TheStudentDao {
 
     @Query("UPDATE chat_messages SET attachmentLocal = :available WHERE localId = :localId")
     suspend fun setAttachmentAvailable(localId: String, available: Boolean)
+
+    // ── Deletions ───────────────────────────────────────────────────────────
+
+    /** Remove one message (used by "delete for everyone" on both sides). */
+    @Query("DELETE FROM chat_messages WHERE localId = :localId")
+    suspend fun deleteByLocalId(localId: String)
+
+    /** Remove a message the peer just deleted: delivered rows are `srv-<id>`. */
+    @Query("DELETE FROM chat_messages WHERE localId = :localId")
+    suspend fun deleteReceivedMessage(localId: String)
 }

@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -18,6 +20,8 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -28,8 +32,10 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material3.BottomSheetDefaults
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -38,7 +44,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -74,6 +82,12 @@ private val ChatFaint = Color(0xFF94A3B8)
 private val ChatHairline = Color(0xFFE8EDF3)
 private val ChatOnline = Color(0xFF22C55E)
 private val ChatError = Color(0xFFDC2626)
+
+/** Outgoing bubble: pure black, the text and ticks carry the contrast. */
+private val ChatBubbleOutgoing = Color(0xFF000000)
+
+/** Soft elevation-less card used by the attachment sheet. */
+private val ChatSheetCard = Color(0xFFF6F8FA)
 
 /** Stable avatar tint per student id, so the initials avatar never flickers. */
 private val ChatAvatarPalette = listOf(
@@ -136,6 +150,7 @@ fun ChatScreen(
             onDismissError = { viewModel.dismissChatError() },
             onPickAttachment = { uri -> viewModel.stageChatAttachment(uri) },
             onClearAttachment = { viewModel.clearStagedChatAttachment() },
+            onDeleteMessage = { message -> viewModel.deleteChatMessage(message) },
             modifier = modifier
         )
         return
@@ -611,14 +626,19 @@ private fun ChatConversationScreen(
     onDismissError: () -> Unit,
     onPickAttachment: (Uri) -> Unit,
     onClearAttachment: () -> Unit,
+    onDeleteMessage: (ChatMessage) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
     var input by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
-    var showAttachMenu by remember { mutableStateOf(false) }
+    var showAttachSheet by remember { mutableStateOf(false) }
+    var selectedMessage by remember { mutableStateOf<ChatMessage?>(null) }
+    var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
     val listState = rememberLazyListState()
+    val context = LocalContext.current
+    val onLongPressMessage: (ChatMessage) -> Unit = { selectedMessage = it }
 
     // Gallery and document pickers. Neither needs a runtime permission: the
     // system picker hands back a one-off readable Uri.
@@ -821,7 +841,10 @@ private fun ChatConversationScreen(
                                 ) { row ->
                                     when (row) {
                                         is ChatRow.Day -> DayDivider(row.label)
-                                        is ChatRow.Msg -> ChatBubble(message = row.message)
+                                        is ChatRow.Msg -> ChatBubble(
+                                            message = row.message,
+                                            onLongPress = onLongPressMessage
+                                        )
                                     }
                                 }
 
@@ -914,7 +937,7 @@ private fun ChatConversationScreen(
                 ) {
                     Box {
                         Surface(
-                            onClick = { showAttachMenu = true },
+                            onClick = { showAttachSheet = true },
                             enabled = peer.canReceiveEncrypted && !state.isSending,
                             shape = CircleShape,
                             color = Color.White,
@@ -932,33 +955,8 @@ private fun ChatConversationScreen(
                                 )
                             }
                         }
-                        DropdownMenu(
-                            expanded = showAttachMenu,
-                            onDismissRequest = { showAttachMenu = false }
-                        ) {
-                            DropdownMenuItem(
-                                text = { Text("Photo", fontFamily = MaisonNeueFontFamily, fontSize = 14.sp) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Image, contentDescription = null, tint = EmeraldDark)
-                                },
-                                onClick = {
-                                    showAttachMenu = false
-                                    imagePicker.launch("image/*")
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Document", fontFamily = MaisonNeueFontFamily, fontSize = 14.sp) },
-                                leadingIcon = {
-                                    Icon(Icons.Default.Description, contentDescription = null, tint = EmeraldDark)
-                                },
-                                onClick = {
-                                    showAttachMenu = false
-                                    documentPicker.launch(CHAT_DOCUMENT_TYPES)
-                                }
-                            )
-                        }
                     }
-                    Spacer(Modifier.width(8.dp))
+                    Spacer(Modifier.width(7.dp))
                     OutlinedTextField(
                         value = input,
                         onValueChange = {
@@ -1074,11 +1072,331 @@ private fun ChatConversationScreen(
             }
         )
     }
+
+    // ── attachment picker ───────────────────────────────────────────────────
+    if (showAttachSheet) {
+        AttachmentPickerSheet(
+            onDismiss = { showAttachSheet = false },
+            onPhoto = {
+                showAttachSheet = false
+                imagePicker.launch("image/*")
+            },
+            onDocument = {
+                showAttachSheet = false
+                documentPicker.launch(CHAT_DOCUMENT_TYPES)
+            }
+        )
+    }
+
+    // ── long-press actions on a message ─────────────────────────────────────
+    selectedMessage?.let { message ->
+        MessageActionsSheet(
+            message = message,
+            onDismiss = { selectedMessage = null },
+            onCopy = {
+                copyToClipboard(context, message.body)
+                selectedMessage = null
+            },
+            onDelete = {
+                pendingDelete = message
+                selectedMessage = null
+            }
+        )
+    }
+
+    pendingDelete?.let { message ->
+        AlertDialog(
+            onDismissRequest = { pendingDelete = null },
+            title = { Text("Delete message?", fontWeight = FontWeight.Bold) },
+            text = {
+                Text(
+                    if (message.isMine && message.serverId > 0L) {
+                        "It will be removed from ${peer.name}'s chat as well. This cannot be undone."
+                    } else {
+                        "It will be removed from this phone only."
+                    }
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        onDeleteMessage(message)
+                        pendingDelete = null
+                    }
+                ) {
+                    Text("Delete", color = ChatError, fontWeight = FontWeight.Bold)
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
+            }
+        )
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Pieces
 // ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Bottom sheet with the two ways to send a file.
+ *
+ * Deliberately not a dropdown menu: each option gets a tinted icon tile, a
+ * one-line explanation and the upload limit, so the choice is obvious before the
+ * system picker takes over the screen.
+ */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun AttachmentPickerSheet(
+    onDismiss: () -> Unit,
+    onPhoto: () -> Unit,
+    onDocument: () -> Unit
+) {
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        tonalElevation = 0.dp,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = ChatHairline) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, bottom = 26.dp)
+                .navigationBarsPadding()
+        ) {
+            Text(
+                text = "Send a file",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 19.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = ChatInk,
+                letterSpacing = (-0.3).sp
+            )
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Encrypted on your phone before it leaves. Up to 25 MB.",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = ChatMuted
+            )
+            Spacer(Modifier.height(16.dp))
+
+            AttachmentOptionRow(
+                title = "Photo",
+                subtitle = "JPG, PNG, GIF or WebP from your gallery",
+                iconTint = EmeraldDark,
+                iconBackground = Color(0xFFE9F9EF),
+                icon = Icons.Default.Image,
+                onClick = onPhoto
+            )
+            Spacer(Modifier.height(10.dp))
+            AttachmentOptionRow(
+                title = "Document",
+                subtitle = "PDF, Word, PowerPoint, Excel, text or ZIP",
+                iconTint = Color(0xFF2563EB),
+                iconBackground = Color(0xFFEAF1FE),
+                icon = Icons.Default.Description,
+                onClick = onDocument
+            )
+        }
+    }
+}
+
+@Composable
+private fun AttachmentOptionRow(
+    title: String,
+    subtitle: String,
+    iconTint: Color,
+    iconBackground: Color,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = ChatSheetCard,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 13.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(13.dp))
+                    .background(iconBackground),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = iconTint,
+                    modifier = Modifier.size(21.dp)
+                )
+            }
+            Spacer(Modifier.width(11.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ChatInk
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    lineHeight = 15.sp,
+                    color = ChatMuted
+                )
+            }
+            Spacer(Modifier.width(6.dp))
+            Icon(
+                Icons.Default.ChevronRight,
+                contentDescription = null,
+                tint = ChatFaint,
+                modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/** Actions available by long-pressing a bubble. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun MessageActionsSheet(
+    message: ChatMessage,
+    onDismiss: () -> Unit,
+    onCopy: () -> Unit,
+    onDelete: () -> Unit
+) {
+    val hasText = message.body.isNotBlank()
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        containerColor = Color.White,
+        shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+        tonalElevation = 0.dp,
+        dragHandle = { BottomSheetDefaults.DragHandle(color = ChatHairline) }
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 20.dp, end = 20.dp, bottom = 26.dp)
+                .navigationBarsPadding()
+        ) {
+            // A compact preview so it is obvious which message is about to change.
+            Text(
+                text = when {
+                    hasText -> message.body.take(90)
+                    message.attachment?.isImage == true -> "Photo"
+                    message.attachment != null -> message.attachment.name
+                    else -> "Message"
+                },
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 13.sp,
+                lineHeight = 19.sp,
+                color = ChatMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.height(14.dp))
+
+            if (hasText) {
+                MessageActionRow(
+                    label = "Copy text",
+                    icon = Icons.Default.ContentCopy,
+                    tint = ChatInk,
+                    onClick = onCopy
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+            MessageActionRow(
+                label = if (message.isMine && message.serverId > 0L) {
+                    "Delete for everyone"
+                } else {
+                    "Remove from this chat"
+                },
+                icon = Icons.Default.DeleteOutline,
+                tint = ChatError,
+                onClick = onDelete
+            )
+        }
+    }
+}
+
+@Composable
+private fun MessageActionRow(
+    label: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(16.dp),
+        color = ChatSheetCard,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 13.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(19.dp))
+            Spacer(Modifier.width(12.dp))
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 14.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = tint
+            )
+        }
+    }
+}
+
+/** Copy a message body to the system clipboard. */
+private fun copyToClipboard(context: Context, text: String) {
+    if (text.isBlank()) return
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager ?: return
+    clipboard.setPrimaryClip(ClipData.newPlainText("Chat message", text))
+    Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+}
+
+/**
+ * True when a message is nothing but emoji (1–6 of them), so the bubble can show
+ * them large instead of at body-text size.
+ */
+private fun isEmojiOnlyMessage(text: String): Boolean {
+    val trimmed = text.trim()
+    if (trimmed.isEmpty() || trimmed.length > 32) return false
+    var emojiCount = 0
+    var index = 0
+    while (index < trimmed.length) {
+        val codePoint = trimmed.codePointAt(index)
+        index += Character.charCount(codePoint)
+        when {
+            // Variation selector, ZWJ (family emoji) and the keycap mark.
+            codePoint == 0xFE0F || codePoint == 0x200D || codePoint == 0x20E3 -> Unit
+            // Regional indicators (country flags).
+            codePoint in 0x1F1E6..0x1F1FF -> emojiCount++
+            // Main pictographic blocks.
+            codePoint in 0x1F300..0x1FAFF -> emojiCount++
+            codePoint in 0x2600..0x27BF -> emojiCount++
+            codePoint in 0x2B00..0x2BFF -> emojiCount++
+            codePoint in 0x2190..0x21FF -> emojiCount++
+            codePoint == 0x0020 || codePoint == 0x000A -> Unit
+            else -> return false
+        }
+    }
+    return emojiCount in 1..6
+}
 
 /** File types offered by the document picker. */
 private val CHAT_DOCUMENT_TYPES = arrayOf(
@@ -1183,13 +1501,13 @@ private fun AttachmentDraftCard(
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(8.dp),
+            modifier = Modifier.padding(7.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             Box(
                 modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(11.dp))
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(10.dp))
                     .background(Color(0xFFF1F5F9)),
                 contentAlignment = Alignment.Center
             ) {
@@ -1264,8 +1582,8 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
     if (attachment.isImage) {
         Box(
             modifier = Modifier
-                .size(width = 216.dp, height = 162.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .size(width = 202.dp, height = 150.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(if (message.isMine) Color.White.copy(alpha = 0.18f) else Color(0xFFEEF2F6))
                 .then(
                     if (file != null) {
@@ -1307,8 +1625,8 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .widthIn(max = 232.dp)
-                .clip(RoundedCornerShape(12.dp))
+                .widthIn(max = 220.dp)
+                .clip(RoundedCornerShape(10.dp))
                 .background(if (message.isMine) Color.White.copy(alpha = 0.16f) else Color(0xFFF1F5F9))
                 .then(
                     if (file != null) {
@@ -1319,7 +1637,7 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
                         Modifier
                     }
                 )
-                .padding(horizontal = 10.dp, vertical = 9.dp)
+                .padding(horizontal = 8.dp, vertical = 7.dp)
         ) {
             Box(
                 modifier = Modifier
@@ -1452,9 +1770,14 @@ private fun ChatAvatar(
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ChatBubble(message: ChatMessage) {
+private fun ChatBubble(
+    message: ChatMessage,
+    onLongPress: (ChatMessage) -> Unit = {}
+) {
     val isMine = message.isMine
+    val haptics = LocalHapticFeedback.current
     Box(
         modifier = Modifier.fillMaxWidth(),
         contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
@@ -1466,25 +1789,45 @@ private fun ChatBubble(message: ChatMessage) {
                 bottomStart = if (isMine) 18.dp else 5.dp,
                 bottomEnd = if (isMine) 5.dp else 18.dp
             ),
-            color = if (isMine) EmeraldPrimary else Color.White,
+            color = if (isMine) ChatBubbleOutgoing else Color.White,
             border = if (isMine) null else BorderStroke(1.dp, ChatHairline),
-            modifier = Modifier.widthIn(max = 300.dp)
+            modifier = Modifier
+                .widthIn(max = 300.dp)
+                .combinedClickable(
+                    onClick = {},
+                    onLongClick = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        onLongPress(message)
+                    }
+                )
         ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+            Column(
+                modifier = Modifier.padding(
+                    horizontal = if (message.attachment != null) 6.dp else 10.dp,
+                    vertical = if (message.attachment != null) 6.dp else 7.dp
+                )
+            ) {
                 message.attachment?.let { attachment ->
                     ChatAttachmentContent(message = message, attachment = attachment)
-                    if (message.body.isNotBlank()) Spacer(Modifier.height(8.dp))
+                    if (message.body.isNotBlank()) Spacer(Modifier.height(6.dp))
                 }
                 if (message.body.isNotBlank()) {
+                    // Emoji-only messages are shown big, like every other chat app.
+                    val emojiOnly = message.attachment == null && isEmojiOnlyMessage(message.body)
                     Text(
                         text = message.body,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.sp,
-                        lineHeight = 20.sp,
-                        color = if (isMine) Color.White else ChatInk
+                        fontSize = if (emojiOnly) 34.sp else 14.sp,
+                        lineHeight = if (emojiOnly) 40.sp else 20.sp,
+                        color = if (isMine) Color.White else ChatInk,
+                        modifier = if (message.attachment != null) {
+                            Modifier.padding(start = 4.dp, end = 4.dp)
+                        } else {
+                            Modifier
+                        }
                     )
                 }
-                Spacer(Modifier.height(4.dp))
+                Spacer(Modifier.height(3.dp))
                 Row(
                     modifier = Modifier.align(Alignment.End),
                     verticalAlignment = Alignment.CenterVertically

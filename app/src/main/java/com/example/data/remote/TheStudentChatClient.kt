@@ -49,11 +49,19 @@ sealed class ChatResult<out T> {
     }
 }
 
+/** A message the sender removed for both sides. */
+data class ChatDeletion(
+    val peerId: Int,
+    /** Relay id of the message I received from them, stored locally as `srv-<id>`. */
+    val serverId: Long
+)
+
 /** Everything the relay handed over in one inbox fetch (already decrypted). */
 data class ChatInbox(
     val messages: List<ChatMessage> = emptyList(),
     /** peerId -> highest server id the peer has read of mine. */
     val receipts: Map<Int, Long> = emptyMap(),
+    val deletions: List<ChatDeletion> = emptyList(),
     val serverEpoch: Long = 0L
 )
 
@@ -229,9 +237,21 @@ object TheStudentChatClient {
                 }
             }
 
+            val deletions = ArrayList<ChatDeletion>()
+            val delArr = json.optJSONArray("deletions") ?: JSONArray()
+            for (i in 0 until delArr.length()) {
+                val obj = delArr.optJSONObject(i) ?: continue
+                val peerId = obj.optInt("peer_id", 0)
+                val serverId = obj.optLong("server_id", 0L)
+                if (peerId > 0 && serverId > 0) {
+                    deletions += ChatDeletion(peerId = peerId, serverId = serverId)
+                }
+            }
+
             ChatInbox(
                 messages = messages,
                 receipts = receipts,
+                deletions = deletions,
                 serverEpoch = json.optLong("server_epoch", 0L)
             )
         }
@@ -281,6 +301,24 @@ object TheStudentChatClient {
     // -----------------------------------------------------------------------
     // Plumbing
     // -----------------------------------------------------------------------
+
+    /**
+     * Delete one of my messages for both sides. The relay can only hold the
+     * instruction, so the peer's app removes the copy it already has.
+     */
+    suspend fun deleteMessage(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int,
+        serverId: Long
+    ): ChatResult<Boolean> = withContext(Dispatchers.IO) {
+        post(
+            backendBaseUrl,
+            token,
+            "delete_message",
+            JSONObject().put("peer_id", peerId).put("server_id", serverId)
+        ) { true }
+    }
 
     // -----------------------------------------------------------------------
     // Attachments

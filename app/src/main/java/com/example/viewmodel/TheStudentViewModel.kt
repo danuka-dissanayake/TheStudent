@@ -734,6 +734,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             chatDao.markMyMessagesRead(peerId, upTo)
         }
 
+        // Messages the sender deleted for both sides.
+        inbox.deletions.forEach { deletion ->
+            chatDao.deleteReceivedMessage("srv-${deletion.serverId}")
+        }
+
         if (newForActivePeer) {
             val upTo = chatDao.newestServerIdFromPeer(activePeerId ?: 0) ?: 0L
             if (upTo > 0) {
@@ -973,6 +978,32 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Delete one message.
+     *
+     * On my own message this is "delete for everyone": the row disappears here
+     * immediately (and its attachment file with it), then the relay tells the
+     * peer to drop their copy. On a message I received it only removes my copy —
+     * the sender's history is theirs.
+     */
+    fun deleteChatMessage(message: ChatMessage) {
+        val peer = _chatState.value.activePeer ?: return
+        viewModelScope.launch {
+            chatDao.deleteByLocalId(message.localId)
+            message.attachment?.let { ChatAttachmentStore.delete(appContext, it.id) }
+            if (message.isMine && message.serverId > 0) {
+                chatSession()?.let { (baseUrl, token) ->
+                    TheStudentChatClient.deleteMessage(
+                        backendBaseUrl = baseUrl,
+                        token = token,
+                        peerId = peer.id,
+                        serverId = message.serverId
+                    )
+                }
+            }
+        }
+    }
+
     /** Delete the open conversation from this device only. */
     fun clearActiveChat() {
         val peer = _chatState.value.activePeer ?: return
@@ -1053,30 +1084,38 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 }
         }
 
-        val bytes = resolver.openInputStream(uri)?.use { input ->
-            val out = java.io.ByteArrayOutputStream()
-            val buffer = ByteArray(64 * 1024)
-            var total = 0L
-            while (true) {
-                val read = input.read(buffer)
-                if (read <= 0) break
-                total += read
-                if (total > CHAT_MAX_ATTACHMENT_BYTES) return@use null
-                out.write(buffer, 0, read)
+        // Streamed to disk, never buffered whole: a 25 MB document must not have
+        // to fit in the heap twice before it can be sent.
+        val target = File(appContext.cacheDir, "chat_pick_" + UUID.randomUUID().toString())
+        val copied = resolver.openInputStream(uri)?.use { input ->
+            target.outputStream().use { output ->
+                val buffer = ByteArray(64 * 1024)
+                var total = 0L
+                while (true) {
+                    val read = input.read(buffer)
+                    if (read <= 0) break
+                    total += read
+                    if (total > CHAT_MAX_ATTACHMENT_BYTES) {
+                        output.close()
+                        target.delete()
+                        return null
+                    }
+                    output.write(buffer, 0, read)
+                }
+                total
             }
-            out.toByteArray()
         } ?: return null
 
-        if (bytes.isEmpty()) return null
-
-        val target = File(appContext.cacheDir, "chat_pick_" + UUID.randomUUID().toString())
-        target.writeBytes(bytes)
+        if (copied <= 0L) {
+            target.delete()
+            return null
+        }
 
         return ChatAttachmentDraft(
             path = target.absolutePath,
             name = displayName.take(120),
             mime = mime,
-            size = bytes.size.toLong(),
+            size = copied,
             // Only real image types are rendered inline; everything else (PDF,
             // DOCX, ZIP, …) becomes a document card.
             kind = if (mime.startsWith("image/")) ChatAttachment.IMAGE else ChatAttachment.FILE
@@ -1138,7 +1177,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         const val CHAT_INBOX_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
         /** Files larger than this are refused before they are read into memory. */
-        const val CHAT_MAX_ATTACHMENT_BYTES = 5L * 1024L * 1024L
+        const val CHAT_MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
         /** How long to wait before retrying a blob the relay no longer has. */
         const val CHAT_ATTACHMENT_RETRY_MS = 60_000L
     }

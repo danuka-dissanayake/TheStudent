@@ -21,9 +21,10 @@ messages, real presence.
 | Online row | Students active in the last 10 seconds (2 s heartbeats), with a live count ("12 online") | same response, `online_count` |
 | Thread row | Last message preview ("📷 Photo", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp | **device database** |
 | Day separators | The conversation is grouped as **Today**, **Yesterday**, then "12 October" / "12 October 2024" | message timestamps |
-| Conversation | History, own bubbles on the right, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
+| Conversation | History, own bubbles on the right in **black**, tighter padding, emoji-only messages rendered large, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
-| Attachments | Paperclip in the composer opens **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP). The pick is previewed small above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open the file with any viewer installed on the phone. Max 5 MB. | `upload_attachment` + `attachment` |
+| Attachments | Paperclip opens a styled sheet: **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP), each with its icon tile and description. The pick is previewed above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open it. Max **25 MB**. | `upload_attachment` + `attachment` |
+| Message actions | Long-press a bubble: **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
 | Safety notice | Bottom banner: *never share phone numbers, home address, school, bank details or passwords* — shown **once per account** until acknowledged | `users.chat_safety_ack_at` |
 | Typing | Three-dot bubble (rounded, one squared corner): each dot lifts 7 px and brightens at the 30 % mark of a 1.2 s loop, staggered 160 ms left→right | `chat_typing` |
 
@@ -117,7 +118,7 @@ encrypted envelope, and the decrypted copy lives only in the app's private
 storage. The local attachment cache is capped at 120 MB (oldest dropped first)
 and is cleared on sign-out.
 
-Limits: 5 MB per file in the app, 6 MB server-side, 12 uploads per rolling
+Limits: **25 MB** per file in the app, 26 MB server-side, 12 uploads per rolling
 minute. Some shared hosts cap PHP uploads at 2 MB (`upload_max_filesize` /
 `post_max_size` in the PHP settings) — the app then shows the server's message
 instead of failing silently, and the limit has to be raised in the hosting panel.
@@ -175,6 +176,7 @@ never accepted in a query string. Successful responses use
 | POST | `heartbeat` | – | `online_count`, `server_epoch` |
 | POST | `upload_attachment` | multipart: `peer_id`, `file` (already-encrypted bytes) | `attachment_id`, `bytes` |
 | GET | `attachment` | `id` | raw `application/octet-stream`; **deleted once the recipient has it** |
+| POST | `delete_message` | `{peer_id, server_id}` | queues a `delete` envelope so both sides drop the message |
 | POST | `set_key` | `{public_key, allow_replace?}` | `public_key` (409 when a different key is already published and `allow_replace` is absent) |
 | GET | `version` | – | deploy fingerprint (`2.0.0`) |
 
@@ -185,7 +187,7 @@ Rules enforced server-side:
 * Sending to a student with no published key returns 409.
 * 30 messages per rolling minute per student (HTTP 429 + `Retry-After`).
 * You cannot message yourself, an inactive account or an unverified account.
-* Attachments: 6 MB per blob server-side (the app stops at 5 MB), 12 uploads per
+* Attachments: 26 MB per blob server-side (the app stops at 25 MB), 12 uploads per
   rolling minute, only the sender or recipient may fetch one, and the recipient's
   fetch deletes both the file and its row.
 * Inbox is capped at 200 envelopes per fetch; expired rows (older than 7 days)
@@ -274,4 +276,5 @@ CHAT_TYPING_THROTTLE_MS = 3_000
 | Photo or document stuck on "Fetching…" | The blob was already delivered to another install, expired after 7 days, or the send never finished | The caption and file card still show; ask the sender to resend the file |
 | "That file is larger than this server accepts (2M)" | PHP `upload_max_filesize` / `post_max_size` on the host | Raise both to 8M in the hosting panel (DirectAdmin → PHP settings) |
 | Unread badge missing while on the chat list | Fixed in 2.1.0: a read receipt used to mark *incoming* messages as read | Update the app — no server change needed for this one |
+| "Delete for everyone" only removed my copy | The peer's app was offline, so the `delete` envelope is still queued | It disappears on their next inbox poll (2 s), or after 7 days if they never open the app |
 | Messages show "🔒 can't be decrypted on this device" | A message was encrypted to a key this phone no longer holds | Expected after a key rotation; new messages decrypt normally |

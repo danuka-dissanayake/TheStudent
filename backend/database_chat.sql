@@ -30,13 +30,15 @@ ALTER TABLE `users`
 CREATE INDEX IF NOT EXISTS `idx_users_last_seen_at` ON `users` (`last_seen_at`);
 
 -- ── 2. Relay queue: encrypted envelopes waiting to be collected ─────────────
---     kind = 'msg'  → body is an e2ee:v1:… payload for recipient_id
---     kind = 'read' → body is empty, ref_id points at the read up to that id
+--     kind = 'msg'    → body is an e2ee:v1:… payload for recipient_id
+--     kind = 'read'   → body is empty, ref_id points at the read up to that id
+--     kind = 'delete' → body is empty, ref_id is a message the sender deleted
+--                      for both sides
 CREATE TABLE IF NOT EXISTS `chat_relay` (
     `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `sender_id`    INT UNSIGNED    NOT NULL,
     `recipient_id` INT UNSIGNED    NOT NULL,
-    `kind`         ENUM('msg','read') NOT NULL DEFAULT 'msg',
+    `kind`         ENUM('msg','read','delete') NOT NULL DEFAULT 'msg',
     `body`         TEXT            NULL,
     `ref_id`       BIGINT UNSIGNED NULL DEFAULT NULL,
     `created_at`   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,

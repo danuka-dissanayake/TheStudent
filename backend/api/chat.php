@@ -19,6 +19,8 @@
  *                     waiting for the caller.
  *   POST send         {peer_id, body}          body is E2EE ciphertext
  *   POST read         {peer_id, up_to_server_id}  read receipt for the sender
+ *   POST delete_message  {peer_id, server_id}  delete one of my messages for
+ *                     both sides (relayed as a 'delete' envelope)
  *   POST typing       {peer_id, is_typing?}
  *   POST ack_safety   First-visit chat safety notice acknowledgement.
  *   POST heartbeat    Presence ping (every ~2 s from the app).
@@ -56,7 +58,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.1.0';
+const TS_CHAT_API_VERSION          = '2.2.0';
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -64,7 +66,7 @@ const TS_CHAT_MAX_MESSAGES_PER_MIN = 30;    // per student
 const TS_CHAT_MAX_BODY_BYTES       = 16384;
 const TS_CHAT_INBOX_LIMIT          = 200;   // rows handed out per fetch
 const TS_CHAT_RELAY_TTL_DAYS       = 7;     // undelivered messages expire
-const TS_CHAT_MAX_ATTACHMENT_BYTES = 6291456;   // 6 MB encrypted blob
+const TS_CHAT_MAX_ATTACHMENT_BYTES = 27262976;  // 26 MB encrypted blob (25 MB file)
 const TS_CHAT_ATTACHMENT_DIR       = 'uploads/chat/';  // encrypted blobs only
 const TS_CHAT_MAX_UPLOADS_PER_MIN  = 12;    // per student
 
@@ -309,7 +311,7 @@ function ts_chat_ensure_schema(PDO $pdo): void
                 `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `sender_id` INT UNSIGNED NOT NULL,
                 `recipient_id` INT UNSIGNED NOT NULL,
-                `kind` ENUM('msg','read') NOT NULL DEFAULT 'msg',
+                `kind` ENUM('msg','read','delete') NOT NULL DEFAULT 'msg',
                 `body` TEXT NULL DEFAULT NULL,
                 `ref_id` BIGINT UNSIGNED NULL DEFAULT NULL,
                 `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -330,6 +332,22 @@ function ts_chat_ensure_schema(PDO $pdo): void
         );
     } catch (Throwable $e) {
         error_log('[TheStudent] chat schema creation failed: ' . $e->getMessage());
+    }
+
+    // Older installs created `kind` as ENUM('msg','read'); widen it once so a
+    // delete envelope can be relayed. Checked first, because widening an ENUM
+    // rebuilds the table on some MySQL versions and this runs on every request.
+    try {
+        $kindStmt = $pdo->query("SHOW COLUMNS FROM `chat_relay` LIKE 'kind'");
+        $kindRow  = $kindStmt ? $kindStmt->fetch() : null;
+        if ($kindRow && stripos((string) $kindRow['Type'], 'delete') === false) {
+            $pdo->exec(
+                "ALTER TABLE `chat_relay` MODIFY COLUMN `kind` ENUM('msg','read','delete')
+                 NOT NULL DEFAULT 'msg'"
+            );
+        }
+    } catch (Throwable $e) {
+        error_log('[TheStudent] chat_relay kind widen skipped: ' . $e->getMessage());
     }
 
     // Encrypted attachment blobs (never readable by the server).
@@ -367,6 +385,7 @@ if ($action === 'version') {
         'storage'           => 'relay-only (history lives on the device)',
         'attachments'       => 'encrypted blobs, ' . (TS_CHAT_MAX_ATTACHMENT_BYTES / 1048576) .
                                ' MB max, deleted on delivery or after ' . TS_CHAT_RELAY_TTL_DAYS . ' days',
+        'delete_for_all'    => true,
         'chat_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ]);
 }
@@ -491,6 +510,7 @@ switch ($action) {
 
             $messages = [];
             $receipts = [];
+            $deletions = [];
             $ids = [];
             foreach ($rows as $row) {
                 $ids[] = (int) $row['id'];
@@ -498,6 +518,14 @@ switch ($action) {
                     $receipts[] = [
                         'peer_id'        => (int) $row['sender_id'],
                         'up_to_server_id' => (int) ($row['ref_id'] ?? 0),
+                    ];
+                    continue;
+                }
+                if ($row['kind'] === 'delete') {
+                    // The sender removed a message of theirs that I already have.
+                    $deletions[] = [
+                        'peer_id'   => (int) $row['sender_id'],
+                        'server_id' => (int) ($row['ref_id'] ?? 0),
                     ];
                     continue;
                 }
@@ -523,6 +551,7 @@ switch ($action) {
             ts_chat_json('success', 'Inbox fetched.', [
                 'messages'     => $messages,
                 'receipts'     => $receipts,
+                'deletions'    => $deletions,
                 'server_epoch' => $now,
             ]);
         } catch (Throwable $e) {
@@ -640,6 +669,18 @@ switch ($action) {
         }
 
         if (!isset($_FILES['file'])) {
+            // When post_max_size is exceeded PHP throws the whole body away and
+            // $_FILES is empty, so say that instead of "no file received".
+            $contentLength = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
+            if ($contentLength > 0) {
+                ts_chat_json(
+                    'error',
+                    'That file is larger than this server accepts (post_max_size ' .
+                        ini_get('post_max_size') . '). Please send a smaller one.',
+                    [],
+                    413
+                );
+            }
             ts_chat_json('error', 'No file was received.', [], 422);
         }
         $file = $_FILES['file'];
@@ -765,6 +806,37 @@ switch ($action) {
             }
         }
         exit();
+    }
+
+    // -----------------------------------------------------------------------
+    // Delete one of my messages for both sides
+    // -----------------------------------------------------------------------
+    case 'delete_message': {
+        ts_chat_require_post('delete_message');
+        $body     = ts_chat_read_body();
+        $peerId   = ts_chat_peer_id($body);
+        $serverId = isset($body['server_id']) && is_numeric($body['server_id'])
+            ? (int) $body['server_id']
+            : 0;
+
+        if ($peerId === $meId || $serverId <= 0) {
+            ts_chat_json('success', 'Nothing to delete.', []);
+        }
+
+        // The relay never keeps a message after delivery, so ownership cannot be
+        // re-verified here. The envelope only ever removes a message from the
+        // peer's device; it cannot expose or alter anything else.
+        try {
+            $pdo->prepare(
+                'INSERT INTO chat_relay (sender_id, recipient_id, kind, ref_id)
+                 VALUES (:me, :peer, \'delete\', :ref)'
+            )->execute(['me' => $meId, 'peer' => $peerId, 'ref' => $serverId]);
+            ts_chat_json('success', 'Message deleted for both sides.', []);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat delete relay failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not delete that message right now.', [], 500);
+        }
+        break;
     }
 
     // -----------------------------------------------------------------------
