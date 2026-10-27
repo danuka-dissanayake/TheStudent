@@ -14,6 +14,8 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.BasicTextField
+import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -25,19 +27,26 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.autofill.ContentType
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.Fill
+import androidx.compose.ui.graphics.SolidColor
 import android.util.Patterns
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.contentType
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -64,6 +73,16 @@ import com.example.ui.theme.*
 // Modern Darkened Emerald Palette for Modern White, Black & Green UI (Emerald 700)
 private val AuthModernDarkGreen = Color(0xFF047857)
 
+/** Public pages referenced by the sign-up consent row. */
+private const val TERMS_URL = "https://app.quizontal.site/legal/terms.html"
+private const val PRIVACY_URL = "https://app.quizontal.site/legal/privacy.html"
+
+/** "5:00" style countdown instead of the broken "0:300". */
+internal fun formatCooldown(totalSeconds: Int): String {
+    val safe = totalSeconds.coerceAtLeast(0)
+    return "%d:%02d".format(safe / 60, safe % 60)
+}
+
 enum class AuthMode {
     SIGN_IN,
     SIGN_UP,
@@ -88,6 +107,17 @@ private fun passwordPolicyError(password: String): String? = when {
 
 private fun isEmailValid(value: String): Boolean =
     value.isNotBlank() && Patterns.EMAIL_ADDRESS.matcher(value.trim()).matches()
+
+/**
+ * True when repeating the same request can plausibly succeed: the network
+ * failed, the server throttled us, or it had a temporary problem. A 400/401
+ * ("wrong password", "bad email") is the user's to fix, not a retry.
+ */
+private fun AuthApiResult.Error.isRetryable(): Boolean =
+    isNetworkError || statusCode == 429 || statusCode >= 500
+
+private fun ApiOutcome.Failure.isRetryable(): Boolean =
+    isNetworkError || statusCode == 429 || statusCode >= 500
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -145,8 +175,23 @@ fun AuthScreen(
     var newPasswordVisible by remember { mutableStateOf(false) }
     var confirmNewPasswordVisible by remember { mutableStateOf(false) }
     var isVerifyingOtp by remember { mutableStateOf(false) }
+    // Retry hook for recoverable (network / rate-limit) failures. Null when the
+    // error is a validation problem the user has to fix by editing the form.
+    var retryAction by remember { mutableStateOf<(() -> Unit)?>(null) }
+    var acceptedTerms by remember { mutableStateOf(false) }
     val isAnyLoading = isGoogleSigningIn || isSigningIn || isRegistering || isVerifyingOtp ||
         isRequestingReset || isResettingPassword
+
+    /** Show an error, optionally offering a one-tap retry. */
+    fun showError(message: String, retry: (() -> Unit)? = null) {
+        errorMessage = message
+        retryAction = retry
+    }
+
+    fun clearError() {
+        errorMessage = null
+        retryAction = null
+    }
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -202,7 +247,7 @@ fun AuthScreen(
             AuthMode.RESET_PASSWORD,
             AuthMode.FORGOT_PASSWORD,
             AuthMode.SIGN_UP -> {
-                errorMessage = null
+                clearError()
                 switchModeWithShimmer(AuthMode.SIGN_IN)
             }
             AuthMode.SIGN_IN -> {
@@ -223,7 +268,7 @@ fun AuthScreen(
         if (isAnyLoading) return
         coroutineScope.launch {
             isGoogleSigningIn = true
-            errorMessage = null
+            clearError()
             when (val result = TheStudentGoogleAuthClient.signIn(context)) {
                 is GoogleAuthResult.Success -> {
                     // Call DirectAdmin backend to create/authenticate user & issue OTP in MySQL
@@ -259,7 +304,10 @@ fun AuthScreen(
                             errorMessage = "Unexpected response from the server. Please try again."
                         }
                         is AuthApiResult.Error -> {
-                            errorMessage = authResult.message
+                            showError(
+                                authResult.message,
+                                retry = ({ handleGoogleSignIn() }).takeIf { authResult.isRetryable() }
+                            )
                         }
                     }
                 }
@@ -268,7 +316,7 @@ fun AuthScreen(
                     android.widget.Toast.makeText(context, "Sign in with Google was cancelled", android.widget.Toast.LENGTH_SHORT).show()
                 }
                 is GoogleAuthResult.Error -> {
-                    errorMessage = result.message
+                    showError(result.message)
                 }
             }
             isGoogleSigningIn = false
@@ -290,7 +338,7 @@ fun AuthScreen(
         // entered are the exact characters hashed, so spaces are significant.
         coroutineScope.launch {
             isSigningIn = true
-            errorMessage = null
+            clearError()
             when (val result = TheStudentAuthClient.login(backendBaseUrl, email, password)) {
                 is AuthApiResult.RequiresOtp -> {
                     pendingVerificationEmail = result.email
@@ -324,7 +372,10 @@ fun AuthScreen(
                     errorMessage = "Unexpected response from the server. Please try again."
                 }
                 is AuthApiResult.Error -> {
-                    errorMessage = result.message
+                    showError(
+                        result.message,
+                        retry = ({ handleEmailSignIn() }).takeIf { result.isRetryable() }
+                    )
                 }
             }
             isSigningIn = false
@@ -349,9 +400,15 @@ fun AuthScreen(
             errorMessage = "Passwords do not match."
             return
         }
+        // Consent is required before an account is created (and before any
+        // personal data leaves the device).
+        if (!acceptedTerms) {
+            errorMessage = "Please accept the Terms of Service and Privacy Policy to create an account."
+            return
+        }
         coroutineScope.launch {
             isRegistering = true
-            errorMessage = null
+            clearError()
             val fullName = "${firstName.trim()} ${lastName.trim()}"
             when (val result = TheStudentAuthClient.register(backendBaseUrl, fullName, email.trim(), password, selectedStream)) {
                 is AuthApiResult.RequiresOtp -> {
@@ -385,7 +442,10 @@ fun AuthScreen(
                     errorMessage = "Unexpected response from the server. Please try again."
                 }
                 is AuthApiResult.Error -> {
-                    errorMessage = result.message
+                    showError(
+                        result.message,
+                        retry = ({ handleEmailRegister() }).takeIf { result.isRetryable() }
+                    )
                 }
             }
             isRegistering = false
@@ -402,7 +462,7 @@ fun AuthScreen(
         val targetEmail = pendingVerificationEmail.ifBlank { email }
         coroutineScope.launch {
             isVerifyingOtp = true
-            errorMessage = null
+            clearError()
 
             // Strictly verify against DirectAdmin MySQL backend to update is_email_verified
             when (val result = TheStudentAuthClient.verifyOtp(backendBaseUrl, targetEmail, enteredCode)) {
@@ -423,16 +483,19 @@ fun AuthScreen(
                     // The code was valid but it belongs to a password reset:
                     // no session is created, the user must choose a new password.
                     resetToken = result.resetToken
-                    errorMessage = null
+                    clearError()
                     otpDigits = listOf("", "", "", "", "", "")
                     isVerifyingOtp = false
                     switchModeWithShimmer(AuthMode.RESET_PASSWORD)
                 }
                 is AuthApiResult.RequiresOtp -> {
-                    errorMessage = result.message
+                    showError(result.message)
                 }
                 is AuthApiResult.Error -> {
-                    errorMessage = result.message
+                    showError(
+                        result.message,
+                        retry = ({ handleVerifyOtp() }).takeIf { result.isRetryable() }
+                    )
                     result.retryAfterSeconds?.let { wait ->
                         if (wait in 1..300) resendCooldownSeconds = maxOf(resendCooldownSeconds, wait)
                     }
@@ -450,14 +513,17 @@ fun AuthScreen(
             return
         }
         coroutineScope.launch {
-            errorMessage = null
+            clearError()
             when (val outcome = TheStudentAuthClient.resendOtp(backendBaseUrl, targetEmail.trim())) {
                 is ApiOutcome.Success -> {
                     resendCooldownSeconds = outcome.cooldownSeconds.coerceIn(30, 300)
                     android.widget.Toast.makeText(context, outcome.message, android.widget.Toast.LENGTH_SHORT).show()
                 }
                 is ApiOutcome.Failure -> {
-                    errorMessage = outcome.message
+                    showError(
+                        outcome.message,
+                        retry = ({ handleResendOtp() }).takeIf { outcome.isRetryable() }
+                    )
                     outcome.retryAfterSeconds?.let { wait ->
                         if (wait in 1..300) resendCooldownSeconds = wait
                     }
@@ -478,7 +544,7 @@ fun AuthScreen(
         }
         coroutineScope.launch {
             isRequestingReset = true
-            errorMessage = null
+            clearError()
             when (val outcome = TheStudentAuthClient.requestPasswordReset(backendBaseUrl, email.trim())) {
                 is ApiOutcome.Success -> {
                     pendingVerificationEmail = email.trim()
@@ -490,7 +556,10 @@ fun AuthScreen(
                     switchModeWithShimmer(AuthMode.VERIFY_OTP)
                 }
                 is ApiOutcome.Failure -> {
-                    errorMessage = outcome.message
+                    showError(
+                        outcome.message,
+                        retry = ({ handleForgotPassword() }).takeIf { outcome.isRetryable() }
+                    )
                     outcome.retryAfterSeconds?.let { wait ->
                         if (wait in 1..300) resendCooldownSeconds = wait
                     }
@@ -517,7 +586,7 @@ fun AuthScreen(
         }
         coroutineScope.launch {
             isResettingPassword = true
-            errorMessage = null
+            clearError()
             when (val outcome = TheStudentAuthClient.resetPassword(backendBaseUrl, resetToken, newPassword)) {
                 is ApiOutcome.Success -> {
                     resetToken = ""
@@ -531,7 +600,10 @@ fun AuthScreen(
                     switchModeWithShimmer(AuthMode.SIGN_IN)
                 }
                 is ApiOutcome.Failure -> {
-                    errorMessage = outcome.message
+                    showError(
+                        outcome.message,
+                        retry = ({ handleResetPassword() }).takeIf { outcome.isRetryable() }
+                    )
                 }
             }
             isResettingPassword = false
@@ -575,6 +647,7 @@ fun AuthScreen(
             ModernEmailVerificationScreen(
                 targetEmail = pendingVerificationEmail.ifBlank { email }.ifBlank { "your email" },
                 reason = pendingVerificationReason,
+                isSecureConnection = backendBaseUrl.trim().startsWith("https", ignoreCase = true),
                 otpDigits = otpDigits,
                 activeOtpIndex = activeOtpIndex,
                 isAnyLoading = isAnyLoading,
@@ -585,7 +658,7 @@ fun AuthScreen(
                 onVerify = { handleVerifyOtp() },
                 onResend = { handleResendOtp() },
                 onBack = {
-                    errorMessage = null
+                    clearError()
                     switchModeWithShimmer(AuthMode.SIGN_IN)
                 },
                 modifier = Modifier
@@ -623,7 +696,7 @@ fun AuthScreen(
                                     if (authMode == AuthMode.SIGN_IN) {
                                         onBack?.invoke()
                                     } else {
-                                        errorMessage = null
+                                        clearError()
                                         switchModeWithShimmer(AuthMode.SIGN_IN)
                                     }
                                 }
@@ -697,13 +770,13 @@ fun AuthScreen(
                             onSelectSignIn = {
                                 if (!isAnyLoading) {
                                     switchModeWithShimmer(AuthMode.SIGN_IN)
-                                    errorMessage = null
+                                    clearError()
                                 }
                             },
                             onSelectSignUp = {
                                 if (!isAnyLoading) {
                                     switchModeWithShimmer(AuthMode.SIGN_UP)
-                                    errorMessage = null
+                                    clearError()
                                 }
                             }
                         )
@@ -714,7 +787,11 @@ fun AuthScreen(
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = RedError.copy(alpha = 0.12f),
-                            modifier = Modifier.fillMaxWidth()
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                // TalkBack announces the message as soon as it appears
+                                // instead of leaving it silently on screen.
+                                .semantics { liveRegion = LiveRegionMode.Polite }
                         ) {
                             Row(
                                 modifier = Modifier.padding(12.dp),
@@ -726,8 +803,27 @@ fun AuthScreen(
                                     text = errorMessage ?: "",
                                     style = MaterialTheme.typography.bodySmall,
                                     color = RedError,
-                                    fontWeight = FontWeight.Medium
+                                    fontWeight = FontWeight.Medium,
+                                    modifier = Modifier.weight(1f)
                                 )
+                                retryAction?.let { retry ->
+                                    TextButton(
+                                        onClick = {
+                                            clearError()
+                                            retry()
+                                        },
+                                        enabled = !isAnyLoading,
+                                        contentPadding = PaddingValues(horizontal = 8.dp),
+                                        modifier = Modifier.testTag("btn_retry_last_action")
+                                    ) {
+                                        Text(
+                                            text = "Try again",
+                                            color = RedError,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.5.sp
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -753,8 +849,9 @@ fun AuthScreen(
                                         enabled = !isAnyLoading,
                                         onValueChange = {
                                             email = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.EmailAddress,
                                         testTag = "signin_email_field"
                                     )
 
@@ -770,8 +867,11 @@ fun AuthScreen(
                                         onTogglePassword = { passwordVisible = !passwordVisible },
                                         onValueChange = {
                                             password = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.Password,
+                                        imeAction = ImeAction.Done,
+                                        onSubmit = { handleEmailSignIn() },
                                         testTag = "signin_password_field"
                                     )
 
@@ -808,7 +908,7 @@ fun AuthScreen(
                                             color = RedError,
                                             modifier = Modifier
                                                 .clickable(enabled = !isAnyLoading) {
-                                                    errorMessage = null
+                                                    clearError()
                                                     switchModeWithShimmer(AuthMode.FORGOT_PASSWORD)
                                                 }
                                                 .testTag("forget_password_button")
@@ -876,6 +976,7 @@ fun AuthScreen(
                                             modifier = Modifier.weight(1f),
                                             enabled = !isAnyLoading,
                                             onValueChange = { firstName = it },
+                                            autofillType = ContentType.PersonFirstName,
                                             testTag = "signup_firstname_field"
                                         )
                                         CleanLabeledTextField(
@@ -885,6 +986,7 @@ fun AuthScreen(
                                             modifier = Modifier.weight(1f),
                                             enabled = !isAnyLoading,
                                             onValueChange = { lastName = it },
+                                            autofillType = ContentType.PersonLastName,
                                             testTag = "signup_lastname_field"
                                         )
                                     }
@@ -898,8 +1000,9 @@ fun AuthScreen(
                                         enabled = !isAnyLoading,
                                         onValueChange = {
                                             email = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.EmailAddress,
                                         testTag = "signup_email_field"
                                     )
 
@@ -915,10 +1018,14 @@ fun AuthScreen(
                                         onTogglePassword = { passwordVisible = !passwordVisible },
                                         onValueChange = {
                                             password = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.NewPassword,
                                         testTag = "signup_password_field"
                                     )
+                                    if (password.isNotEmpty()) {
+                                        PasswordStrengthHint(password = password)
+                                    }
 
                                     // Confirm Password input
                                     CleanLabeledTextField(
@@ -932,9 +1039,19 @@ fun AuthScreen(
                                         onTogglePassword = { confirmPasswordVisible = !confirmPasswordVisible },
                                         onValueChange = {
                                             confirmPassword = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.NewPassword,
+                                        imeAction = ImeAction.Done,
+                                        onSubmit = { handleEmailRegister() },
                                         testTag = "signup_confirm_password_field"
+                                    )
+
+                                    // Terms & privacy consent (required before an account is created)
+                                    SignUpConsentRow(
+                                        accepted = acceptedTerms,
+                                        enabled = !isAnyLoading,
+                                        onToggle = { acceptedTerms = !acceptedTerms }
                                     )
 
                                     // Register Button
@@ -999,8 +1116,11 @@ fun AuthScreen(
                                         enabled = !isAnyLoading,
                                         onValueChange = {
                                             email = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.EmailAddress,
+                                        imeAction = ImeAction.Done,
+                                        onSubmit = { handleForgotPassword() },
                                         testTag = "forgot_email_field"
                                     )
                                     SolidPillButton(
@@ -1013,7 +1133,7 @@ fun AuthScreen(
                                     )
                                     TextButton(
                                         onClick = {
-                                            errorMessage = null
+                                            clearError()
                                             switchModeWithShimmer(AuthMode.SIGN_IN)
                                         },
                                         enabled = !isAnyLoading
@@ -1050,8 +1170,9 @@ fun AuthScreen(
                                         onTogglePassword = { newPasswordVisible = !newPasswordVisible },
                                         onValueChange = {
                                             newPassword = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.NewPassword,
                                         testTag = "reset_password_field"
                                     )
                                     CleanLabeledTextField(
@@ -1065,8 +1186,11 @@ fun AuthScreen(
                                         onTogglePassword = { confirmNewPasswordVisible = !confirmNewPasswordVisible },
                                         onValueChange = {
                                             confirmNewPassword = it
-                                            errorMessage = null
+                                            clearError()
                                         },
+                                        autofillType = ContentType.NewPassword,
+                                        imeAction = ImeAction.Done,
+                                        onSubmit = { handleResetPassword() },
                                         testTag = "reset_confirm_password_field"
                                     )
                                     SolidPillButton(
@@ -1202,6 +1326,140 @@ fun ModernSegmentedToggle(
 }
 
 /**
+ * Live password strength meter.
+ *
+ * Shows a 4-segment bar plus the requirement the user is still missing, so the
+ * policy is visible *while typing* instead of only after a rejected submit.
+ * (The server remains the authority; this is guidance only.)
+ */
+@Composable
+fun PasswordStrengthHint(
+    password: String,
+    modifier: Modifier = Modifier
+) {
+    val hasLength = password.length >= 8
+    val hasLetter = password.any { it.isLetter() }
+    val hasDigit = password.any { it.isDigit() }
+    val hasSymbol = password.any { !it.isLetterOrDigit() }
+    val score = listOf(hasLength, hasLetter, hasDigit, hasSymbol).count { it }
+
+    val label = when {
+        score <= 1 -> "Weak"
+        score <= 3 -> "Fair"
+        else -> "Strong"
+    }
+    val color = when {
+        score <= 1 -> RedError
+        score <= 3 -> Color(0xFFD97706)
+        else -> AuthModernDarkGreen
+    }
+    val missing = buildList {
+        if (!hasLength) add("8+ characters")
+        if (!hasLetter) add("a letter")
+        if (!hasDigit) add("a number")
+        if (!hasSymbol) add("a symbol")
+    }
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            repeat(4) { index ->
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp))
+                        .background(if (index < score.coerceAtLeast(1)) color else Color(0xFFE2E8F0))
+                )
+                if (index < 3) Spacer(modifier = Modifier.width(4.dp))
+            }
+            Spacer(modifier = Modifier.width(10.dp))
+            Text(
+                text = label,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = color
+            )
+        }
+        Spacer(modifier = Modifier.height(6.dp))
+        Text(
+            text = if (missing.isEmpty()) {
+                "Great password. Keep it somewhere safe."
+            } else {
+                "Add " + missing.joinToString(", ")
+            },
+            fontSize = 11.5.sp,
+            color = Color(0xFF64748B)
+        )
+    }
+}
+
+/**
+ * Terms of Service / Privacy Policy consent.
+ *
+ * Publishing an app that creates accounts on Google Play requires the user to
+ * actively agree to both, and the links must be reachable before sign-up.
+ */
+@Composable
+fun SignUpConsentRow(
+    accepted: Boolean,
+    enabled: Boolean,
+    onToggle: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val uriHandler = LocalUriHandler.current
+
+    Column(modifier = modifier.fillMaxWidth()) {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(10.dp))
+                .clickable(enabled = enabled) { onToggle() }
+        ) {
+            Checkbox(
+                checked = accepted,
+                onCheckedChange = null,
+                enabled = enabled,
+                colors = CheckboxDefaults.colors(
+                    checkedColor = AuthModernDarkGreen,
+                    checkmarkColor = Color.White
+                )
+            )
+            Text(
+                text = "I agree to TheStudent's Terms of Service and Privacy Policy",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+        Row(
+            modifier = Modifier.padding(start = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ConsentLink(text = "Read terms", enabled = enabled) { uriHandler.openUri(TERMS_URL) }
+            Text(text = "·", color = Color(0xFF94A3B8), fontSize = 12.sp)
+            ConsentLink(text = "Read privacy policy", enabled = enabled) { uriHandler.openUri(PRIVACY_URL) }
+        }
+    }
+}
+
+@Composable
+private fun ConsentLink(
+    text: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.SemiBold,
+        color = if (enabled) AuthModernDarkGreen else Color(0xFF94A3B8),
+        textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
+        modifier = Modifier.clickable(enabled = enabled) { onClick() }
+    )
+}
+
+/**
  * Clean field with floating notch label matching Material Design outline specs.
  */
 @Composable
@@ -1216,6 +1474,9 @@ fun CleanLabeledTextField(
     isPassword: Boolean = false,
     passwordVisible: Boolean = false,
     onTogglePassword: (() -> Unit)? = null,
+    autofillType: ContentType? = null,
+    imeAction: ImeAction = ImeAction.Next,
+    onSubmit: (() -> Unit)? = null,
     testTag: String = ""
 ) {
     OutlinedTextField(
@@ -1235,9 +1496,23 @@ fun CleanLabeledTextField(
         singleLine = true,
         modifier = modifier
             .fillMaxWidth()
-            .testTag(testTag),
+            .testTag(testTag)
+            // Tells Google Password Manager / autofill services what this field
+            // holds, so credentials can be suggested and saved.
+            .then(
+                if (autofillType != null) {
+                    Modifier.semantics { contentType = autofillType }
+                } else {
+                    Modifier
+                }
+            ),
         shape = RoundedCornerShape(14.dp),
-        keyboardOptions = KeyboardOptions(keyboardType = keyboardType),
+        keyboardOptions = KeyboardOptions(keyboardType = keyboardType, imeAction = imeAction),
+        keyboardActions = KeyboardActions(
+            onNext = { onSubmit?.invoke() },
+            onDone = { onSubmit?.invoke() },
+            onGo = { onSubmit?.invoke() }
+        ),
         visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
         trailingIcon = {
             if (isPassword && onTogglePassword != null) {
@@ -1454,81 +1729,6 @@ fun GoogleLogoIcon(modifier: Modifier = Modifier) {
 }
 
 /**
- * Real Official Apple Button with authentic Apple silhouette logo and typography.
- */
-@Composable
-fun OfficialAppleButton(
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
-) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(25.dp),
-        color = Color(0xFF0F172A), // Official Apple black / obsidian
-        shadowElevation = 2.dp,
-        modifier = modifier
-            .height(50.dp)
-            .testTag("apple_login_button")
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            AppleSilhouetteIcon(modifier = Modifier.size(18.dp), tint = Color.White)
-            Spacer(modifier = Modifier.width(10.dp))
-            Text(
-                text = "Apple",
-                fontWeight = FontWeight.SemiBold,
-                fontSize = 15.sp,
-                color = Color.White
-            )
-        }
-    }
-}
-
-/**
- * Apple Silhouette vector logo drawn via Canvas Path.
- */
-@Composable
-fun AppleSilhouetteIcon(
-    modifier: Modifier = Modifier,
-    tint: Color = Color.White
-) {
-    Canvas(modifier = modifier) {
-        val w = size.width
-        val h = size.height
-
-        // Apple leaf
-        val leafPath = Path().apply {
-            moveTo(w * 0.52f, h * 0.22f)
-            cubicTo(w * 0.52f, h * 0.10f, w * 0.62f, 0f, w * 0.72f, 0f)
-            cubicTo(w * 0.73f, h * 0.12f, w * 0.63f, h * 0.24f, w * 0.52f, h * 0.22f)
-            close()
-        }
-        drawPath(leafPath, color = tint, style = Fill)
-
-        // Apple Body with bite cut-out
-        val bodyPath = Path().apply {
-            moveTo(w * 0.75f, h * 0.32f)
-            // right top curve
-            cubicTo(w * 0.88f, h * 0.40f, w * 0.94f, h * 0.56f, w * 0.88f, h * 0.68f)
-            cubicTo(w * 0.82f, h * 0.78f, w * 0.76f, h * 0.88f, w * 0.64f, h * 0.88f)
-            cubicTo(w * 0.54f, h * 0.88f, w * 0.50f, h * 0.82f, w * 0.38f, h * 0.82f)
-            cubicTo(w * 0.26f, h * 0.82f, w * 0.22f, h * 0.88f, w * 0.12f, h * 0.88f)
-            cubicTo(0f, h * 0.88f, -0.04f, h * 0.70f, 0.04f, h * 0.54f)
-            cubicTo(0.12f, h * 0.38f, 0.26f, h * 0.28f, 0.40f, h * 0.28f)
-            cubicTo(0.50f, h * 0.28f, 0.56f, h * 0.34f, 0.64f, h * 0.34f)
-            cubicTo(0.70f, h * 0.34f, 0.72f, h * 0.30f, 0.75f, h * 0.32f)
-            close()
-        }
-        drawPath(bodyPath, color = tint, style = Fill)
-    }
-}
-
-/**
  * Numeric Keypad Grid matching Mockup Screen 3.
  */
 @Composable
@@ -1624,6 +1824,7 @@ private fun String.capitalizeWords(): String =
 fun ModernEmailVerificationScreen(
     targetEmail: String,
     reason: String,
+    isSecureConnection: Boolean = true,
     otpDigits: List<String>,
     activeOtpIndex: Int,
     isAnyLoading: Boolean,
@@ -1692,11 +1893,14 @@ fun ModernEmailVerificationScreen(
                         }
                     }
 
-                    // Security Shield Pill
+                    // Security pill. The label reflects the REAL transport the app
+                    // is talking to - it used to say "256-Bit SSL" unconditionally,
+                    // which was a false claim whenever the server URL was http://.
+                    val infoIsWarning = reason == "ip_change" || !isSecureConnection
                     Surface(
                         shape = RoundedCornerShape(16.dp),
-                        color = if (reason == "ip_change") Color(0xFFFEF3C7) else Color(0xFFDCFCE7),
-                        border = BorderStroke(1.dp, if (reason == "ip_change") Color(0xFFFDE68A) else Color(0xFFBBF7D0))
+                        color = if (infoIsWarning) Color(0xFFFEF3C7) else Color(0xFFDCFCE7),
+                        border = BorderStroke(1.dp, if (infoIsWarning) Color(0xFFFDE68A) else Color(0xFFBBF7D0))
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
@@ -1704,17 +1908,21 @@ fun ModernEmailVerificationScreen(
                             horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
-                                imageVector = if (reason == "ip_change") Icons.Default.Warning else Icons.Default.Security,
+                                imageVector = if (infoIsWarning) Icons.Default.Warning else Icons.Default.Security,
                                 contentDescription = null,
-                                tint = if (reason == "ip_change") Color(0xFFB45309) else AuthModernDarkGreen,
+                                tint = if (infoIsWarning) Color(0xFFB45309) else AuthModernDarkGreen,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (reason == "ip_change") "Security Alert" else "256-Bit SSL",
+                                text = when {
+                                    !isSecureConnection -> "Insecure connection"
+                                    reason == "ip_change" -> "Security Alert"
+                                    else -> "Secure connection"
+                                },
                                 fontFamily = MaisonNeueFontFamily,
                                 fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = if (reason == "ip_change") Color(0xFF92400E) else AuthModernDarkGreen
+                                color = if (infoIsWarning) Color(0xFF92400E) else AuthModernDarkGreen
                             )
                         }
                     }
@@ -1810,11 +2018,42 @@ fun ModernEmailVerificationScreen(
 
                 Spacer(modifier = Modifier.height(16.dp))
 
-                // 6 OTP code boxes (46dp x 52dp)
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
+                // 6 OTP code boxes (46dp x 52dp) with a real - but invisible -
+                // text field on top, so paste, a hardware keyboard and Android's
+                // one-time-code autofill all work. It auto-submits on the 6th digit.
+                val otpText = otpDigits.joinToString("")
+                Box(contentAlignment = Alignment.Center) {
+                    BasicTextField(
+                        value = otpText,
+                        onValueChange = { raw ->
+                            if (!isAnyLoading) {
+                                val digits = raw.filter { it.isDigit() }.take(6)
+                                val updated = MutableList(6) { "" }
+                                digits.forEachIndexed { i, character -> updated[i] = character.toString() }
+                                onOtpDigitChange(updated)
+                                if (digits.length == 6) onVerify()
+                            }
+                        },
+                        enabled = !isAnyLoading,
+                        modifier = Modifier
+                            .matchParentSize()
+                            .semantics { contentType = ContentType.SmsOtpCode }
+                            .testTag("otp_input_field"),
+                        textStyle = androidx.compose.ui.text.TextStyle(
+                            color = Color.Transparent,
+                            fontSize = 22.sp
+                        ),
+                        cursorBrush = SolidColor(Color.Transparent),
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.NumberPassword,
+                            imeAction = ImeAction.Done
+                        ),
+                        keyboardActions = KeyboardActions(onDone = { onVerify() })
+                    )
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
                     otpDigits.forEachIndexed { index, digit ->
                         val isCurrentFocus = index == activeOtpIndex
                         val hasValue = digit.isNotBlank()
@@ -1857,6 +2096,7 @@ fun ModernEmailVerificationScreen(
                             }
                         }
                     }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(12.dp))
@@ -1874,7 +2114,7 @@ fun ModernEmailVerificationScreen(
                             fontSize = 12.5.sp
                         )
                         Text(
-                            text = "0:${resendCooldownSeconds.toString().padStart(2, '0')}",
+                            text = formatCooldown(resendCooldownSeconds),
                             fontFamily = MaisonNeueFontFamily,
                             fontWeight = FontWeight.Bold,
                             color = AuthModernDarkGreen,
@@ -1918,7 +2158,9 @@ fun ModernEmailVerificationScreen(
                         shape = RoundedCornerShape(10.dp),
                         color = Color(0xFFFEF2F2),
                         border = BorderStroke(1.dp, Color(0xFFFECACA)),
-                        modifier = Modifier.fillMaxWidth()
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .semantics { liveRegion = LiveRegionMode.Polite }
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
@@ -1936,7 +2178,7 @@ fun ModernEmailVerificationScreen(
                                 fontSize = 12.sp,
                                 color = Color(0xFF991B1B),
                                 lineHeight = 16.sp,
-                                maxLines = 2
+                                maxLines = 3
                             )
                         }
                     }

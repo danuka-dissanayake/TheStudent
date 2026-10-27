@@ -205,6 +205,11 @@ Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_b
    console and the paper upload/delete APIs require authentication; cleartext HTTP disabled app-wide
    (`network_security_config.xml` allows localhost/emulator/LAN only); session store excluded from backups.
    Outstanding operator action: **rotate the MySQL and Gmail passwords that were committed to git history.**
+   UI side (`AuthScreen.kt`, `SecurityScreen.kt`, drawer) is Play-store ready too: account deletion,
+   Terms/Privacy consent, sign-out, change-password, autofill content types, OTP paste/auto-submit,
+   retry-able errors and a live password-strength meter. Compose BOM was raised to `2025.06.01`
+   (1.8) for `androidx.compose.ui.autofill.ContentType`. Legal page templates live in
+   `backend/legal/` and must be filled in and uploaded to `/legal/`.
 8. **No real chat backend** — the CHAT tab is entirely local demo data despite looking production-ready.
 9. **Auth is mandatory** (guest deprecated) yet `MainActivity` still contains a fallback white-box + `openAuthScreen()` effect — a slightly awkward safety net.
 10. **Test coverage ≈ 0**, and nothing guards the 70-field UI state or the AI routing.

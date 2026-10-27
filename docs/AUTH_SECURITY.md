@@ -96,6 +96,7 @@ with HttpOnly/SameSite=Strict/Secure cookies, session-id regeneration, per-IP+ac
 | `change_password` | POST | Bearer | `current_password, new_password` | `success` (new token) |
 | `google_login` | POST | – | `id_token, target_exam?` | `success` / `requires_verification` |
 | `me` (alias `profile`) | GET | Bearer | – | `success` + `user`, `expires_at` |
+| `delete_account` | POST | Bearer | `password?` (required for e-mail accounts) | `success` |
 | `logout` | POST | Bearer | – | `success` |
 | `logout_all` | POST | Bearer | – | `success` |
 
@@ -133,7 +134,12 @@ require an admin bearer token.
         -d '{"email":"you@example.com","password":"…"}'
    curl -s 'https://app.quizontal.site/api/auth.php?action=me' -H "Authorization: Bearer <token>"
    ```
-7. Rebuild the app (`upload_paper.php` / `delete_paper.php` now require the header the new client sends).
+7. Upload `backend/legal/terms.html` and `backend/legal/privacy.html` to
+   `public_html/legal/`, then fill in the `[bracketed]` placeholders (your business name,
+   address, support/privacy e-mail). The sign-up consent links point at
+   `https://app.quizontal.site/legal/terms.html` and `/legal/privacy.html` — change the two
+   constants at the top of `AuthScreen.kt` if your domain differs.
+8. Rebuild the app (`upload_paper.php` / `delete_paper.php` now require the header the new client sends).
 
 > **Expected side effect:** every existing session token and pending OTP stops working after this
 > deploy (only digests are stored now). Users simply sign in again.
@@ -173,7 +179,39 @@ php -r "echo password_hash('Your-Strong-Password', PASSWORD_BCRYPT), PHP_EOL;"
 
 ---
 
-## 6. Deliberate trade-offs / next steps
+## 6. UI / UX pass (Play-store readiness)
+
+The security work above made the *server* correct; these fixes make the *screens* match a
+production app. Everything here is in `AuthScreen.kt`, the new `SecurityScreen.kt` and the
+drawer.
+
+| # | Issue | Fix |
+|---|---|---|
+| 31 | **No way to delete an account.** Google Play requires in-app deletion (plus a web URL) for any app where users can register. | `delete_account` action (server re-checks the password, cascades the wipe) + Security screen with a confirm dialog. |
+| 32 | **No Terms / Privacy consent at sign-up**, and no reachable policy pages. | Required checkbox + links; `backend/legal/terms.html` and `privacy.html` templates to upload. |
+| 33 | **No sign-out anywhere in the app** — `logout()` existed but nothing called it. | "Sign out" in the drawer; also "Sign out of all devices". |
+| 34 | `changePassword` / `logoutAll` existed in the client and server but had **no UI at all**. | Account & Security screen: change password (rotates every session), sign out everywhere, delete account. |
+| 35 | Fields declared only a keyboard type, so **Google Password Manager never offered or saved** a login. | `ContentType` semantics: `EmailAddress`, `Password`, `NewPassword`, `PersonFirstName/LastName`. |
+| 36 | OTP was six custom boxes driven by a fake keypad: **no paste, no autofill, no hardware keyboard, no auto-submit**. | An invisible real `BasicTextField` sits over the boxes (`SmsOtpCode` content type): paste, IME and Android's code autofill all work, and it submits on the sixth digit. |
+| 37 | Resend countdown rendered as **"0:300"** (`"0:" + seconds`). | `formatCooldown()` → `5:00`. |
+| 38 | Errors were plain text: **no retry**, and TalkBack never announced them. | "Try again" appears for network/429/5xx failures only; both error banners carry `liveRegion = Polite`. |
+| 39 | The **"256-Bit SSL" pill was hardcoded** — a false claim whenever the configured server URL was plain HTTP. | Label is derived from the real endpoint: "Secure connection" / "Insecure connection" / "Security Alert". |
+| 40 | ~75 lines of dead Apple-button composable were still compiled in. | Deleted (plus the now-unused `Path` / `Fill` / `Rect` imports). |
+| 41 | Password rules appeared only **after** a rejected submit. | Live strength meter with a segment bar and "Add a symbol" style guidance, on sign-up and on the security screen. |
+
+**Compose bump:** `composeBom` moved `2024.09.00` → `2025.06.01` (Compose 1.8) because
+`androidx.compose.ui.autofill.ContentType` is new in 1.8. Material 3 stays on the same minor
+line, but this is the one change in the whole auth patch that touches the dependency graph —
+if the build complains, revert that single line in `gradle/libs.versions.toml` and drop the
+`autofillType = …` arguments.
+
+**Still open (deliberately):** strings are not yet in `strings.xml` (needed for Sinhala/Tamil),
+the OTP screen is a fixed-height non-scrolling column (large font-scale devices can clip it),
+and there is no biometric unlock / TOTP 2FA.
+
+---
+
+## 7. Deliberate trade-offs / next steps
 
 * `register` still answers `409` for an existing verified address (needed for a usable sign-up UX).
   Login and password reset are enumeration-resistant.

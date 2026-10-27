@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.Logout
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
@@ -40,6 +41,8 @@ fun ModernSidebarDrawer(
     onOpenLanguageLab: () -> Unit,
     onCloseDrawer: () -> Unit,
     onOpenAdminPanel: (() -> Unit)? = null,
+    onOpenSecurity: (() -> Unit)? = null,
+    onSignOut: (() -> Unit)? = null,
     isAdmin: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -299,6 +302,36 @@ fun ModernSidebarDrawer(
                     isSelected = false,
                     badge = "Admin",
                     onClick = onOpenAdminPanel
+                )
+            }
+
+            // Account section: security controls and sign-out. The app had no
+            // way to sign out at all before this.
+            Spacer(modifier = Modifier.height(20.dp))
+            Text(
+                text = "ACCOUNT",
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                letterSpacing = 1.sp,
+                modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+            )
+
+            if (onOpenSecurity != null) {
+                DrawerNavTile(
+                    title = "Account & Security",
+                    icon = Icons.Filled.Security,
+                    isSelected = false,
+                    onClick = onOpenSecurity
+                )
+            }
+
+            if (onSignOut != null) {
+                DrawerNavTile(
+                    title = "Sign out",
+                    icon = Icons.AutoMirrored.Filled.Logout,
+                    isSelected = false,
+                    onClick = onSignOut
                 )
             }
         }

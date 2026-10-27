@@ -116,6 +116,8 @@ data class TheStudentUiState(
 
     // Admin Panel State
     val isAdminPanelOpen: Boolean = false,
+    // Account / security settings (change password, sign out everywhere, delete)
+    val isSecurityPanelOpen: Boolean = false,
     val activeChatConversation: ChatConversation? = null
 )
 
@@ -376,6 +378,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { it.copy(isAdminPanelOpen = false) }
     }
 
+    /** Open the account security sheet (password, sessions, deletion). */
+    fun openSecurityPanel() {
+        _uiState.update { it.copy(isSecurityPanelOpen = true) }
+    }
+
+    fun closeSecurityPanel() {
+        _uiState.update { it.copy(isSecurityPanelOpen = false) }
+    }
+
     fun openChat(conversation: ChatConversation) {
         _uiState.update { it.copy(activeChatConversation = conversation) }
     }
@@ -613,15 +624,40 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         openAuthScreen(isRegister = false)
     }
 
+    /** Sign out of this device (server session revoked, local state cleared). */
     fun logout() {
+        endSession("Logged out successfully.")
+    }
+
+    /**
+     * Sign out of EVERY device, then clear local state.
+     * Used by the security screen ("sign out everywhere") and after account
+     * deletion, so a stolen token cannot keep working.
+     */
+    fun signOutEverywhere() {
+        viewModelScope.launch {
+            val token = preferences.sessionToken
+            val serverUrl = serverUrlState.value
+            if (!token.isNullOrBlank()) {
+                TheStudentAuthClient.logoutAll(serverUrl, token)
+            }
+            endSession("Signed out of all devices.")
+        }
+    }
+
+    /**
+     * Clear every trace of the session and return to the auth flow.
+     * `revokeOnServer` is skipped when the account no longer exists.
+     */
+    fun endSession(message: String, revokeOnServer: Boolean = true) {
         viewModelScope.launch {
             val token = preferences.sessionToken
             val serverUrl = serverUrlState.value
             preferences.logout()
             repository.clearUserProfile()
             _isAdmin.value = false
-            _uiState.update { it.copy(isAdminPanelOpen = false) }
-            if (!token.isNullOrBlank()) {
+            _uiState.update { it.copy(isAdminPanelOpen = false, isSecurityPanelOpen = false) }
+            if (revokeOnServer && !token.isNullOrBlank()) {
                 // Revoke server-side AFTER clearing local state so the UI reacts
                 // instantly even if the network call is slow or fails.
                 TheStudentAuthClient.logout(serverUrl, token)
@@ -634,7 +670,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     isOtpAuthMode = false
                 )
             }
-            showSnackbar("Logged out successfully.")
+            showSnackbar(message)
         }
     }
 

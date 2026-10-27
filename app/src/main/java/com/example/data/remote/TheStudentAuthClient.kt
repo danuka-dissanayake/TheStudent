@@ -236,6 +236,24 @@ object TheStudentAuthClient {
     }
 
     /**
+     * Permanently delete the signed-in account and all of its data.
+     *
+     * The server re-checks the password for e-mail accounts (Google-only
+     * accounts have none, so the valid session is the proof of ownership).
+     */
+    suspend fun deleteAccount(
+        backendBaseUrl: String,
+        token: String,
+        password: String = ""
+    ): ApiOutcome = withContext(Dispatchers.IO) {
+        postOutcome(
+            endpoint(backendBaseUrl, "delete_account"),
+            JSONObject().apply { put("password", password) },
+            bearerToken = token
+        )
+    }
+
+    /**
      * Validate a stored session. Distinguishes "invalid" from "offline".
      */
     suspend fun validateSession(

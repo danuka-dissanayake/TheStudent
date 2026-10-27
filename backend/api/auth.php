@@ -16,6 +16,7 @@
  *   POST change_password         {current_password, new_password}   [Bearer]
  *   POST google_login            {id_token, target_exam?}
  *   GET  me                      [Bearer]  (alias: profile)
+ *   POST delete_account          {password?}                        [Bearer]
  *   POST logout                  [Bearer]
  *   POST logout_all              [Bearer]
  *
@@ -1436,7 +1437,52 @@ if ($action === 'google_login') {
 }
 
 // ===========================================================================
-// 9. ME / PROFILE
+// 9. DELETE ACCOUNT (self-service - required by Google Play policy)
+// ===========================================================================
+if ($action === 'delete_account') {
+    requirePost('delete_account');
+
+    [$user] = requireSession($pdo, false);
+    $userId   = (int) $user['id'];
+    $password = (string) ($body['password'] ?? '');
+
+    // Re-authenticate before an irreversible action. Accounts created through
+    // Google may have no local password; for those the valid session is the
+    // proof of ownership.
+    if (!empty($user['password_hash'])) {
+        if ($password === '' || !password_verify($password, (string) $user['password_hash'])) {
+            recordFailedAttempt($pdo, $clientIp, (string) $user['email']);
+            sendJsonResponse('error', 'Your password is incorrect.', [], 401);
+        }
+    }
+
+    $email = strtolower((string) $user['email']);
+
+    try {
+        $pdo->beginTransaction();
+        $pdo->prepare('DELETE FROM password_resets WHERE user_id = :uid')->execute(['uid' => $userId]);
+        $pdo->prepare('DELETE FROM user_tokens WHERE user_id = :uid')->execute(['uid' => $userId]);
+        $pdo->prepare('DELETE FROM email_verifications WHERE email = :email OR user_id = :uid')
+            ->execute(['email' => $email, 'uid' => $userId]);
+        $pdo->prepare('DELETE FROM login_attempts WHERE email = :email')->execute(['email' => $email]);
+        $pdo->prepare('DELETE FROM users WHERE id = :uid')->execute(['uid' => $userId]);
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        error_log('[TheStudent][auth] account deletion failed: ' . $e->getMessage());
+        sendJsonResponse('error', 'We could not delete your account right now. Please try again.', [], 500);
+    }
+
+    // No personal data is kept; the id only goes to the server log for auditing.
+    error_log('[TheStudent][auth] account deleted: user ' . $userId);
+
+    sendJsonResponse('success', 'Your account and personal data have been deleted.');
+}
+
+// ===========================================================================
+// 10. ME / PROFILE
 // ===========================================================================
 if ($action === 'me' || $action === 'profile') {
     [$user, $expiresAt] = requireSession($pdo);
@@ -1448,7 +1494,7 @@ if ($action === 'me' || $action === 'profile') {
 }
 
 // ===========================================================================
-// 10. LOGOUT
+// 11. LOGOUT
 // ===========================================================================
 if ($action === 'logout') {
     $token = extractBearerToken();

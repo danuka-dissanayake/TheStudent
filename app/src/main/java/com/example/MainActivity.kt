@@ -45,6 +45,7 @@ class MainActivity : ComponentActivity() {
             val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
             val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
 
+            val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
             val snackbarHostState = remember { SnackbarHostState() }
             val drawerState = rememberDrawerState(initialValue = DrawerValue.Closed)
             val coroutineScope = rememberCoroutineScope()
@@ -180,6 +181,37 @@ class MainActivity : ComponentActivity() {
                                         .fillMaxSize()
                                         .background(Color.White)
                                 )
+                            } else if (uiState.isSecurityPanelOpen) {
+                                // Account & security: password change, sign out of all
+                                // devices, account deletion (Play policy requirement).
+                                SecurityScreen(
+                                    backendBaseUrl = viewModel.serverUrlState.collectAsStateWithLifecycle().value,
+                                    onBack = { viewModel.closeSecurityPanel() },
+                                    onSignOutEverywhere = { viewModel.signOutEverywhere() },
+                                    onPasswordChanged = { newToken, expiresAt ->
+                                        val prefs = viewModel.preferences
+                                        val email = prefs.userEmail.orEmpty()
+                                        val name = prefs.userName.orEmpty()
+                                        if (!newToken.isNullOrBlank()) {
+                                            // The server rotated the session: store the new token.
+                                            com.example.data.local.TheStudentPreferences.setSession(
+                                                context = appContext,
+                                                token = newToken,
+                                                userEmail = email,
+                                                userName = name,
+                                                rememberMe = true,
+                                                role = prefs.userRole,
+                                                expiresAt = expiresAt
+                                            )
+                                        }
+                                    },
+                                    onAccountDeleted = {
+                                        viewModel.endSession(
+                                            "Your account has been deleted.",
+                                            revokeOnServer = false
+                                        )
+                                    }
+                                )
                             } else if (uiState.isAdminPanelOpen) {
                                 val dynamicPapers by viewModel.dynamicPapers.collectAsStateWithLifecycle()
                                 val isLiveDb by viewModel.isLiveDatabaseConnected.collectAsStateWithLifecycle()
@@ -275,6 +307,14 @@ class MainActivity : ComponentActivity() {
                                             onOpenAdminPanel = {
                                                 viewModel.openAdminPanel()
                                                 coroutineScope.launch { drawerState.close() }
+                                            },
+                                            onOpenSecurity = {
+                                                viewModel.openSecurityPanel()
+                                                coroutineScope.launch { drawerState.close() }
+                                            },
+                                            onSignOut = {
+                                                coroutineScope.launch { drawerState.close() }
+                                                viewModel.logout()
                                             }
                                         )
                                     }
