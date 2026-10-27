@@ -64,11 +64,14 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -1497,28 +1500,16 @@ private fun ChatConversationScreen(
     }
 
     if (showClearDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearDialog = false },
-            title = { Text("Clear this chat?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    "Your copy of the conversation with ${peer.name} will be removed. " +
-                        "The messages stay in their chat."
-                )
-            },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        showClearDialog = false
-                        onClearChat()
-                    }
-                ) {
-                    Text("Clear chat", color = ChatError, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
-            }
+        ChatConfirmDialog(
+            icon = Icons.Default.DeleteOutline,
+            title = "Clear this chat?",
+            message = "Your copy of the conversation with ${peer.name} is removed. " +
+                "The messages stay in their chat.",
+            confirmLabel = "Clear chat",
+            note = "Only on this phone",
+            noteIcon = Icons.Default.Smartphone,
+            onConfirm = onClearChat,
+            onDismiss = { showClearDialog = false }
         )
     }
 
@@ -1558,31 +1549,24 @@ private fun ChatConversationScreen(
     }
 
     pendingDelete?.let { message ->
-        AlertDialog(
-            onDismissRequest = { pendingDelete = null },
-            title = { Text("Delete message?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text(
-                    if (message.isMine && message.serverId > 0L) {
-                        "It will be removed from ${peer.name}'s chat as well. This cannot be undone."
-                    } else {
-                        "It will be removed from this phone only."
-                    }
-                )
+        val forEveryone = message.isMine && message.serverId > 0L
+        ChatConfirmDialog(
+            icon = Icons.Default.DeleteOutline,
+            title = if (forEveryone) "Delete for everyone?" else "Remove this message?",
+            message = if (forEveryone) {
+                "This message disappears from ${peer.name}'s phone too."
+            } else {
+                "It disappears from your phone. ${peer.name} keeps their copy."
             },
-            confirmButton = {
-                TextButton(
-                    onClick = {
-                        onDeleteMessage(message)
-                        pendingDelete = null
-                    }
-                ) {
-                    Text("Delete", color = ChatError, fontWeight = FontWeight.Bold)
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { pendingDelete = null }) { Text("Cancel") }
-            }
+            confirmLabel = if (forEveryone) "Delete" else "Remove",
+            preview = message.body.takeIf { it.isNotBlank() }
+                ?: message.attachment?.let { attachment ->
+                    if (attachment.isImage) "📷 Photo" else "📎 ${attachment.name}"
+                },
+            note = if (forEveryone) "Both of you lose it" else "Only on this phone",
+            noteIcon = if (forEveryone) Icons.Default.Groups else Icons.Default.Smartphone,
+            onConfirm = { onDeleteMessage(message) },
+            onDismiss = { pendingDelete = null }
         )
     }
 }
@@ -2001,6 +1985,196 @@ private fun AttachmentProgressBar(progress: Float, onDark: Boolean, modifier: Mo
                 .clip(RoundedCornerShape(2.dp))
                 .background(if (onDark) Color.White else EmeraldPrimary)
         )
+    }
+}
+
+/**
+ * Themed confirmation card, used for destructive chat actions.
+ *
+ * Built instead of [AlertDialog] because the Material dialog could not carry the
+ * app's language: an icon badge, a hairline card, capsule buttons and the
+ * MaisonNeue typeface. The message being acted on is shown as a quote chip, so
+ * there is no doubt which one is about to disappear.
+ */
+@Composable
+private fun ChatConfirmDialog(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    title: String,
+    message: String,
+    confirmLabel: String,
+    onConfirm: () -> Unit,
+    onDismiss: () -> Unit,
+    destructive: Boolean = true,
+    /** Quoted snippet of the affected message (delete only). */
+    preview: String? = null,
+    /** One short reassurance line under the copy, e.g. "Only on this phone". */
+    note: String? = null,
+    noteIcon: androidx.compose.ui.graphics.vector.ImageVector? = null
+) {
+    val accent = if (destructive) ChatError else EmeraldPrimary
+    val accentSoft = if (destructive) Color(0xFFFEF2F2) else Color(0xFFECFDF5)
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = Color.White,
+            border = BorderStroke(1.dp, ChatHairline),
+            shadowElevation = 20.dp,
+            modifier = Modifier
+                .padding(horizontal = 28.dp)
+                .fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 22.dp),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                // Icon badge: a soft tinted disc, not a loud warning triangle.
+                Box(
+                    modifier = Modifier
+                        .size(54.dp)
+                        .background(accentSoft, CircleShape),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = accent,
+                        modifier = Modifier.size(24.dp)
+                    )
+                }
+
+                Spacer(Modifier.height(14.dp))
+                Text(
+                    text = title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ChatInk,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = message,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 13.sp,
+                    lineHeight = 19.sp,
+                    color = ChatMuted,
+                    textAlign = TextAlign.Center
+                )
+
+                // The message itself, quoted, so the target is unmistakable.
+                if (preview != null) {
+                    Spacer(Modifier.height(14.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(ChatSheetCard)
+                            .padding(10.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .width(2.dp)
+                                .height(30.dp)
+                                .clip(RoundedCornerShape(1.dp))
+                                .background(accent.copy(alpha = 0.55f))
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Text(
+                            text = preview,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            lineHeight = 17.sp,
+                            color = ChatMuted,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                // Scope pill: "only on this phone" vs "also in their chat".
+                if (note != null) {
+                    Spacer(Modifier.height(12.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(accentSoft)
+                            .padding(horizontal = 10.dp, vertical = 6.dp)
+                    ) {
+                        noteIcon?.let {
+                            Icon(
+                                imageVector = it,
+                                contentDescription = null,
+                                tint = accent,
+                                modifier = Modifier.size(12.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                        }
+                        Text(
+                            text = note,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = accent
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(20.dp))
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    // Cancel is the quiet choice: grey capsule, ink text.
+                    Surface(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(15.dp),
+                        color = ChatSheetCard,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Cancel",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ChatInk
+                            )
+                        }
+                    }
+                    // Confirm carries the colour, so it reads as the real action.
+                    Surface(
+                        onClick = {
+                            onDismiss()
+                            onConfirm()
+                        },
+                        shape = RoundedCornerShape(15.dp),
+                        color = accent,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(46.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = confirmLabel,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
