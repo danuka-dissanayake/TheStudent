@@ -6,6 +6,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -37,6 +38,9 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.res.painterResource
 import android.util.Patterns
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalUriHandler
@@ -63,10 +67,9 @@ import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
 import com.example.data.remote.ApiOutcome
 import com.example.data.local.TheStudentPreferences
-import com.example.ui.components.TheStudentLogo
+import com.example.R
 import com.example.ui.components.StudentLoadingSpinner
 import com.example.ui.components.TheStudentAppBackground
-import com.example.ui.components.TheStudentSystemBars
 import com.example.ui.components.AuthSignInSkeleton
 import com.example.ui.components.AuthSignUpSkeleton
 import com.example.ui.components.AuthOtpSkeleton
@@ -612,12 +615,9 @@ fun AuthScreen(
         }
     }
 
-    // Lightwash screens: e-mail verification, forgot-password and reset-password.
-    // These use the same background as onboarding / profile setup (with the
-    // status bar blending into it); sign-in / sign-up keep the dark-green header.
-    val isLightWashMode = authMode == AuthMode.VERIFY_OTP ||
-        authMode == AuthMode.FORGOT_PASSWORD ||
-        authMode == AuthMode.RESET_PASSWORD
+    // Every auth step (sign in, sign up, verification, forgot and reset password)
+    // now shares the app-wide background from onboarding / profile setup, so the
+    // status bar blends into the same colour as the rest of the app.
 
     Scaffold(
         modifier = modifier
@@ -654,20 +654,12 @@ fun AuthScreen(
         // ── Box overlay: real content underneath, shimmer fades on top ──────
         Box(modifier = Modifier.fillMaxSize()) {
 
-        if (isLightWashMode) {
-            TheStudentAppBackground(
-                baseColor = Color(0xFFF8FAFC),
-                modifier = Modifier.fillMaxSize()
-            ) {}
-        } else {
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(AuthModernDarkGreen)
-            )
-            // White status-bar icons over the dark-green header.
-            TheStudentSystemBars(darkIcons = false)
-        }
+        // Shared app background, drawn edge-to-edge so the system bars blend in.
+        // TheStudentAppBackground also flips the status-bar icons to dark.
+        TheStudentAppBackground(
+            baseColor = Color(0xFFF8FAFC),
+            modifier = Modifier.fillMaxSize()
+        ) {}
 
         if (authMode == AuthMode.VERIFY_OTP) {
             ModernEmailVerificationScreen(
@@ -692,107 +684,116 @@ fun AuthScreen(
                     .padding(innerPadding)
             )
         } else {
-            // Real auth content (SIGN_IN & SIGN_UP)
+            // ═════════════════════════════════════════════════════════════════
+            // MODERN AUTH FORM  (sign in · sign up · forgot · reset)
+            // =================================================================
+            // Light wash background (same as onboarding / profile setup), a
+            // slim brand bar, big headline, animated mode switch and one
+            // floating white card that holds the whole form.
+            // ═════════════════════════════════════════════════════════════════
             Column(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .background(
-                        if (isLightWashMode) Color.Transparent else AuthModernDarkGreen
-                    )
             ) {
-                // Top Header section for Sign In & Sign Up
-                Column(
+                // ── slim top bar: back + brand mark ──────────────────────────
+                Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 24.dp, vertical = 18.dp),
-                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                        // Scaffold already applies the status-bar inset through
+                        // innerPadding, so no extra status-bars padding here.
+                        .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Circular back button row
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Start,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color.White,
-                            shadowElevation = 3.dp,
-                            modifier = Modifier
-                                .size(44.dp)
-                                .clickable(enabled = !isAnyLoading) {
-                                    if (authMode == AuthMode.SIGN_IN) {
-                                        onBack?.invoke()
-                                    } else {
-                                        clearError()
-                                        switchModeWithShimmer(AuthMode.SIGN_IN)
-                                    }
+                    Surface(
+                        onClick = {
+                            if (!isAnyLoading) {
+                                if (authMode == AuthMode.SIGN_IN) {
+                                    onBack?.invoke()
+                                } else {
+                                    clearError()
+                                    switchModeWithShimmer(AuthMode.SIGN_IN)
                                 }
-                                .testTag("auth_back_button")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "Back",
-                                    tint = AuthModernDarkGreen,
-                                    modifier = Modifier.size(20.dp)
-                                )
                             }
+                        },
+                        enabled = !isAnyLoading,
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+                        shadowElevation = 1.dp,
+                        modifier = Modifier
+                            .size(42.dp)
+                            .testTag("auth_back_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = AuthModernDarkGreen,
+                                modifier = Modifier.size(19.dp)
+                            )
                         }
                     }
 
-                    Spacer(modifier = Modifier.height(4.dp))
+                    Spacer(Modifier.weight(1f))
 
-                    val headline = when (authMode) {
-                        AuthMode.SIGN_IN -> "Go ahead and complete your\naccount and setup"
-                        AuthMode.SIGN_UP -> "Sign up now to access your\npersonal account"
-                        AuthMode.FORGOT_PASSWORD -> "Forgot your password?\nLet's get you back in"
-                        AuthMode.RESET_PASSWORD -> "Almost there -\nchoose a new password"
-                        AuthMode.VERIFY_OTP -> "Verify it's you"
-                    }
-                    val subheadline = when (authMode) {
-                        AuthMode.SIGN_IN -> "Create your account and simplify your workflow instantly."
-                        AuthMode.SIGN_UP -> "Sign up to access your account and exclusive features."
-                        AuthMode.FORGOT_PASSWORD -> "We'll email a 6-digit reset code to your registered address."
-                        AuthMode.RESET_PASSWORD -> "Use at least 8 characters with a letter and a number."
-                        AuthMode.VERIFY_OTP -> "Enter the code we emailed you."
-                    }
-                    Text(
-                        text = headline,
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isLightWashMode) Color(0xFF0F172A) else Color.White,
-                        lineHeight = 32.sp
-                    )
-                    Text(
-                        text = subheadline,
-                        style = MaterialTheme.typography.bodyMedium,
-                        color = if (isLightWashMode) Color(0xFF475569) else Color.White.copy(alpha = 0.92f)
+                    Image(
+                        painter = painterResource(id = R.drawable.thestudent_logo_full),
+                        contentDescription = "TheStudent",
+                        contentScale = ContentScale.Fit,
+                        modifier = Modifier
+                            .height(26.dp)
+                            .aspectRatio(3.6211f)
                     )
                 }
 
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Main White Sheet with generous top rounded corners
-                Surface(
-                    shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp),
-                    color = MaterialTheme.colorScheme.surface,
+                // ── scrollable content ───────────────────────────────────────
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
                         .weight(1f)
-                        .shadow(16.dp, shape = RoundedCornerShape(topStart = 32.dp, topEnd = 32.dp))
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                        .padding(horizontal = 20.dp)
                 ) {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(horizontal = 20.dp, vertical = 26.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(18.dp)
-                    ) {
-                    // Redesigned modern toggle pill switcher
+                    Spacer(Modifier.height(10.dp))
+
+                    val headline = when (authMode) {
+                        AuthMode.SIGN_IN -> "Welcome back"
+                        AuthMode.SIGN_UP -> "Create your account"
+                        AuthMode.FORGOT_PASSWORD -> "Forgot password?"
+                        AuthMode.RESET_PASSWORD -> "Choose a new password"
+                        AuthMode.VERIFY_OTP -> "Verify it's you"
+                    }
+                    val subheadline = when (authMode) {
+                        AuthMode.SIGN_IN -> "Pick up right where you left off."
+                        AuthMode.SIGN_UP -> "Free forever, built for the Sri Lankan syllabus."
+                        AuthMode.FORGOT_PASSWORD -> "We'll email a 6-digit code to your inbox."
+                        AuthMode.RESET_PASSWORD -> "At least 8 characters, with a letter and a number."
+                        AuthMode.VERIFY_OTP -> "Enter the code we emailed you."
+                    }
+
+                    Text(
+                        text = headline,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 30.sp,
+                        color = Color(0xFF0B1220),
+                        letterSpacing = (-0.6).sp
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = subheadline,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 14.sp,
+                        color = Color(0xFF64748B),
+                        lineHeight = 20.sp
+                    )
+
+                    Spacer(Modifier.height(22.dp))
+
+                    // ── sign in / sign up segmented switch ───────────────────
                     if (authMode == AuthMode.SIGN_IN || authMode == AuthMode.SIGN_UP) {
-                        ModernSegmentedToggle(
+                        ModernAuthToggle(
                             isSignIn = authMode == AuthMode.SIGN_IN,
                             enabled = !isAnyLoading,
                             onSelectSignIn = {
@@ -808,437 +809,453 @@ fun AuthScreen(
                                 }
                             }
                         )
+                        Spacer(Modifier.height(18.dp))
                     }
 
-                    // Error message banner if any
+                    // ── error banner ─────────────────────────────────────────
                     AnimatedVisibility(visible = errorMessage != null) {
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = RedError.copy(alpha = 0.12f),
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                // TalkBack announces the message as soon as it appears
-                                // instead of leaving it silently on screen.
-                                .semantics { liveRegion = LiveRegionMode.Polite }
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(12.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
-                            ) {
-                                Icon(Icons.Default.Error, contentDescription = null, tint = RedError, modifier = Modifier.size(18.dp))
-                                Text(
-                                    text = errorMessage ?: "",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = RedError,
-                                    fontWeight = FontWeight.Medium,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                retryAction?.let { retry ->
-                                    TextButton(
-                                        onClick = {
-                                            clearError()
-                                            retry()
-                                        },
-                                        enabled = !isAnyLoading,
-                                        contentPadding = PaddingValues(horizontal = 8.dp),
-                                        modifier = Modifier.testTag("btn_retry_last_action")
-                                    ) {
-                                        Text(
-                                            text = "Try again",
-                                            color = RedError,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 12.5.sp
-                                        )
+                        Column {
+                            AuthErrorBanner(
+                                message = errorMessage ?: "",
+                                retry = retryAction?.let { retry ->
+                                    {
+                                        clearError()
+                                        retry()
                                     }
                                 }
-                            }
+                            )
+                            Spacer(Modifier.height(14.dp))
                         }
                     }
 
-                    // Screen Body Content
-                    AnimatedContent(
-                        targetState = authMode,
-                        transitionSpec = { fadeIn() togetherWith fadeOut() },
-                        label = "auth_screen_transition"
-                    ) { mode ->
-                        when (mode) {
-                            AuthMode.SIGN_IN -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    // Email input
-                                    CleanLabeledTextField(
-                                        label = "Email",
-                                        value = email,
-                                        placeholder = "jonathansmith76@gmail.com",
-                                        keyboardType = KeyboardType.Email,
-                                        enabled = !isAnyLoading,
-                                        onValueChange = {
-                                            email = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.EmailAddress,
-                                        testTag = "signin_email_field"
-                                    )
+                    // ── the form card ────────────────────────────────────────
+                    Surface(
+                        shape = RoundedCornerShape(26.dp),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, Color(0xFFEFF2F6)),
+                        shadowElevation = 3.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(horizontal = 18.dp, vertical = 20.dp),
+                            verticalArrangement = Arrangement.spacedBy(14.dp)
+                        ) {
+                            AnimatedContent(
+                                targetState = authMode,
+                                transitionSpec = { fadeIn() togetherWith fadeOut() },
+                                label = "auth_screen_transition"
+                            ) { mode ->
+                                when (mode) {
 
-                                    // Password input
-                                    CleanLabeledTextField(
-                                        label = "Password",
-                                        value = password,
-                                        placeholder = "Enter your password",
-                                        keyboardType = KeyboardType.Password,
-                                        isPassword = true,
-                                        passwordVisible = passwordVisible,
-                                        enabled = !isAnyLoading,
-                                        onTogglePassword = { passwordVisible = !passwordVisible },
-                                        onValueChange = {
-                                            password = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.Password,
-                                        imeAction = ImeAction.Done,
-                                        onSubmit = { handleEmailSignIn() },
-                                        testTag = "signin_password_field"
-                                    )
-
-                                    // Remember me & Forget password row
-                                    Row(
+                                    // ─────────────────────────────── SIGN IN ──
+                                    AuthMode.SIGN_IN -> Column(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
                                     ) {
+                                        CleanLabeledTextField(
+                                            label = "Email address",
+                                            value = email,
+                                            placeholder = "you@example.com",
+                                            keyboardType = KeyboardType.Email,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.AlternateEmail,
+                                            onValueChange = {
+                                                email = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.EmailAddress,
+                                            testTag = "signin_email_field"
+                                        )
+
+                                        CleanLabeledTextField(
+                                            label = "Password",
+                                            value = password,
+                                            placeholder = "Enter your password",
+                                            keyboardType = KeyboardType.Password,
+                                            isPassword = true,
+                                            passwordVisible = passwordVisible,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.Lock,
+                                            onTogglePassword = { passwordVisible = !passwordVisible },
+                                            onValueChange = {
+                                                password = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.Password,
+                                            imeAction = ImeAction.Done,
+                                            onSubmit = { handleEmailSignIn() },
+                                            testTag = "signin_password_field"
+                                        )
+
+                                        // Remember me + forgot password
                                         Row(
-                                            verticalAlignment = Alignment.CenterVertically,
-                                            modifier = Modifier.clickable(enabled = !isAnyLoading) { rememberMe = !rememberMe }
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Checkbox(
-                                                checked = rememberMe,
-                                                enabled = !isAnyLoading,
-                                                onCheckedChange = { rememberMe = it },
-                                                colors = CheckboxDefaults.colors(
-                                                    checkedColor = AuthModernDarkGreen,
-                                                    checkmarkColor = Color.White
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                modifier = Modifier.clickable(enabled = !isAnyLoading) {
+                                                    rememberMe = !rememberMe
+                                                }
+                                            ) {
+                                                Switch(
+                                                    checked = rememberMe,
+                                                    enabled = !isAnyLoading,
+                                                    onCheckedChange = { rememberMe = it },
+                                                    colors = SwitchDefaults.colors(
+                                                        checkedThumbColor = Color.White,
+                                                        checkedTrackColor = AuthModernDarkGreen,
+                                                        uncheckedThumbColor = Color.White,
+                                                        uncheckedTrackColor = Color(0xFFCBD5E1),
+                                                        uncheckedBorderColor = Color.Transparent
+                                                    ),
+                                                    modifier = Modifier
+                                                        .height(24.dp)
+                                                        .width(42.dp)
                                                 )
-                                            )
+                                                Spacer(Modifier.width(8.dp))
+                                                Text(
+                                                    text = "Remember me",
+                                                    fontFamily = MaisonNeueFontFamily,
+                                                    fontSize = 13.sp,
+                                                    color = Color(0xFF475569)
+                                                )
+                                            }
+
                                             Text(
-                                                text = "Remember me",
-                                                style = MaterialTheme.typography.bodyMedium,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                text = "Forgot password?",
+                                                fontFamily = MaisonNeueFontFamily,
+                                                fontSize = 13.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = EmeraldPrimary,
+                                                modifier = Modifier
+                                                    .clickable(enabled = !isAnyLoading) {
+                                                        clearError()
+                                                        switchModeWithShimmer(AuthMode.FORGOT_PASSWORD)
+                                                    }
+                                                    .testTag("forget_password_button")
                                             )
                                         }
 
-                                        Text(
-                                            text = "Forget password?",
-                                            style = MaterialTheme.typography.bodyMedium,
-                                            fontWeight = FontWeight.SemiBold,
-                                            color = RedError,
-                                            modifier = Modifier
-                                                .clickable(enabled = !isAnyLoading) {
-                                                    clearError()
-                                                    switchModeWithShimmer(AuthMode.FORGOT_PASSWORD)
-                                                }
-                                                .testTag("forget_password_button")
-                                        )
-                                    }
+                                        Spacer(Modifier.height(2.dp))
 
-                                    // Primary Sign In Button
-                                    SolidPillButton(
-                                        text = if (isSigningIn) "Signing In..." else "Sign In",
-                                        buttonColor = AuthModernDarkGreen,
-                                        isLoading = isSigningIn,
-                                        enabled = !isAnyLoading,
-                                        onClick = { handleEmailSignIn() },
-                                        testTag = "btn_sign_in"
-                                    )
-
-                                    // Or Login With divider
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 6.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                        )
-                                        Text(
-                                            text = "   Or Login With   ",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                        )
-                                    }
-
-                                    // Official Google Button (Full Width, Apple removed, Admin Panel removed)
-                                    OfficialGoogleButton(
-                                        text = "Continue with Google",
-                                        isLoading = isGoogleSigningIn,
-                                        enabled = !isAnyLoading,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onClick = { handleGoogleSignIn() }
-                                    )
-                                }
-                            }
-
-                            AuthMode.SIGN_UP -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    // First Name & Last Name 2-column row
-                                    Row(
-                                        modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        CleanLabeledTextField(
-                                            label = "First Name",
-                                            value = firstName,
-                                            placeholder = "Jonathan",
-                                            modifier = Modifier.weight(1f),
+                                        SolidPillButton(
+                                            text = if (isSigningIn) "Signing in..." else "Sign in",
+                                            buttonColor = AuthModernDarkGreen,
+                                            isLoading = isSigningIn,
                                             enabled = !isAnyLoading,
-                                            onValueChange = { firstName = it },
-                                            autofillType = ContentType.PersonFirstName,
-                                            testTag = "signup_firstname_field"
+                                            onClick = { handleEmailSignIn() },
+                                            testTag = "btn_sign_in"
+                                        )
+
+                                        AuthOrDivider(text = "or continue with")
+
+                                        OfficialGoogleButton(
+                                            text = "Continue with Google",
+                                            isLoading = isGoogleSigningIn,
+                                            enabled = !isAnyLoading,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            onClick = { handleGoogleSignIn() }
+                                        )
+                                    }
+
+                                    // ─────────────────────────────── SIGN UP ──
+                                    AuthMode.SIGN_UP -> Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                        ) {
+                                            CleanLabeledTextField(
+                                                label = "First name",
+                                                value = firstName,
+                                                placeholder = "Danuka",
+                                                modifier = Modifier.weight(1f),
+                                                enabled = !isAnyLoading,
+                                                onValueChange = { firstName = it },
+                                                autofillType = ContentType.PersonFirstName,
+                                                testTag = "signup_firstname_field"
+                                            )
+                                            CleanLabeledTextField(
+                                                label = "Last name",
+                                                value = lastName,
+                                                placeholder = "Dissanayake",
+                                                modifier = Modifier.weight(1f),
+                                                enabled = !isAnyLoading,
+                                                onValueChange = { lastName = it },
+                                                autofillType = ContentType.PersonLastName,
+                                                testTag = "signup_lastname_field"
+                                            )
+                                        }
+
+                                        CleanLabeledTextField(
+                                            label = "Email address",
+                                            value = email,
+                                            placeholder = "you@example.com",
+                                            keyboardType = KeyboardType.Email,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.AlternateEmail,
+                                            onValueChange = {
+                                                email = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.EmailAddress,
+                                            testTag = "signup_email_field"
+                                        )
+
+                                        CleanLabeledTextField(
+                                            label = "Password",
+                                            value = password,
+                                            placeholder = "At least 8 characters",
+                                            keyboardType = KeyboardType.Password,
+                                            isPassword = true,
+                                            passwordVisible = passwordVisible,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.Lock,
+                                            onTogglePassword = { passwordVisible = !passwordVisible },
+                                            onValueChange = {
+                                                password = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.NewPassword,
+                                            testTag = "signup_password_field"
+                                        )
+                                        AnimatedVisibility(visible = password.isNotEmpty()) {
+                                            PasswordStrengthHint(password = password)
+                                        }
+
+                                        CleanLabeledTextField(
+                                            label = "Confirm password",
+                                            value = confirmPassword,
+                                            placeholder = "Repeat your password",
+                                            keyboardType = KeyboardType.Password,
+                                            isPassword = true,
+                                            passwordVisible = confirmPasswordVisible,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.LockReset,
+                                            onTogglePassword = { confirmPasswordVisible = !confirmPasswordVisible },
+                                            onValueChange = {
+                                                confirmPassword = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.NewPassword,
+                                            imeAction = ImeAction.Done,
+                                            onSubmit = { handleEmailRegister() },
+                                            testTag = "signup_confirm_password_field"
+                                        )
+
+                                        SignUpConsentRow(
+                                            accepted = acceptedTerms,
+                                            enabled = !isAnyLoading,
+                                            onToggle = { acceptedTerms = !acceptedTerms }
+                                        )
+
+                                        SolidPillButton(
+                                            text = if (isRegistering) "Creating account..." else "Create account",
+                                            buttonColor = AuthModernDarkGreen,
+                                            isLoading = isRegistering,
+                                            enabled = !isAnyLoading,
+                                            onClick = { handleEmailRegister() },
+                                            testTag = "btn_register"
+                                        )
+
+                                        AuthOrDivider(text = "or sign up with")
+
+                                        OfficialGoogleButton(
+                                            text = "Sign up with Google",
+                                            isLoading = isGoogleSigningIn,
+                                            enabled = !isAnyLoading,
+                                            modifier = Modifier.fillMaxWidth(),
+                                            onClick = { handleGoogleSignIn() }
+                                        )
+                                    }
+
+                                    // ───────────────────────── FORGOT PASSWORD ──
+                                    AuthMode.FORGOT_PASSWORD -> Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        Text(
+                                            text = "Enter the email linked to your account and we'll send " +
+                                                "you a 6-digit reset code.",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 13.5.sp,
+                                            lineHeight = 19.sp,
+                                            color = Color(0xFF64748B)
                                         )
                                         CleanLabeledTextField(
-                                            label = "Last Name",
-                                            value = lastName,
-                                            placeholder = "Smith",
-                                            modifier = Modifier.weight(1f),
+                                            label = "Email address",
+                                            value = email,
+                                            placeholder = "you@example.com",
+                                            keyboardType = KeyboardType.Email,
                                             enabled = !isAnyLoading,
-                                            onValueChange = { lastName = it },
-                                            autofillType = ContentType.PersonLastName,
-                                            testTag = "signup_lastname_field"
+                                            leadingIcon = Icons.Default.AlternateEmail,
+                                            onValueChange = {
+                                                email = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.EmailAddress,
+                                            imeAction = ImeAction.Done,
+                                            onSubmit = { handleForgotPassword() },
+                                            testTag = "forgot_email_field"
                                         )
-                                    }
-
-                                    // Email input
-                                    CleanLabeledTextField(
-                                        label = "Email",
-                                        value = email,
-                                        placeholder = "jonathansmith76@gmail.com",
-                                        keyboardType = KeyboardType.Email,
-                                        enabled = !isAnyLoading,
-                                        onValueChange = {
-                                            email = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.EmailAddress,
-                                        testTag = "signup_email_field"
-                                    )
-
-                                    // Password input
-                                    CleanLabeledTextField(
-                                        label = "Password",
-                                        value = password,
-                                        placeholder = "••••••••••••",
-                                        keyboardType = KeyboardType.Password,
-                                        isPassword = true,
-                                        passwordVisible = passwordVisible,
-                                        enabled = !isAnyLoading,
-                                        onTogglePassword = { passwordVisible = !passwordVisible },
-                                        onValueChange = {
-                                            password = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.NewPassword,
-                                        testTag = "signup_password_field"
-                                    )
-                                    if (password.isNotEmpty()) {
-                                        PasswordStrengthHint(password = password)
-                                    }
-
-                                    // Confirm Password input
-                                    CleanLabeledTextField(
-                                        label = "Confirm Password",
-                                        value = confirmPassword,
-                                        placeholder = "••••••••••••",
-                                        keyboardType = KeyboardType.Password,
-                                        isPassword = true,
-                                        passwordVisible = confirmPasswordVisible,
-                                        enabled = !isAnyLoading,
-                                        onTogglePassword = { confirmPasswordVisible = !confirmPasswordVisible },
-                                        onValueChange = {
-                                            confirmPassword = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.NewPassword,
-                                        imeAction = ImeAction.Done,
-                                        onSubmit = { handleEmailRegister() },
-                                        testTag = "signup_confirm_password_field"
-                                    )
-
-                                    // Terms & privacy consent (required before an account is created)
-                                    SignUpConsentRow(
-                                        accepted = acceptedTerms,
-                                        enabled = !isAnyLoading,
-                                        onToggle = { acceptedTerms = !acceptedTerms }
-                                    )
-
-                                    // Register Button
-                                    SolidPillButton(
-                                        text = if (isRegistering) "Creating Account..." else "Register",
-                                        buttonColor = AuthModernDarkGreen,
-                                        isLoading = isRegistering,
-                                        enabled = !isAnyLoading,
-                                        onClick = { handleEmailRegister() },
-                                        testTag = "btn_register"
-                                    )
-
-                                    // Or Sign Up With divider
-                                    Row(
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .padding(vertical = 4.dp),
-                                        verticalAlignment = Alignment.CenterVertically
-                                    ) {
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                                        SolidPillButton(
+                                            text = if (isRequestingReset) "Sending code..." else "Send reset code",
+                                            buttonColor = AuthModernDarkGreen,
+                                            isLoading = isRequestingReset,
+                                            enabled = !isAnyLoading,
+                                            onClick = { handleForgotPassword() },
+                                            testTag = "btn_send_reset_code"
                                         )
-                                        Text(
-                                            text = "   Or Sign Up With   ",
-                                            style = MaterialTheme.typography.labelSmall,
-                                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                            fontWeight = FontWeight.Medium
-                                        )
-                                        HorizontalDivider(
-                                            modifier = Modifier.weight(1f),
-                                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
-                                        )
-                                    }
-
-                                    // Official Google Button in Sign Up
-                                    OfficialGoogleButton(
-                                        text = "Sign up with Google",
-                                        isLoading = isGoogleSigningIn,
-                                        enabled = !isAnyLoading,
-                                        modifier = Modifier.fillMaxWidth(),
-                                        onClick = { handleGoogleSignIn() }
-                                    )
-                                }
-                            }
-
-                            AuthMode.FORGOT_PASSWORD -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text(
-                                        text = "Enter the email linked to your account and we'll send you a 6-digit reset code.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    CleanLabeledTextField(
-                                        label = "Email",
-                                        value = email,
-                                        placeholder = "you@example.com",
-                                        keyboardType = KeyboardType.Email,
-                                        enabled = !isAnyLoading,
-                                        onValueChange = {
-                                            email = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.EmailAddress,
-                                        imeAction = ImeAction.Done,
-                                        onSubmit = { handleForgotPassword() },
-                                        testTag = "forgot_email_field"
-                                    )
-                                    SolidPillButton(
-                                        text = if (isRequestingReset) "Sending code..." else "Send reset code",
-                                        buttonColor = AuthModernDarkGreen,
-                                        isLoading = isRequestingReset,
-                                        enabled = !isAnyLoading,
-                                        onClick = { handleForgotPassword() },
-                                        testTag = "btn_send_reset_code"
-                                    )
-                                    TextButton(
-                                        onClick = {
-                                            clearError()
-                                            switchModeWithShimmer(AuthMode.SIGN_IN)
-                                        },
-                                        enabled = !isAnyLoading
-                                    ) {
                                         Text(
                                             text = "Back to sign in",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
                                             color = AuthModernDarkGreen,
-                                            fontWeight = FontWeight.SemiBold
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .clickable(enabled = !isAnyLoading) {
+                                                    clearError()
+                                                    switchModeWithShimmer(AuthMode.SIGN_IN)
+                                                }
+                                                .padding(vertical = 6.dp)
                                         )
                                     }
+
+                                    // ────────────────────────── RESET PASSWORD ──
+                                    AuthMode.RESET_PASSWORD -> Column(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                                    ) {
+                                        Text(
+                                            text = "New password for " +
+                                                pendingVerificationEmail.ifBlank { email }.ifBlank { "your email" } +
+                                                ". All other devices will be signed out.",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 13.5.sp,
+                                            lineHeight = 19.sp,
+                                            color = Color(0xFF64748B)
+                                        )
+                                        CleanLabeledTextField(
+                                            label = "New password",
+                                            value = newPassword,
+                                            placeholder = "At least 8 characters",
+                                            keyboardType = KeyboardType.Password,
+                                            isPassword = true,
+                                            passwordVisible = newPasswordVisible,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.Lock,
+                                            onTogglePassword = { newPasswordVisible = !newPasswordVisible },
+                                            onValueChange = {
+                                                newPassword = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.NewPassword,
+                                            testTag = "reset_password_field"
+                                        )
+                                        CleanLabeledTextField(
+                                            label = "Confirm new password",
+                                            value = confirmNewPassword,
+                                            placeholder = "Repeat your new password",
+                                            keyboardType = KeyboardType.Password,
+                                            isPassword = true,
+                                            passwordVisible = confirmNewPasswordVisible,
+                                            enabled = !isAnyLoading,
+                                            leadingIcon = Icons.Default.LockReset,
+                                            onTogglePassword = { confirmNewPasswordVisible = !confirmNewPasswordVisible },
+                                            onValueChange = {
+                                                confirmNewPassword = it
+                                                clearError()
+                                            },
+                                            autofillType = ContentType.NewPassword,
+                                            imeAction = ImeAction.Done,
+                                            onSubmit = { handleResetPassword() },
+                                            testTag = "reset_confirm_password_field"
+                                        )
+                                        SolidPillButton(
+                                            text = if (isResettingPassword) "Updating..." else "Update password",
+                                            buttonColor = AuthModernDarkGreen,
+                                            isLoading = isResettingPassword,
+                                            enabled = !isAnyLoading,
+                                            onClick = { handleResetPassword() },
+                                            testTag = "btn_update_password"
+                                        )
+                                    }
+
+                                    AuthMode.VERIFY_OTP -> {}
                                 }
                             }
-
-                            AuthMode.RESET_PASSWORD -> {
-                                Column(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    verticalArrangement = Arrangement.spacedBy(16.dp)
-                                ) {
-                                    Text(
-                                        text = "Enter a new password for " +
-                                            pendingVerificationEmail.ifBlank { email }.ifBlank { "your email" } +
-                                            ". All other devices will be signed out.",
-                                        style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    CleanLabeledTextField(
-                                        label = "New password",
-                                        value = newPassword,
-                                        placeholder = "At least 8 characters",
-                                        keyboardType = KeyboardType.Password,
-                                        isPassword = true,
-                                        passwordVisible = newPasswordVisible,
-                                        enabled = !isAnyLoading,
-                                        onTogglePassword = { newPasswordVisible = !newPasswordVisible },
-                                        onValueChange = {
-                                            newPassword = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.NewPassword,
-                                        testTag = "reset_password_field"
-                                    )
-                                    CleanLabeledTextField(
-                                        label = "Confirm new password",
-                                        value = confirmNewPassword,
-                                        placeholder = "Repeat your new password",
-                                        keyboardType = KeyboardType.Password,
-                                        isPassword = true,
-                                        passwordVisible = confirmNewPasswordVisible,
-                                        enabled = !isAnyLoading,
-                                        onTogglePassword = { confirmNewPasswordVisible = !confirmNewPasswordVisible },
-                                        onValueChange = {
-                                            confirmNewPassword = it
-                                            clearError()
-                                        },
-                                        autofillType = ContentType.NewPassword,
-                                        imeAction = ImeAction.Done,
-                                        onSubmit = { handleResetPassword() },
-                                        testTag = "reset_confirm_password_field"
-                                    )
-                                    SolidPillButton(
-                                        text = if (isResettingPassword) "Updating..." else "Update password",
-                                        buttonColor = AuthModernDarkGreen,
-                                        isLoading = isResettingPassword,
-                                        enabled = !isAnyLoading,
-                                        onClick = { handleResetPassword() },
-                                        testTag = "btn_update_password"
-                                    )
-                                }
-                            }
-
-                            AuthMode.VERIFY_OTP -> {}
                         }
                     }
+
+                    // ── footer switch ────────────────────────────────────────
+                    Spacer(Modifier.height(18.dp))
+                    if (authMode == AuthMode.SIGN_IN || authMode == AuthMode.SIGN_UP) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.Center,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = if (authMode == AuthMode.SIGN_IN) {
+                                    "New to TheStudent?"
+                                } else {
+                                    "Already have an account?"
+                                },
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.5.sp,
+                                color = Color(0xFF64748B)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            Text(
+                                text = if (authMode == AuthMode.SIGN_IN) "Create account" else "Sign in",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldPrimary,
+                                modifier = Modifier
+                                    .clickable(enabled = !isAnyLoading) {
+                                        clearError()
+                                        switchModeWithShimmer(
+                                            if (authMode == AuthMode.SIGN_IN) AuthMode.SIGN_UP
+                                            else AuthMode.SIGN_IN
+                                        )
+                                    }
+                                    .testTag("btn_switch_auth_mode")
+                            )
+                        }
+                        Spacer(Modifier.height(10.dp))
+                    }
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = Color(0xFF94A3B8),
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(Modifier.width(5.dp))
+                        Text(
+                            text = "Secure connection · email verification required",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            color = Color(0xFF94A3B8)
+                        )
+                    }
+
+                    Spacer(Modifier.height(26.dp))
                 }
             }
         }
-    }
 
         // ── Shimmer overlay (on top of real content, fades in/out) ────────────
         androidx.compose.animation.AnimatedVisibility(
@@ -1488,6 +1505,171 @@ private fun ConsentLink(
 }
 
 /**
+ * Segmented sign-in / sign-up switch used above the auth form card.
+ */
+@Composable
+fun ModernAuthToggle(
+    isSignIn: Boolean,
+    enabled: Boolean,
+    onSelectSignIn: () -> Unit,
+    onSelectSignUp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFF1F5F9),
+        border = BorderStroke(1.dp, Color(0xFFE6ECF3)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(4.dp),
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
+        ) {
+            SegmentedAuthOption(
+                text = "Sign in",
+                selected = isSignIn,
+                enabled = enabled,
+                onClick = onSelectSignIn,
+                modifier = Modifier.weight(1f)
+            )
+            SegmentedAuthOption(
+                text = "Sign up",
+                selected = !isSignIn,
+                enabled = enabled,
+                onClick = onSelectSignUp,
+                modifier = Modifier.weight(1f)
+            )
+        }
+    }
+}
+
+@Composable
+private fun SegmentedAuthOption(
+    text: String,
+    selected: Boolean,
+    enabled: Boolean,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Box(
+        modifier = modifier
+            .height(40.dp)
+            .clip(RoundedCornerShape(12.dp))
+            .background(if (selected) AuthModernDarkGreen else Color.Transparent)
+            .clickable(enabled = enabled && !selected) { onClick() },
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = text,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 13.5.sp,
+            fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+            color = when {
+                selected -> Color.White
+                enabled -> Color(0xFF475569)
+                else -> Color(0xFF94A3B8)
+            }
+        )
+    }
+}
+
+/**
+ * Soft red banner shown above the form card whenever the view model reports an error.
+ */
+@Composable
+fun AuthErrorBanner(
+    message: String,
+    modifier: Modifier = Modifier,
+    retry: (() -> Unit)? = null
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color(0xFFFEF2F2),
+        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+        modifier = modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(26.dp)
+                    .clip(CircleShape)
+                    .background(Color(0xFFFEE2E2)),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.ErrorOutline,
+                    contentDescription = null,
+                    tint = Color(0xFFDC2626),
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Text(
+                text = message,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.5.sp,
+                lineHeight = 17.sp,
+                color = Color(0xFFB91C1C),
+                modifier = Modifier.weight(1f)
+            )
+            if (retry != null) {
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "Retry",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color(0xFFDC2626),
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable { retry() }
+                        .padding(horizontal = 8.dp, vertical = 4.dp)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * "─── or continue with ───" hairline divider used before the Google button.
+ */
+@Composable
+fun AuthOrDivider(
+    text: String,
+    modifier: Modifier = Modifier
+) {
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .padding(vertical = 2.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(Color(0xFFE8EDF3))
+        )
+        Text(
+            text = text,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 11.5.sp,
+            color = Color(0xFF94A3B8),
+            modifier = Modifier.padding(horizontal = 10.dp)
+        )
+        Box(
+            modifier = Modifier
+                .weight(1f)
+                .height(1.dp)
+                .background(Color(0xFFE8EDF3))
+        )
+    }
+}
+
+/**
  * Clean field with floating notch label matching Material Design outline specs.
  */
 @Composable
@@ -1505,7 +1687,8 @@ fun CleanLabeledTextField(
     autofillType: ContentType? = null,
     imeAction: ImeAction = ImeAction.Next,
     onSubmit: (() -> Unit)? = null,
-    testTag: String = ""
+    testTag: String = "",
+    leadingIcon: ImageVector? = null
 ) {
     OutlinedTextField(
         value = value,
@@ -1542,6 +1725,16 @@ fun CleanLabeledTextField(
             onGo = { onSubmit?.invoke() }
         ),
         visualTransformation = if (isPassword && !passwordVisible) PasswordVisualTransformation() else VisualTransformation.None,
+        leadingIcon = leadingIcon?.let { icon ->
+            {
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (enabled) Color(0xFF94A3B8) else Color(0xFFCBD5E1),
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+        },
         trailingIcon = {
             if (isPassword && onTogglePassword != null) {
                 IconButton(onClick = onTogglePassword, enabled = enabled) {
