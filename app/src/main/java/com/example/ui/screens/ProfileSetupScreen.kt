@@ -22,7 +22,6 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -64,8 +63,6 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
-import androidx.compose.material3.Scaffold
-import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -300,84 +297,20 @@ fun ProfileSetupScreen(
 
     // Layout contract
     // --------------
-    // Scaffold owns the bottom action bar. The form is its `content`, so the
-    // button is measured first and the scrollable area receives exactly the
-    // remaining height via `innerPadding`. Nothing can ever render underneath
-    // the button, and the button can never be pushed down by long content.
-    Scaffold(
+    // The "Finish setup" button is the LAST item inside the scroll container, so
+    // it sits directly under the "Where you study" card and is only reachable by
+    // scrolling - it is deliberately NOT pinned to the screen bottom. The header
+    // stays fixed, the form scrolls, and the bottom padding is applied on the
+    // scroll content (never on the container) so the button can leave the screen.
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .imePadding(),          // keep the bar above the keyboard
-        containerColor = MaterialTheme.colorScheme.background,
-        // System insets are applied explicitly (status bar on the header,
-        // navigation bar inside the bottom bar), so Scaffold must not add them.
-        contentWindowInsets = WindowInsets(0, 0, 0, 0),
-        bottomBar = {
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 16.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    if (submitted && !isFormValid && !isSaving) {
-                        Text(
-                            text = "Please fix the highlighted fields above.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RedError,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    Button(
-                        onClick = { submit() },
-                        enabled = !isSaving && !isProcessingPhoto,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .testTag("profile_finish_button"),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EmeraldPrimary,
-                            contentColor = Color.White,
-                            disabledContainerColor = EmeraldPrimary.copy(alpha = 0.45f)
-                        )
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text("Saving your profile…", fontWeight = FontWeight.SemiBold)
-                        } else if (isProcessingPhoto) {
-                            Text("Preparing photo…", fontWeight = FontWeight.SemiBold)
-                        } else {
-                            Text("Finish setup", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(5.dp)
-                            .clip(CircleShape),
-                        color = EmeraldPrimary,
-                        trackColor = EmeraldPrimary.copy(alpha = 0.15f)
-                    )
-                }
-            }
-        }
-    ) { innerPadding ->
+            .background(MaterialTheme.colorScheme.background)
+    ) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(innerPadding)
+                .imePadding()
                 .background(
                     Brush.verticalGradient(
                         0f to EmeraldPrimary.copy(alpha = 0.12f),
@@ -416,7 +349,8 @@ fun ProfileSetupScreen(
                 }
             }
 
-            // ── scrollable form (fills the space above the pinned button) ────
+            // ── scrollable form: header stays, everything else scrolls, and the
+            //    submit button lives at the very end of this column ────────────
             Column(
                 modifier = Modifier
                     .weight(1f)
@@ -682,9 +616,62 @@ fun ProfileSetupScreen(
                     }
                 }
 
-                // Only breathing room: the bottom bar is outside this scroll
-                // container, so no reserved space is needed for it.
-                Spacer(Modifier.height(16.dp))
+                // ── submit (end of the form, not pinned to the screen) ───────
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 4.dp)
+                ) {
+                    if (submitted && !isFormValid && !isSaving) {
+                        Text(
+                            text = "Please fix the highlighted fields above.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RedError,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    Button(
+                        onClick = { submit() },
+                        enabled = !isSaving && !isProcessingPhoto,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("profile_finish_button"),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldPrimary,
+                            contentColor = Color.White,
+                            disabledContainerColor = EmeraldPrimary.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text("Saving your profile…", fontWeight = FontWeight.SemiBold)
+                        } else if (isProcessingPhoto) {
+                            Text("Preparing photo…", fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Text("Finish setup", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape),
+                        color = EmeraldPrimary,
+                        trackColor = EmeraldPrimary.copy(alpha = 0.15f)
+                    )
+                }
+
+                // Clears the navigation bar when the button is scrolled to the end.
+                Spacer(Modifier.navigationBarsPadding().height(20.dp))
             }
         }
     }

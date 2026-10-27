@@ -211,4 +211,8 @@ used by the other screens.
   section overlap for a frame, which is what caused the dirty edges.
 * The error ring on the avatar is drawn inside the disc so it can never paint
   over the camera badge.
-* The last card keeps 20 dp of clearance above the sticky action bar.
+* The **Finish setup** button is the last item *inside* the scroll container, so
+  it sits under the "Where you study" card and is only reachable by scrolling.
+  It is not pinned to the screen bottom and never floats over the cards; the
+  scroll content ends with a navigation-bar inset so the button clears the
+  gesture bar when you reach it.
