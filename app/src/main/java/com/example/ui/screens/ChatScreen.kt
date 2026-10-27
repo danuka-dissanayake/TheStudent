@@ -24,7 +24,6 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -646,37 +645,7 @@ private fun ChatThreadRow(
                             )
                         }
                     }
-                    // My messages they have not opened yet. Indigo, not emerald:
-                    // emerald is always "you have something to read", this is
-                    // "they have something of yours to read".
-                    if (thread.myUnreadCount > 0) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier
-                                .defaultMinSize(minWidth = 22.dp, minHeight = 20.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(Color(0xFFEEF2FF))
-                                .border(1.dp, Color(0xFFC7D2FE), RoundedCornerShape(50))
-                                .padding(horizontal = 6.dp, vertical = 2.dp)
-                                .testTag("chat_unread_by_peer_${peer.id}")
-                        ) {
-                            Icon(
-                                Icons.Default.Done,
-                                contentDescription = "Not opened yet",
-                                tint = Color(0xFF4338CA),
-                                modifier = Modifier.size(12.dp)
-                            )
-                            Spacer(Modifier.width(3.dp))
-                            Text(
-                                text = if (thread.myUnreadCount > 99) "99+" else thread.myUnreadCount.toString(),
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 10.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF4338CA)
-                            )
-                        }
-                    }
-                    if (thread.unreadCount == 0 && thread.myUnreadCount == 0 && peer.isOnline) {
+                    if (thread.unreadCount == 0 && peer.isOnline) {
                         Text(
                             text = "online",
                             fontFamily = MaisonNeueFontFamily,

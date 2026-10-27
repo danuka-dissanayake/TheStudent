@@ -86,9 +86,7 @@ data class ChatThread(
     val lastMessageIsMine: Boolean = false,
     val lastMessageEpoch: Long = 0L,
     /** Messages from this peer that I have not opened yet. */
-    val unreadCount: Int = 0,
-    /** My delivered messages this peer has not opened yet. */
-    val myUnreadCount: Int = 0
+    val unreadCount: Int = 0
 ) {
     val hasConversation: Boolean get() = lastMessageEpoch > 0L
 }

@@ -116,9 +116,10 @@ plus a local Room table that owns the actual history.
 * **Delete for everyone**: long-press → the row is removed locally (and its cached
   file), then `delete_message` queues a `delete` envelope the peer applies to its
   own copy on the next inbox poll.
-* The chat list shows two different counters: the emerald badge for messages I
-  have not read, and a quiet `✓ n` chip for my delivered messages the peer has
-  not read yet (from read receipts).
+* The chat list shows exactly one badge: the emerald count of messages I have
+  not read. A second "my messages they have not opened" counter was tried and
+  removed at the user's request — the single/double tick inside the conversation
+  already carries that information.
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
 * **Never touch a property from the ViewModel `init` block without suspending
