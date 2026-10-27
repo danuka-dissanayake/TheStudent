@@ -76,14 +76,25 @@ Theme (`ui/theme`): emerald/teal/lime brand palette, light + dark schemes, custo
 
 ### 3b. Chat data flow (added with the chat batch)
 
-`ChatScreen` → `TheStudentViewModel.chatState` → `TheStudentChatClient` → `api/chat.php`.
+`ChatScreen` → `TheStudentViewModel.chatState` → `TheStudentChatClient` → `api/chat.php`,
+plus a local Room table that owns the actual history.
 
-* Polling: directory 3 s, open conversation 2 s, presence heartbeat 2 s
-  (online window on the server is 10 s).
+* **The server is a relay + presence board, never an archive.** Encrypted
+  envelopes sit in `chat_relay` only until the recipient's `inbox` fetch, which
+  deletes exactly the rows it handed out; anything older than 7 days is purged
+  on the next request. There is no message, clear or key-backup table.
+* **History lives on the device**: `chat_messages` (Room **v3**,
+  `MIGRATION_2_3`, entity `ChatMessageEntity`) stores decrypted bubbles with
+  `localId` PK (`srv-<id>` for delivered rows, a UUID for outgoing pending
+  ones), and `ChatSummaryRow` drives the thread previews. `endSession()`
+  wipes the table on sign-out. A reinstall loses the history by design — there
+  is no backup/restore feature (removed on request).
+* Polling: directory/presence 3 s, relay inbox 2 s, heartbeat 2 s (online
+  window on the server is 10 s, caller excluded, counted on the DB clock by one
+  helper shared by `threads` and `heartbeat`).
 * End-to-end encryption: `data/local/ChatCrypto.kt` (EC P-256 ECDH + AES-256-GCM,
-  Keystore-sealed private key, password-wrapped key backup for restore).
-* Tables: `chat_messages`, `chat_typing`, `chat_clears` + `users.last_seen_at`
-  and `users.chat_safety_ack_at` (`backend/database_chat.sql`, self-healed by the API).
+  Keystore-sealed private key). The server rejects anything that is not
+  `e2ee:v1:…`.
 * Only full names and avatars are ever exposed about another student.
 
 ## 4. State layer — `TheStudentViewModel` (1660 lines)

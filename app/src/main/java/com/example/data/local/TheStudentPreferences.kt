@@ -41,15 +41,6 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_IS_GUEST, false)
         set(value) = prefs.edit().putBoolean(KEY_IS_GUEST, value).apply()
 
-    /**
-     * True once the student answered the "restore your chat backup?" card.
-     *
-     * Deliberately install-scoped: a reinstall clears it, which is exactly when
-     * the card has to appear again.
-     */
-    var chatHistoryPromptHandled: Boolean
-        get() = prefs.getBoolean(KEY_CHAT_HISTORY_HANDLED, false)
-        set(value) = prefs.edit().putBoolean(KEY_CHAT_HISTORY_HANDLED, value).apply()
 
     /**
      * The bearer token, decrypted on demand.
@@ -135,7 +126,6 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_IS_ONBOARDED = "is_onboarded"
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
         private const val KEY_IS_GUEST = "is_guest"
-        private const val KEY_CHAT_HISTORY_HANDLED = "chat_history_prompt_handled"
         private const val KEY_SESSION_TOKEN = "session_token"      // ciphertext only
         private const val KEY_SESSION_EXPIRES_AT = "session_expires_at"
         private const val KEY_USER_ROLE = "user_role"

@@ -1,46 +1,44 @@
 <?php
 /**
- * TheStudent - Student Chat API (v1.0.0)
+ * TheStudent - Student Chat API (v2.0.0)
  * ======================================
  *
  * Endpoint: /api/chat.php?action=<action>
  *
- * Every action requires `Authorization: Bearer <session token>` issued by
- * api/auth.php. Chat is student-to-student only: there are no public rooms,
- * no group chats and no anonymous senders.
+ * Design: the server is a **relay and a presence board — never a message
+ * archive**. Chat history lives only in the student's own device database
+ * (SQLite / Room). A message sits in `chat_relay` only until the recipient's
+ * app fetches it, and then the row is deleted. That keeps the cloud footprint
+ * tiny and means a database dump contains almost no conversation content.
  *
  * Actions
  * -------
- *   GET  threads                        Directory of registered students +
- *                                       presence, last message, unread count.
- *   GET  messages&peer_id=&after_id=    Message history (incremental when
- *                                       after_id is supplied).
- *   POST send        {peer_id, body}
- *   POST typing      {peer_id, is_typing?}
- *   POST read        {peer_id}
- *   POST clear       {peer_id}
- *   POST ack_safety                     First-visit chat safety notice.
- *   POST heartbeat                      Presence ping (every ~20 s).
- *   GET  version                        Deploy fingerprint.
- *
- * Privacy model
- * -------------
- *  • Only `users.full_name` and the profile picture are ever exposed. E-mail,
- *    phone, institution and any other profile column stays server-side.
- *  • Presence is coarse on purpose: "online" (active in the last 45 s) or a
- *    "last seen …" label. No IP addresses, no device data, no read receipts
- *    beyond `read_at` for the sender's own messages.
+ *   GET  threads      Student directory: full name, avatar, presence, typing
+ *                     flag, published encryption key. No message content.
+ *   GET  inbox        Fetch (and immediately delete) messages + read receipts
+ *                     waiting for the caller.
+ *   POST send         {peer_id, body}          body is E2EE ciphertext
+ *   POST read         {peer_id, up_to_server_id}  read receipt for the sender
+ *   POST typing       {peer_id, is_typing?}
+ *   POST ack_safety   First-visit chat safety notice acknowledgement.
+ *   POST heartbeat    Presence ping (every ~2 s from the app).
+ *   POST set_key      {public_key}  publish the E2EE identity public key.
+ *   GET  version      Deploy fingerprint.
  *
  * Security properties
  * -------------------
- *  • Bearer token only (never a query parameter), stored as a SHA-256 digest
- *    by auth.php, so a database dump cannot be replayed.
+ *  • Bearer token only (never a query parameter); tokens are stored as SHA-256
+ *    digests by auth.php, so a database dump cannot be replayed.
+ *  • Message bodies are encrypted on the sender's phone (ECDH P-256 + AES-256-
+ *    GCM). The server only ever handles opaque ciphertext and never the keys.
  *  • Every query is parameterised; peer ids are validated as integers.
- *  • Per-user send throttle, body length cap and control-character stripping.
- *  • `users.is_active` / `is_email_verified` are enforced on every call.
- *  • All responses are `Cache-Control: no-store`.
- *  • The schema is self-healing (tables + the two `users` columns are created
- *    on first use), so a fresh deployment works without phpMyAdmin.
+ *  • Per-user send throttle, body length cap, control-character stripping.
+ *  • `is_active` / `is_email_verified` are enforced on every call.
+ *  • Responses are `Cache-Control: no-store`; relay rows expire after 7 days.
+ *  • Privacy: only `full_name`, `profile_picture` and coarse presence leave the
+ *    server. E-mail, phone, institution and role never do.
+ *
+ * No new configuration, secrets or environment variables are required.
  */
 
 declare(strict_types=1);
@@ -54,13 +52,14 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '1.0.0';
-const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // "online" = seen in the last N s (2 s heartbeats)
+const TS_CHAT_API_VERSION          = '2.0.0';
+const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
-const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64, ~1.4x the plain text
+const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
 const TS_CHAT_MAX_MESSAGES_PER_MIN = 30;    // per student
-const TS_CHAT_PAGE_SIZE            = 120;   // history window per request
 const TS_CHAT_MAX_BODY_BYTES       = 16384;
+const TS_CHAT_INBOX_LIMIT          = 200;   // rows handed out per fetch
+const TS_CHAT_RELAY_TTL_DAYS       = 7;     // undelivered messages expire
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -73,11 +72,11 @@ if (ts_requires_https() && !ts_is_https()) {
     ts_chat_json('error', 'Secure connection required.', [], 400);
 }
 
-$pdo      = getDbConnection();
-$action   = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
+$pdo    = getDbConnection();
+$action = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
 
 // ---------------------------------------------------------------------------
-// Response helper
+// Helpers
 // ---------------------------------------------------------------------------
 function ts_chat_json(string $status, string $message, array $data = [], int $code = 200): void
 {
@@ -217,78 +216,17 @@ function ts_chat_public_peer(array $row, int $now): array
     $isOnline = $lastSeen > 0 && ($now - $lastSeen) <= TS_CHAT_ONLINE_WINDOW_SEC;
 
     return [
-        'id'                 => (int) $row['id'],
-        'name'               => (string) ($row['full_name'] ?? 'Student'),
-        'avatar_url'         => ts_avatar_public_url($row['profile_picture'] ?? null),
-        'is_online'          => $isOnline,
-        'last_seen_at'       => $lastSeen > 0 ? gmdate('c', $lastSeen) : null,
-        'last_seen_seconds'  => $lastSeen > 0 ? max(0, $now - $lastSeen) : null,
+        'id'                => (int) $row['id'],
+        'name'              => (string) ($row['full_name'] ?? 'Student'),
+        'avatar_url'        => ts_avatar_public_url($row['profile_picture'] ?? null),
+        'is_online'         => $isOnline,
+        'last_seen_at'      => $lastSeen > 0 ? gmdate('c', $lastSeen) : null,
+        'last_seen_seconds' => $lastSeen > 0 ? max(0, $now - $lastSeen) : null,
         // Public half of their chat key. Without it this student cannot receive
-        // end-to-end encrypted messages yet (they have never opened the chat).
-        'public_key'         => $row['chat_public_key'] ?? null,
-        'key_ready'          => !empty($row['chat_public_key']),
+        // end-to-end encrypted messages yet (they never opened secure chat).
+        'public_key'        => $row['chat_public_key'] ?? null,
+        'key_ready'         => !empty($row['chat_public_key']),
     ];
-}
-
-/**
- * How much server-side history this account has.
- *
- * Used by the app right after a reinstall to offer "restore your backup".
- */
-function ts_chat_history_summary(PDO $pdo, int $userId): array
-{
-    try {
-        $stmt = $pdo->prepare(
-            'SELECT COUNT(*) AS message_count,
-                    COUNT(DISTINCT IF(sender_id = :me, recipient_id, sender_id)) AS thread_count,
-                    UNIX_TIMESTAMP(MAX(created_at)) AS newest_epoch
-             FROM chat_messages
-             WHERE sender_id = :me2 OR recipient_id = :me3'
-        );
-        $stmt->execute(['me' => $userId, 'me2' => $userId, 'me3' => $userId]);
-        $row = $stmt->fetch() ?: [];
-        $count = (int) ($row['message_count'] ?? 0);
-        return [
-            'available'     => $count > 0,
-            'message_count' => $count,
-            'thread_count'  => (int) ($row['thread_count'] ?? 0),
-            'newest_epoch'  => isset($row['newest_epoch']) ? (int) $row['newest_epoch'] : 0,
-        ];
-    } catch (Throwable $e) {
-        error_log('[TheStudent] chat history summary failed: ' . $e->getMessage());
-        return ['available' => false, 'message_count' => 0, 'thread_count' => 0, 'newest_epoch' => 0];
-    }
-}
-
-/**
- * Very small brute-force guard for the password that unlocks the key backup.
- * Reuses the login_attempts table so there is no extra schema to deploy.
- */
-function ts_chat_guard_backup_unlock(PDO $pdo, string $email, string $ip): void
-{
-    try {
-        $stmt = $pdo->prepare(
-            'SELECT COUNT(*) FROM login_attempts
-             WHERE email = :email AND attempted_at > (NOW() - INTERVAL 15 MINUTE)'
-        );
-        $stmt->execute(['email' => $email]);
-        if ((int) $stmt->fetchColumn() >= 5) {
-            header('Retry-After: 900');
-            ts_chat_json('error', 'Too many attempts. Please try again in 15 minutes.', [], 429);
-        }
-    } catch (Throwable $e) {
-        error_log('[TheStudent] backup unlock guard skipped: ' . $e->getMessage());
-    }
-}
-
-function ts_chat_record_failed_unlock(PDO $pdo, string $email, string $ip): void
-{
-    try {
-        $pdo->prepare('INSERT INTO login_attempts (ip_address, email) VALUES (:ip, :email)')
-            ->execute(['ip' => $ip, 'email' => $email]);
-    } catch (Throwable $e) {
-        error_log('[TheStudent] backup unlock attempt not recorded: ' . $e->getMessage());
-    }
 }
 
 function ts_chat_safety_acknowledged(array $user): bool
@@ -297,7 +235,32 @@ function ts_chat_safety_acknowledged(array $user): bool
 }
 
 /**
- * Create the chat schema when it is missing. Safe to run on every request.
+ * How many OTHER students are online right now.
+ *
+ * Single definition used by both `threads` and `heartbeat`, so the counter on
+ * the app can never jump between two different numbers (the caller is always
+ * excluded — "1 online" while nobody else is there is misleading).
+ */
+function ts_chat_online_peer_count(PDO $pdo, int $excludeUserId): int
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM users
+             WHERE id <> :me
+               AND is_active = 1
+               AND is_email_verified = 1
+               AND last_seen_at > (NOW() - INTERVAL ' . TS_CHAT_ONLINE_WINDOW_SEC . ' SECOND)'
+        );
+        $stmt->execute(['me' => $excludeUserId]);
+        return (int) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        error_log('[TheStudent] online count failed: ' . $e->getMessage());
+        return 0;
+    }
+}
+
+/**
+ * Create the relay schema when it is missing. Safe to run on every request.
  */
 function ts_chat_ensure_schema(PDO $pdo): void
 {
@@ -308,20 +271,19 @@ function ts_chat_ensure_schema(PDO $pdo): void
     $done = true;
 
     try {
+        // The relay table: rows exist only until the recipient fetches them.
         $pdo->exec(
-            "CREATE TABLE IF NOT EXISTS `chat_messages` (
+            "CREATE TABLE IF NOT EXISTS `chat_relay` (
                 `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `sender_id` INT UNSIGNED NOT NULL,
                 `recipient_id` INT UNSIGNED NOT NULL,
-                `body` TEXT NOT NULL,
-                `read_at` DATETIME NULL DEFAULT NULL,
+                `kind` ENUM('msg','read') NOT NULL DEFAULT 'msg',
+                `body` TEXT NULL DEFAULT NULL,
+                `ref_id` BIGINT UNSIGNED NULL DEFAULT NULL,
                 `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-                INDEX `idx_chat_pair` (`sender_id`, `recipient_id`, `id`),
-                INDEX `idx_chat_recipient_unread` (`recipient_id`, `read_at`),
-                CONSTRAINT `fk_chat_sender` FOREIGN KEY (`sender_id`)
-                    REFERENCES `users` (`id`) ON DELETE CASCADE,
-                CONSTRAINT `fk_chat_recipient` FOREIGN KEY (`recipient_id`)
-                    REFERENCES `users` (`id`) ON DELETE CASCADE
+                INDEX `idx_relay_inbox` (`recipient_id`, `id`),
+                INDEX `idx_relay_sender` (`sender_id`, `created_at`),
+                INDEX `idx_relay_created` (`created_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
@@ -334,30 +296,14 @@ function ts_chat_ensure_schema(PDO $pdo): void
                 INDEX `idx_chat_typing_peer` (`peer_id`, `updated_at`)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
-
-        $pdo->exec(
-            "CREATE TABLE IF NOT EXISTS `chat_clears` (
-                `user_id` INT UNSIGNED NOT NULL,
-                `peer_id` INT UNSIGNED NOT NULL,
-                `cleared_seq` BIGINT UNSIGNED NOT NULL DEFAULT 0,
-                `cleared_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                PRIMARY KEY (`user_id`, `peer_id`)
-            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
-        );
     } catch (Throwable $e) {
         error_log('[TheStudent] chat schema creation failed: ' . $e->getMessage());
     }
 
-    // Columns live on `users` so presence / the safety notice survive a chat
-    // table being rebuilt.
+    // Columns live on `users` so presence / keys survive a relay table rebuild.
     ts_ensure_column($pdo, 'users', 'last_seen_at', 'DATETIME NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'chat_safety_ack_at', 'DATETIME NULL DEFAULT NULL');
-    // End-to-end encryption: the published public half of the student's EC
-    // key pair, plus the private half wrapped with their account password so a
-    // re-installed app can recover its history. The server can decrypt neither.
     ts_ensure_column($pdo, 'users', 'chat_public_key', 'TEXT NULL DEFAULT NULL');
-    ts_ensure_column($pdo, 'users', 'chat_key_backup', 'TEXT NULL DEFAULT NULL');
-    ts_ensure_column($pdo, 'users', 'chat_key_salt', 'VARCHAR(64) NULL DEFAULT NULL');
 }
 
 // ---------------------------------------------------------------------------
@@ -365,18 +311,19 @@ function ts_chat_ensure_schema(PDO $pdo): void
 // ---------------------------------------------------------------------------
 if ($action === 'version') {
     ts_chat_json('success', 'TheStudent chat API', [
-        'api_version' => TS_CHAT_API_VERSION,
-        'php_version' => PHP_VERSION,
+        'api_version'       => TS_CHAT_API_VERSION,
+        'php_version'       => PHP_VERSION,
+        'storage'           => 'relay-only (history lives on the device)',
         'chat_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ]);
 }
 
 ts_chat_ensure_schema($pdo);
 
-$me    = ts_chat_require_user($pdo);
-$meId  = (int) $me['id'];
+$me   = ts_chat_require_user($pdo);
+$meId = (int) $me['id'];
 
-// Single clock for presence + message timestamps: the database's.
+// Single clock for presence + timestamps: the database's.
 try {
     $nowRow = $pdo->query('SELECT UNIX_TIMESTAMP(NOW()) AS now_epoch')->fetch();
     $now = (int) ($nowRow['now_epoch'] ?? time());
@@ -384,80 +331,38 @@ try {
     $now = time();
 }
 
+// Housekeeping: undelivered messages expire, so the relay can never grow into
+// an archive (this is what keeps cloud usage flat).
+try {
+    $pdo->prepare(
+        'DELETE FROM chat_relay WHERE created_at < (NOW() - INTERVAL ' . TS_CHAT_RELAY_TTL_DAYS . ' DAY)'
+    )->execute();
+    $pdo->prepare(
+        'DELETE FROM chat_typing WHERE updated_at < (NOW() - INTERVAL 1 DAY)'
+    )->execute();
+} catch (Throwable $e) {
+    error_log('[TheStudent] chat relay cleanup skipped: ' . $e->getMessage());
+}
+
 switch ($action) {
 
     // -----------------------------------------------------------------------
-    // Student directory + conversation list
+    // Student directory (no message content — the app reads its own database)
     // -----------------------------------------------------------------------
     case 'threads': {
-        // Every active, verified student — full name and avatar only.
         $stmt = $pdo->prepare(
             'SELECT u.id, u.full_name, u.profile_picture, u.last_seen_at,
                     UNIX_TIMESTAMP(u.last_seen_at) AS last_seen_epoch,
-                    u.chat_public_key,
-                    COALESCE(cc.cleared_seq, 0) AS cleared_seq
+                    u.chat_public_key
              FROM users u
-             LEFT JOIN chat_clears cc ON cc.user_id = :me AND cc.peer_id = u.id
-             WHERE u.id <> :me2
+             WHERE u.id <> :me
                AND u.is_active = 1
                AND u.is_email_verified = 1
              ORDER BY u.full_name ASC
              LIMIT 500'
         );
-        $stmt->execute(['me' => $meId, 'me2' => $meId]);
-        $peers = $stmt->fetchAll();
-
-        // Last message of every conversation the caller is part of
-        // (positional placeholders: native prepares cannot reuse a named one).
-        $lastById = [];
-        try {
-            $lastStmt = $pdo->prepare(
-                'SELECT t.peer_id, t.id, t.sender_id, t.body, t.created_at, t.created_epoch
-                 FROM (
-                     SELECT m.id, m.sender_id,
-                            IF(m.sender_id = ?, m.recipient_id, m.sender_id) AS peer_id,
-                            m.body, m.created_at,
-                            UNIX_TIMESTAMP(m.created_at) AS created_epoch
-                     FROM chat_messages m
-                     WHERE m.sender_id = ? OR m.recipient_id = ?
-                 ) t
-                 JOIN (
-                     SELECT peer_id, MAX(id) AS max_id FROM (
-                         SELECT m2.id,
-                                IF(m2.sender_id = ?, m2.recipient_id, m2.sender_id) AS peer_id
-                         FROM chat_messages m2
-                         WHERE m2.sender_id = ? OR m2.recipient_id = ?
-                     ) grouped
-                     GROUP BY peer_id
-                 ) latest ON latest.max_id = t.id'
-            );
-            $lastStmt->execute([$meId, $meId, $meId, $meId, $meId, $meId]);
-            foreach ($lastStmt->fetchAll() as $row) {
-                $lastById[(int) $row['peer_id']] = $row;
-            }
-        } catch (Throwable $e) {
-            error_log('[TheStudent] chat last-message query failed: ' . $e->getMessage());
-        }
-
-        // Unread counts (respecting per-user "clear chat")
-        $unreadBy = [];
-        try {
-            $unreadStmt = $pdo->prepare(
-                'SELECT m.sender_id AS peer_id, COUNT(*) AS unread
-                 FROM chat_messages m
-                 LEFT JOIN chat_clears cc ON cc.user_id = ? AND cc.peer_id = m.sender_id
-                 WHERE m.recipient_id = ?
-                   AND m.read_at IS NULL
-                   AND m.id > COALESCE(cc.cleared_seq, 0)
-                 GROUP BY m.sender_id'
-            );
-            $unreadStmt->execute([$meId, $meId]);
-            foreach ($unreadStmt->fetchAll() as $row) {
-                $unreadBy[(int) $row['peer_id']] = (int) $row['unread'];
-            }
-        } catch (Throwable $e) {
-            error_log('[TheStudent] chat unread query failed: ' . $e->getMessage());
-        }
+        $stmt->execute(['me' => $meId]);
+        $peerRows = $stmt->fetchAll();
 
         // Who is typing to me right now
         $typingBy = [];
@@ -476,155 +381,91 @@ switch ($action) {
         }
 
         $threads = [];
-        $onlineCount = 0;
-        foreach ($peers as $peerRow) {
+        foreach ($peerRows as $peerRow) {
             $peerId = (int) $peerRow['id'];
-            $peer   = ts_chat_public_peer($peerRow, $now);
-            if ($peer['is_online']) {
-                $onlineCount++;
-            }
+            $threads[] = [
+                'peer'      => ts_chat_public_peer($peerRow, $now),
+                'is_typing' => isset($typingBy[$peerId]),
+            ];
+        }
 
-            $cleared = (int) $peerRow['cleared_seq'];
-            $last    = $lastById[$peerId] ?? null;
-            $lastPayload = null;
-            if ($last !== null && (int) $last['id'] > $cleared) {
-                $sentAt = (int) $last['created_epoch'];
-                $lastPayload = [
-                    'body'      => (string) $last['body'],
-                    'is_mine'   => (int) $last['sender_id'] === $meId,
-                    'sent_at'   => $sentAt > 0 ? gmdate('c', $sentAt) : null,
-                    'sent_epoch' => $sentAt > 0 ? $sentAt : 0,
-                    'message_id' => (int) $last['id'],
+        ts_chat_json('success', 'Chat directory loaded.', [
+            'threads'               => $threads,
+            'online_count'          => ts_chat_online_peer_count($pdo, $meId),
+            'total_students'        => count($threads),
+            'safety_acknowledged'   => ts_chat_safety_acknowledged($me),
+            'online_window_seconds' => TS_CHAT_ONLINE_WINDOW_SEC,
+            'server_epoch'          => $now,
+            'my_public_key'         => $me['chat_public_key'] ?? null,
+        ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Inbox: hand over everything waiting for me, then delete it
+    // -----------------------------------------------------------------------
+    case 'inbox': {
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT r.id, r.sender_id, r.kind, r.body, r.ref_id,
+                        UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+                        u.full_name, u.profile_picture, u.last_seen_at,
+                        UNIX_TIMESTAMP(u.last_seen_at) AS last_seen_epoch,
+                        u.chat_public_key
+                 FROM chat_relay r
+                 JOIN users u ON u.id = r.sender_id
+                 WHERE r.recipient_id = :me
+                 ORDER BY r.id ASC
+                 LIMIT ' . TS_CHAT_INBOX_LIMIT
+            );
+            $stmt->execute(['me' => $meId]);
+            $rows = $stmt->fetchAll();
+
+            $messages = [];
+            $receipts = [];
+            $ids = [];
+            foreach ($rows as $row) {
+                $ids[] = (int) $row['id'];
+                if ($row['kind'] === 'read') {
+                    $receipts[] = [
+                        'peer_id'        => (int) $row['sender_id'],
+                        'up_to_server_id' => (int) ($row['ref_id'] ?? 0),
+                    ];
+                    continue;
+                }
+                $sentAt = (int) $row['created_epoch'];
+                $messages[] = [
+                    'server_id'   => (int) $row['id'],
+                    'sender_id'   => (int) $row['sender_id'],
+                    'body'        => (string) $row['body'],
+                    'sent_at'     => $sentAt > 0 ? gmdate('c', $sentAt) : null,
+                    'sent_epoch'  => $sentAt,
+                    'sender'      => ts_chat_public_peer($row, $now),
                 ];
             }
 
-            $threads[] = [
-                'peer'         => $peer,
-                'is_typing'    => isset($typingBy[$peerId]),
-                'unread_count' => $unreadBy[$peerId] ?? 0,
-                'last_message' => $lastPayload,
-            ];
-        }
-
-        // Conversations with actual history float to the top, newest first.
-        usort($threads, function (array $a, array $b): int {
-            $aTime = $a['last_message']['sent_epoch'] ?? 0;
-            $bTime = $b['last_message']['sent_epoch'] ?? 0;
-            if ($aTime === $bTime) {
-                return strcasecmp($a['peer']['name'], $b['peer']['name']);
+            // Delete exactly what was handed out — the relay never keeps a copy
+            // of a delivered message.
+            if (!empty($ids)) {
+                $placeholders = implode(',', array_fill(0, count($ids), '?'));
+                $del = $pdo->prepare("DELETE FROM chat_relay WHERE id IN ($placeholders)");
+                $del->execute($ids);
             }
-            return $bTime <=> $aTime;
-        });
 
-        ts_chat_json('success', 'Chat directory loaded.', [
-            'threads'            => $threads,
-            'online_count'       => $onlineCount,
-            'total_students'     => count($threads),
-            'safety_acknowledged' => ts_chat_safety_acknowledged($me),
-            'online_window_seconds' => TS_CHAT_ONLINE_WINDOW_SEC,
-            'server_epoch'       => $now,
-            // "You have a backup chat history" prompt after a reinstall.
-            'history_backup'     => ts_chat_history_summary($pdo, $meId),
-            'my_public_key'      => $me['chat_public_key'] ?? null,
-            'key_backup_available' => !empty($me['chat_key_backup']),
-        ]);
-        break;
-    }
-
-    // -----------------------------------------------------------------------
-    // Message history
-    // -----------------------------------------------------------------------
-    case 'messages': {
-        $peerId  = ts_chat_peer_id([]);
-        $afterId = isset($_GET['after_id']) && is_numeric($_GET['after_id'])
-            ? max(0, (int) $_GET['after_id'])
-            : 0;
-
-        if ($peerId === $meId) {
-            ts_chat_json('error', 'You cannot chat with yourself.', [], 422);
-        }
-
-        $peerStmt = $pdo->prepare(
-            'SELECT id, full_name, profile_picture, last_seen_at,
-                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch, chat_public_key
-             FROM users WHERE id = :id AND is_active = 1 LIMIT 1'
-        );
-        $peerStmt->execute(['id' => $peerId]);
-        $peerRow = $peerStmt->fetch();
-        if (!$peerRow) {
-            ts_chat_json('error', 'That student is no longer available.', [], 404);
-        }
-
-        $clearedStmt = $pdo->prepare(
-            'SELECT cleared_seq FROM chat_clears WHERE user_id = :me AND peer_id = :peer LIMIT 1'
-        );
-        $clearedStmt->execute(['me' => $meId, 'peer' => $peerId]);
-        $cleared         = (int) ($clearedStmt->fetchColumn() ?: 0);
-        $clearedSeqBody  = max($cleared, $afterId);
-
-        $stmt = $pdo->prepare(
-            'SELECT id, sender_id, body, read_at, created_at,
-                    UNIX_TIMESTAMP(created_at) AS created_epoch
-             FROM chat_messages
-             WHERE ((sender_id = :a AND recipient_id = :b)
-                 OR (sender_id = :c AND recipient_id = :d))
-               AND id > :after
-             ORDER BY id DESC
-             LIMIT ' . TS_CHAT_PAGE_SIZE
-        );
-        $stmt->execute([
-            'a'     => $meId,
-            'b'     => $peerId,
-            'c'     => $peerId,
-            'd'     => $meId,
-            'after' => $clearedSeqBody,
-        ]);
-        $rows = array_reverse($stmt->fetchAll());
-
-        $messages = [];
-        foreach ($rows as $row) {
-            $sentAt = (int) $row['created_epoch'];
-            $messages[] = [
-                'id'         => (int) $row['id'],
-                'sender_id'  => (int) $row['sender_id'],
-                'body'       => (string) $row['body'],
-                'is_mine'    => (int) $row['sender_id'] === $meId,
-                'sent_at'    => $sentAt > 0 ? gmdate('c', $sentAt) : null,
-                'sent_epoch' => $sentAt > 0 ? $sentAt : 0,
-                'is_read'    => $row['read_at'] !== null,
-            ];
-        }
-
-        // Anything we just read from the peer is no longer unread.
-        try {
-            $pdo->prepare(
-                'UPDATE chat_messages SET read_at = NOW()
-                 WHERE recipient_id = :me AND sender_id = :peer AND read_at IS NULL'
-            )->execute(['me' => $meId, 'peer' => $peerId]);
+            ts_chat_json('success', 'Inbox fetched.', [
+                'messages'     => $messages,
+                'receipts'     => $receipts,
+                'server_epoch' => $now,
+            ]);
         } catch (Throwable $e) {
-            error_log('[TheStudent] chat read update failed: ' . $e->getMessage());
+            error_log('[TheStudent] chat inbox failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not fetch your messages right now.', [], 500);
         }
-
-        $typingStmt = $pdo->prepare(
-            'SELECT 1 FROM chat_typing
-             WHERE user_id = :peer AND peer_id = :me
-               AND updated_at > (NOW() - INTERVAL ' . TS_CHAT_TYPING_WINDOW_SEC . ' SECOND)
-             LIMIT 1'
-        );
-        $typingStmt->execute(['peer' => $peerId, 'me' => $meId]);
-
-        ts_chat_json('success', 'Messages loaded.', [
-            'peer'                => ts_chat_public_peer($peerRow, $now),
-            'messages'            => $messages,
-            'peer_is_typing'      => (bool) $typingStmt->fetchColumn(),
-            'safety_acknowledged' => ts_chat_safety_acknowledged($me),
-            'server_epoch'        => $now,
-        ]);
         break;
     }
 
     // -----------------------------------------------------------------------
-    // Send a message
+    // Queue a message for the recipient (ciphertext in, ciphertext out)
     // -----------------------------------------------------------------------
     case 'send': {
         ts_chat_require_post('send');
@@ -635,34 +476,41 @@ switch ($action) {
             ts_chat_json('error', 'You cannot chat with yourself.', [], 422);
         }
 
-        $text = isset($body['body']) && is_string($body['body']) ? $body['body'] : '';
-        // Strip control characters (except newlines) and collapse runs of blank lines.
-        $text = preg_replace('/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/u', '', $text) ?? '';
-        $text = trim($text);
-        $text = preg_replace("/\n{3,}/", "\n\n", $text) ?? $text;
-
+        $text = isset($body['body']) && is_string($body['body']) ? trim($body['body']) : '';
         if ($text === '') {
             ts_chat_json('error', 'Type a message first.', [], 422);
         }
         if (mb_strlen($text, 'UTF-8') > TS_CHAT_MAX_BODY_CHARS) {
             ts_chat_json('error', 'That message is too long (max ' . TS_CHAT_MAX_BODY_CHARS . ' characters).', [], 422);
         }
-
-        $peerStmt = $pdo->prepare(
-            'SELECT id, full_name, profile_picture, last_seen_at,
-                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch, chat_public_key
-             FROM users WHERE id = :id AND is_active = 1 AND is_email_verified = 1 LIMIT 1'
-        );
-        $peerStmt->execute(['id' => $peerId]);
-        $peerRow = $peerStmt->fetch();
-        if (!$peerRow) {
-            ts_chat_json('error', 'That student is no longer available.', [], 404);
+        if (!preg_match('#^e2ee:v1:[A-Za-z0-9+/=]+$#', $text)) {
+            // The app refuses to send plain text; reject it server-side too so a
+            // modified client cannot quietly downgrade the conversation.
+            ts_chat_json('error', 'Messages must be end-to-end encrypted.', [], 422);
         }
 
-        // Simple anti-spam: no more than N messages per rolling minute.
+        $peerStmt = $pdo->prepare(
+            'SELECT id, chat_public_key FROM users
+             WHERE id = :id AND is_active = 1 AND is_email_verified = 1 LIMIT 1'
+        );
+        $peerStmt->execute(['id' => $peerId]);
+        $peer = $peerStmt->fetch();
+        if (!$peer) {
+            ts_chat_json('error', 'That student is no longer available.', [], 404);
+        }
+        if (empty($peer['chat_public_key'])) {
+            ts_chat_json(
+                'error',
+                'That student has not set up secure chat yet, so messages cannot be delivered.',
+                [],
+                409
+            );
+        }
+
+        // Anti-spam: no more than N messages per rolling minute.
         $rateStmt = $pdo->prepare(
-            'SELECT COUNT(*) FROM chat_messages
-             WHERE sender_id = :me AND created_at > (NOW() - INTERVAL 60 SECOND)'
+            'SELECT COUNT(*) FROM chat_relay
+             WHERE sender_id = :me AND kind = \'msg\' AND created_at > (NOW() - INTERVAL 60 SECOND)'
         );
         $rateStmt->execute(['me' => $meId]);
         if ((int) $rateStmt->fetchColumn() >= TS_CHAT_MAX_MESSAGES_PER_MIN) {
@@ -671,12 +519,11 @@ switch ($action) {
         }
 
         $insert = $pdo->prepare(
-            'INSERT INTO chat_messages (sender_id, recipient_id, body) VALUES (:me, :peer, :body)'
+            'INSERT INTO chat_relay (sender_id, recipient_id, kind, body) VALUES (:me, :peer, \'msg\', :body)'
         );
         $insert->execute(['me' => $meId, 'peer' => $peerId, 'body' => $text]);
-        $messageId = (int) $pdo->lastInsertId();
+        $relayId = (int) $pdo->lastInsertId();
 
-        // Sending a message means the sender is no longer "typing".
         try {
             $pdo->prepare('DELETE FROM chat_typing WHERE user_id = :me AND peer_id = :peer')
                 ->execute(['me' => $meId, 'peer' => $peerId]);
@@ -684,18 +531,39 @@ switch ($action) {
             error_log('[TheStudent] chat typing clear failed: ' . $e->getMessage());
         }
 
-        ts_chat_json('success', 'Message sent.', [
-            'message' => [
-                'id'         => $messageId,
-                'sender_id'  => $meId,
-                'body'       => $text,
-                'is_mine'    => true,
-                'sent_at'    => gmdate('c', $now),
-                'sent_epoch' => $now,
-                'is_read'    => false,
-            ],
+        ts_chat_json('success', 'Message queued.', [
+            'server_id'    => $relayId,
+            'sent_epoch'   => $now,
             'server_epoch' => $now,
         ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Read receipt (delivered to the sender through the relay)
+    // -----------------------------------------------------------------------
+    case 'read': {
+        ts_chat_require_post('read');
+        $body   = ts_chat_read_body();
+        $peerId = ts_chat_peer_id($body);
+        $upTo   = isset($body['up_to_server_id']) && is_numeric($body['up_to_server_id'])
+            ? max(0, (int) $body['up_to_server_id'])
+            : 0;
+
+        if ($upTo <= 0 || $peerId === $meId) {
+            ts_chat_json('success', 'Nothing to acknowledge.', []);
+        }
+
+        try {
+            $pdo->prepare(
+                'INSERT INTO chat_relay (sender_id, recipient_id, kind, ref_id)
+                 VALUES (:me, :peer, \'read\', :ref)'
+            )->execute(['me' => $meId, 'peer' => $peerId, 'ref' => $upTo]);
+            ts_chat_json('success', 'Read receipt sent.', []);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat read receipt failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not send the read receipt.', [], 500);
+        }
         break;
     }
 
@@ -731,60 +599,6 @@ switch ($action) {
     }
 
     // -----------------------------------------------------------------------
-    // Mark the peer's messages as read
-    // -----------------------------------------------------------------------
-    case 'read': {
-        ts_chat_require_post('read');
-        $body   = ts_chat_read_body();
-        $peerId = ts_chat_peer_id($body);
-
-        try {
-            $stmt = $pdo->prepare(
-                'UPDATE chat_messages SET read_at = NOW()
-                 WHERE recipient_id = :me AND sender_id = :peer AND read_at IS NULL'
-            );
-            $stmt->execute(['me' => $meId, 'peer' => $peerId]);
-            ts_chat_json('success', 'Marked as read.', ['updated' => $stmt->rowCount()]);
-        } catch (Throwable $e) {
-            error_log('[TheStudent] chat read failed: ' . $e->getMessage());
-            ts_chat_json('error', 'Could not update the conversation.', [], 500);
-        }
-        break;
-    }
-
-    // -----------------------------------------------------------------------
-    // Clear this student's copy of a conversation
-    // -----------------------------------------------------------------------
-    case 'clear': {
-        ts_chat_require_post('clear');
-        $body   = ts_chat_read_body();
-        $peerId = ts_chat_peer_id($body);
-
-        $maxStmt = $pdo->prepare(
-            'SELECT COALESCE(MAX(id), 0) FROM chat_messages
-             WHERE (sender_id = :a AND recipient_id = :b)
-                OR (sender_id = :c AND recipient_id = :d)'
-        );
-        $maxStmt->execute(['a' => $meId, 'b' => $peerId, 'c' => $peerId, 'd' => $meId]);
-        $clearedSeq = (int) $maxStmt->fetchColumn();
-
-        $pdo->prepare(
-            'INSERT INTO chat_clears (user_id, peer_id, cleared_seq) VALUES (:me, :peer, :seq)
-             ON DUPLICATE KEY UPDATE cleared_seq = GREATEST(cleared_seq, VALUES(cleared_seq)),
-                                     cleared_at = CURRENT_TIMESTAMP'
-        )->execute(['me' => $meId, 'peer' => $peerId, 'seq' => $clearedSeq]);
-
-        // Read state follows the clear so unread badges disappear immediately.
-        $pdo->prepare(
-            'UPDATE chat_messages SET read_at = NOW()
-             WHERE recipient_id = :me AND sender_id = :peer AND read_at IS NULL'
-        )->execute(['me' => $meId, 'peer' => $peerId]);
-
-        ts_chat_json('success', 'Conversation cleared.', ['cleared_seq' => $clearedSeq]);
-        break;
-    }
-
-    // -----------------------------------------------------------------------
     // Chat safety notice acknowledgement
     // -----------------------------------------------------------------------
     case 'ack_safety': {
@@ -806,14 +620,9 @@ switch ($action) {
     case 'heartbeat': {
         ts_chat_require_post('heartbeat');
         // ts_chat_require_user() already refreshed last_seen_at.
-        $onlineStmt = $pdo->prepare(
-            'SELECT COUNT(*) FROM users
-             WHERE is_active = 1 AND is_email_verified = 1
-               AND last_seen_at > (NOW() - INTERVAL ' . TS_CHAT_ONLINE_WINDOW_SEC . ' SECOND)'
-        );
-        $onlineStmt->execute();
         ts_chat_json('success', 'Presence updated.', [
-            'online_count' => (int) $onlineStmt->fetchColumn(),
+            // Same definition as `threads`, so the counter cannot flicker.
+            'online_count' => ts_chat_online_peer_count($pdo, $meId),
             'server_epoch' => $now,
         ]);
         break;
@@ -836,121 +645,31 @@ switch ($action) {
             ts_chat_json('error', 'A valid public key is required.', [], 422);
         }
 
-        $backup = isset($body['key_backup']) && is_string($body['key_backup'])
-            ? trim($body['key_backup'])
-            : null;
-        $salt = isset($body['key_salt']) && is_string($body['key_salt'])
-            ? trim($body['key_salt'])
-            : null;
-
-        if ($backup !== null && (strlen($backup) > 4000 || !preg_match('#^[A-Za-z0-9+/=]+$#', $backup))) {
-            ts_chat_json('error', 'That key backup is not valid.', [], 422);
-        }
-        if ($salt !== null && (strlen($salt) > 64 || !preg_match('#^[A-Za-z0-9+/=]+$#', $salt))) {
-            ts_chat_json('error', 'That key backup salt is not valid.', [], 422);
-        }
-
-        // Never silently replace a published key: that would make every message
-        // encrypted to the old key unreadable for this account. Rotation is only
-        // allowed explicitly (or when there is no password-protected backup, so
-        // the account could not recover its history anyway).
-        $currentKey  = $me['chat_public_key'] ?? null;
-        $hasBackup   = !empty($me['chat_key_backup']);
+        // Never silently replace a published key: messages other students
+        // already encrypted to the old key would become unreadable.
+        $currentKey   = $me['chat_public_key'] ?? null;
         $allowReplace = !empty($body['allow_replace']);
-        if (!empty($currentKey) && $currentKey !== $publicKey && $hasBackup && !$allowReplace) {
+        if (!empty($currentKey) && $currentKey !== $publicKey && !$allowReplace) {
             ts_chat_json(
                 'error',
-                'This account already has an encryption key. Unlock your encrypted backup to restore it.',
-                ['can_unlock_backup' => true],
+                'This account already has an encryption key.',
+                ['existing_key' => $currentKey],
                 409
             );
         }
 
-        $sql = 'UPDATE users SET chat_public_key = :pk';
-        $params = ['pk' => $publicKey, 'id' => $meId];
-        if ($backup !== null && $salt !== null && $backup !== '') {
-            $sql .= ', chat_key_backup = :backup, chat_key_salt = :salt';
-            $params['backup'] = $backup;
-            $params['salt'] = $salt;
-        }
-        $sql .= ' WHERE id = :id';
-        $pdo->prepare($sql)->execute($params);
+        $pdo->prepare('UPDATE users SET chat_public_key = :pk WHERE id = :id')
+            ->execute(['pk' => $publicKey, 'id' => $meId]);
 
-        ts_chat_json('success', 'Encryption key published.', [
-            'public_key'   => $publicKey,
-            'key_backup_available' => $backup !== null && $backup !== '',
-        ]);
-        break;
-    }
-
-    // -----------------------------------------------------------------------
-    // Unlock the password-protected key backup (new device / reinstall)
-    // -----------------------------------------------------------------------
-    case 'unlock_key_backup': {
-        ts_chat_require_post('unlock_key_backup');
-        $body = ts_chat_read_body();
-        $password = isset($body['password']) && is_string($body['password']) ? $body['password'] : '';
-        if ($password === '') {
-            ts_chat_json('error', 'Enter your account password.', [], 422);
-        }
-
-        if (empty($me['password_hash'])) {
-            ts_chat_json(
-                'error',
-                'This account signs in with Google, so the encrypted backup cannot be unlocked on a new device.',
-                [],
-                409
-            );
-        }
-        if (empty($me['chat_key_backup']) || empty($me['chat_key_salt'])) {
-            ts_chat_json('error', 'There is no encrypted backup for this account yet.', [], 404);
-        }
-
-        ts_chat_guard_backup_unlock($pdo, (string) $me['email'], ts_client_ip());
-
-        if (!password_verify($password, (string) $me['password_hash'])) {
-            ts_chat_record_failed_unlock($pdo, (string) $me['email'], ts_client_ip());
-            ts_chat_json('error', 'That password is not correct.', [], 401);
-        }
-
-        ts_chat_json('success', 'Backup unlocked.', [
-            'key_backup' => (string) $me['chat_key_backup'],
-            'key_salt'   => (string) $me['chat_key_salt'],
-            'public_key' => $me['chat_public_key'] ?? null,
-        ]);
-        break;
-    }
-
-    // -----------------------------------------------------------------------
-    // "Skip" on the restore card: delete this student's history server-side
-    // -----------------------------------------------------------------------
-    case 'discard_history': {
-        ts_chat_require_post('discard_history');
-        try {
-            $stmt = $pdo->prepare(
-                'DELETE FROM chat_messages WHERE sender_id = :me OR recipient_id = :me2'
-            );
-            $stmt->execute(['me' => $meId, 'me2' => $meId]);
-            $deleted = $stmt->rowCount();
-
-            $pdo->prepare('DELETE FROM chat_typing WHERE user_id = :me OR peer_id = :me2')
-                ->execute(['me' => $meId, 'me2' => $meId]);
-            $pdo->prepare('DELETE FROM chat_clears WHERE user_id = :me OR peer_id = :me2')
-                ->execute(['me' => $meId, 'me2' => $meId]);
-
-            ts_chat_json('success', 'Chat history deleted.', ['deleted' => $deleted]);
-        } catch (Throwable $e) {
-            error_log('[TheStudent] chat history delete failed: ' . $e->getMessage());
-            ts_chat_json('error', 'Could not delete the history right now.', [], 500);
-        }
+        ts_chat_json('success', 'Encryption key published.', ['public_key' => $publicKey]);
         break;
     }
 
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
-                'threads', 'messages', 'send', 'typing', 'read', 'clear', 'ack_safety',
-                'heartbeat', 'set_key', 'unlock_key_backup', 'discard_history',
+                'threads', 'inbox', 'send', 'read', 'typing', 'ack_safety',
+                'heartbeat', 'set_key', 'version',
             ],
         ], 400);
 }

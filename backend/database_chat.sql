@@ -1,79 +1,73 @@
--- =====================================================================
--- TheStudent - Student Chat Database Schema (v1.0.0)
--- =====================================================================
--- Import this file in phpMyAdmin (DirectAdmin -> MySQL Databases ->
--- phpMyAdmin -> select your database -> Import) AFTER database_auth.sql.
+-- ═══════════════════════════════════════════════════════════════════════════
+--  TheStudent — chat schema (relay only, never an archive)
+--  Backend: backend/api/chat.php  (v2.0.0)
 --
--- You only need to do this once. If you cannot reach phpMyAdmin, simply open
--- the chat tab in the app: api/chat.php creates anything that is missing on
--- its first request (that is the "self-healing schema" path).
+--  Privacy model
+--  -------------
+--  Message bodies are encrypted end-to-end on the student's phone. The server
+--  only ever holds opaque `e2ee:v1:` blobs, and only until the recipient's
+--  phone fetches them — every `inbox` call deletes the rows it hands out, and
+--  anything older than 7 days is purged on the next request. There is no
+--  message-history table, no per-thread archive, no key backup table, and no
+--  way for the operator to read a conversation.
 --
--- Tables
--- ------
---   chat_messages  every 1:1 message between two registered students
---   chat_typing    short-lived "X is typing…" markers (6 second lifetime)
---   chat_clears    per-student "clear chat" marker (messages are never
---                  destroyed for the other side)
--- and five columns on `users`:
---   last_seen_at        presence heartbeat (online = seen in the last 10 s)
---   chat_safety_ack_at  when the student acknowledged the safety notice
---   chat_public_key     E2EE identity public key (EC P-256, base64 SPKI)
---   chat_key_backup     identity private key wrapped with the account password
---   chat_key_salt       PBKDF2 salt for that wrapped key
+--  Conversation history lives in the student's own SQLite database on the
+--  device (`chat_messages` via Room). A dump of this database contains no
+--  conversation content at all.
 --
--- The server can read none of the message bodies: every body is AES-256-GCM
--- ciphertext produced on the sender's phone (see app ChatCrypto.kt).
--- =====================================================================
+--  Run once in phpMyAdmin. Safe to re-run: every statement is IF NOT EXISTS.
+-- ═══════════════════════════════════════════════════════════════════════════
 
-CREATE TABLE IF NOT EXISTS `chat_messages` (
-  `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
-  `sender_id` INT UNSIGNED NOT NULL,
-  `recipient_id` INT UNSIGNED NOT NULL,
-  `body` TEXT NOT NULL,
-  `read_at` DATETIME NULL DEFAULT NULL,
-  `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  INDEX `idx_chat_pair` (`sender_id`, `recipient_id`, `id`),
-  INDEX `idx_chat_recipient_unread` (`recipient_id`, `read_at`),
-  CONSTRAINT `fk_chat_sender` FOREIGN KEY (`sender_id`)
-    REFERENCES `users` (`id`) ON DELETE CASCADE,
-  CONSTRAINT `fk_chat_recipient` FOREIGN KEY (`recipient_id`)
-    REFERENCES `users` (`id`) ON DELETE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `chat_typing` (
-  `user_id` INT UNSIGNED NOT NULL,
-  `peer_id` INT UNSIGNED NOT NULL,
-  `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`user_id`, `peer_id`),
-  INDEX `idx_chat_typing_peer` (`peer_id`, `updated_at`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS `chat_clears` (
-  `user_id` INT UNSIGNED NOT NULL,
-  `peer_id` INT UNSIGNED NOT NULL,
-  `cleared_seq` BIGINT UNSIGNED NOT NULL DEFAULT 0,
-  `cleared_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-  PRIMARY KEY (`user_id`, `peer_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
--- ---------------------------------------------------------------------
--- Presence + the one-time safety notice live on the users table.
--- (api/chat.php adds these automatically when they are missing.)
--- ---------------------------------------------------------------------
+-- ── 1. Presence + encryption identity columns on the existing users table ───
 ALTER TABLE `users`
-  ADD COLUMN `last_seen_at` DATETIME NULL DEFAULT NULL,
-  ADD COLUMN `chat_safety_ack_at` DATETIME NULL DEFAULT NULL,
-  ADD COLUMN `chat_public_key` TEXT NULL DEFAULT NULL,
-  ADD COLUMN `chat_key_backup` TEXT NULL DEFAULT NULL,
-  ADD COLUMN `chat_key_salt` VARCHAR(64) NULL DEFAULT NULL;
+    ADD COLUMN IF NOT EXISTS `last_seen_at`      DATETIME NULL DEFAULT NULL
+        COMMENT 'Last chat heartbeat; online = within 10 s',
+    ADD COLUMN IF NOT EXISTS `chat_safety_ack_at` DATETIME NULL DEFAULT NULL
+        COMMENT 'When the student dismissed the one-time safety notice',
+    ADD COLUMN IF NOT EXISTS `chat_public_key`   VARCHAR(255) NULL DEFAULT NULL
+        COMMENT 'Base64 uncompressed EC P-256 public key';
 
-ALTER TABLE `users` ADD INDEX `idx_last_seen` (`last_seen_at`);
+CREATE INDEX IF NOT EXISTS `idx_users_last_seen_at` ON `users` (`last_seen_at`);
 
--- =====================================================================
--- Housekeeping (optional, run occasionally or schedule as a MySQL event)
--- =====================================================================
--- DELETE FROM `chat_typing` WHERE `updated_at` < (NOW() - INTERVAL 1 HOUR);
--- Students are "online" while their app sends a heartbeat (every 2 s); the
--- server treats anything older than 10 s as offline, so presence clears itself.
--- Old typing rows are ignored after 6 s, but this keeps the table small:
--- DELETE FROM `chat_typing` WHERE `updated_at` < (NOW() - INTERVAL 1 DAY);
+-- ── 2. Relay queue: encrypted envelopes waiting to be collected ─────────────
+--     kind = 'msg'  → body is an e2ee:v1:… payload for recipient_id
+--     kind = 'read' → body is empty, ref_id points at the read up to that id
+CREATE TABLE IF NOT EXISTS `chat_relay` (
+    `id`           BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `sender_id`    INT UNSIGNED    NOT NULL,
+    `recipient_id` INT UNSIGNED    NOT NULL,
+    `kind`         ENUM('msg','read') NOT NULL DEFAULT 'msg',
+    `body`         TEXT            NULL,
+    `ref_id`       BIGINT UNSIGNED NULL DEFAULT NULL,
+    `created_at`   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_chat_relay_recipient` (`recipient_id`, `id`),
+    KEY `idx_chat_relay_created_at` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ── 3. Typing flags (overwritten in place, never appended) ──────────────────
+CREATE TABLE IF NOT EXISTS `chat_typing` (
+    `user_id`    INT UNSIGNED NOT NULL,
+    `peer_id`    INT UNSIGNED NOT NULL,
+    `updated_at` DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`user_id`, `peer_id`),
+    KEY `idx_chat_typing_updated_at` (`updated_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- ═══════════════════════════════════════════════════════════════════════════
+--  Housekeeping: chat.php purges expired relay rows and stale typing flags at
+--  the start of every request, so no cron job is required. The queries below
+--  are listed only so the operator can run them by hand if the queue ever
+--  needs clearing (e.g. before handing the site to someone else).
+--
+--      DELETE FROM `chat_relay`  WHERE `created_at` < NOW() - INTERVAL 7 DAY;
+--      DELETE FROM `chat_typing` WHERE `updated_at` < NOW() - INTERVAL 1 HOUR;
+--
+--  Legacy cleanup (only if you upgraded from an older chat.php version — the
+--  current API never reads or writes these tables):
+--
+--      DROP TABLE IF EXISTS `chat_messages`;
+--      DROP TABLE IF EXISTS `chat_key_backup`;
+--      DROP TABLE IF EXISTS `chat_clears`;
+--      DROP TABLE IF EXISTS `chat_history_backup`;
+-- ═══════════════════════════════════════════════════════════════════════════

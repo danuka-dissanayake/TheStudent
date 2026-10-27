@@ -173,9 +173,6 @@ class MainActivity : ComponentActivity() {
                                     onAuthSuccess = { profile ->
                                         viewModel.handleAuthSuccess(profile)
                                     },
-                                    onPasswordAvailable = { password ->
-                                        viewModel.protectChatBackupWithPassword(password)
-                                    },
                                     onBack = {
                                         viewModel.handleAuthBack()
                                     }

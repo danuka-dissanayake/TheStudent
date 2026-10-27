@@ -1,6 +1,7 @@
 package com.example.data.local
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
 @Entity(tableName = "saved_papers")
@@ -59,4 +60,44 @@ data class UserProfileEntity(
     val avatarUrl: String = "",
     val profileCompleted: Boolean = true,
     val hasPassword: Boolean = true
+)
+
+/**
+ * One chat message, stored **only on the device**.
+ *
+ * Chat history never touches the server database: the server is a relay for
+ * undelivered messages and keeps nothing once they are fetched. This table is
+ * the single source of truth for a conversation, so the history survives app
+ * restarts but disappears when the student deletes the app (or the chat).
+ *
+ * [body] is already decrypted for display; Room's database file lives in the
+ * app's private storage, which is covered by Android's file-based encryption.
+ */
+@Entity(
+    tableName = "chat_messages",
+    indices = [Index("peerId"), Index("sentAtEpoch")]
+)
+data class ChatMessageEntity(
+    /** Client-generated id (UUID) — works offline, before the server sees it. */
+    @PrimaryKey val localId: String,
+    /** Relay id assigned by the server; 0 while the message is still pending. */
+    val serverId: Long = 0L,
+    /** `users.id` of the other student. */
+    val peerId: Int,
+    val senderId: Int,
+    val isMine: Boolean,
+    val body: String,
+    val sentAtEpoch: Long,
+    val isRead: Boolean = false,
+    /** True until the server confirmed it is queued for delivery. */
+    val isPending: Boolean = false
+)
+
+/** Per-conversation projection used to build the chat list. */
+data class ChatSummaryRow(
+    val peerId: Int,
+    val lastBody: String?,
+    val lastIsMine: Boolean,
+    val lastEpoch: Long,
+    val unreadCount: Int
 )

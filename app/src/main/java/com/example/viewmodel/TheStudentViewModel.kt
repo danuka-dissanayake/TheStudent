@@ -8,6 +8,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
 import com.example.data.local.ChatCrypto
+import com.example.data.local.ChatMessageEntity
+import com.example.data.local.ChatSummaryRow
 import com.example.data.local.LearningActivityEntity
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
@@ -156,29 +158,13 @@ data class ChatUiState(
     val isSending: Boolean = false,
     val errorMessage: String? = null,
     val threads: List<ChatThread> = emptyList(),
+    /** Other students online right now (never includes me). */
     val onlineCount: Int = 0,
     val totalStudents: Int = 0,
     val safetyAcknowledged: Boolean = false,
     val activePeer: ChatPeer? = null,
     val messages: List<ChatMessage> = emptyList(),
-
-    // ── Backup / restore (after a reinstall) ────────────────────────────────
-    /** Server-side history that belongs to this account. */
-    val historyBackup: ChatHistoryBackup = ChatHistoryBackup(),
-    /** True while the "you have a backup chat history" card is on screen. */
-    val showRestorePrompt: Boolean = false,
-    /** True while restoring (or deleting) the backup — drives the loader. */
-    val isRestoring: Boolean = false,
-    /** 0f..1f progress for the restore progress bar. */
-    val restoreProgress: Float = 0f,
-    /**
-     * True when this device has no private key of its own (fresh install) but
-     * the server holds a password-wrapped one, so the card must ask for the
-     * account password before it can decrypt the history.
-     */
-    val restoreNeedsPassword: Boolean = false,
-    val restoreError: String? = null,
-    /** True once the identity key is ready and the server knows the public key. */
+    /** True once this device's encryption key is what the server published. */
     val isEncryptionReady: Boolean = false
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
@@ -236,6 +222,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
         loadDynamicPapers()
         verifySessionWithBackend()
+        observeChatDatabase()
     }
 
     private fun initTts() {
@@ -456,15 +443,29 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     // ── Chat ─────────────────────────────────────────────────────────────────
+    //
+    // Architecture: the server is a **relay + presence board**. Messages are
+    // encrypted on this device, queued server-side only until the recipient
+    // fetches them, and then stored in the local Room database — which is the
+    // single source of truth for every conversation (see ChatMessageEntity).
 
     private val _chatState = MutableStateFlow(ChatUiState())
     val chatState: StateFlow<ChatUiState> = _chatState.asStateFlow()
 
+    private val chatDao = database.theStudentDao()
+
     private var chatDirectoryJob: Job? = null
+    private var chatInboxJob: Job? = null
     private var chatPresenceJob: Job? = null
     private var chatMessagesJob: Job? = null
     private var chatTypingJob: Job? = null
     private var chatIsDirectoryVisible = false
+
+    /** Peer directory from the last successful `threads` call. */
+    private var chatPeers: List<ChatPeer> = emptyList()
+    /** Conversation previews, straight from the device database. */
+    private var chatSummaries: List<ChatSummaryRow> = emptyList()
+    private var chatActivePeerId: Int? = null
 
     private val appContext: Context
         get() = getApplication<Application>().applicationContext
@@ -484,34 +485,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Called by the auth screen the moment an e-mail sign-in / sign-up succeeds.
-     *
-     * The password is used here only to wrap a copy of the chat private key
-     * (PBKDF2 + AES-GCM) so the student can restore their history on a new
-     * phone. It is never stored, logged or sent anywhere: the server receives
-     * the wrapped blob, which is useless without the password.
-     */
-    fun protectChatBackupWithPassword(password: String) {
-        if (password.length < 8) return
-        val session = chatSession() ?: return
-        val (baseUrl, token) = session
-        viewModelScope.launch {
-            val result = TheStudentChatClient.publishIdentity(
-                context = appContext,
-                accountKey = chatAccountKey,
-                backendBaseUrl = baseUrl,
-                token = token,
-                passwordForBackup = password
-            )
-            if (result.dataOrNull() != null) {
-                _chatState.update { it.copy(isEncryptionReady = true) }
-            }
-        }
-    }
-
-    /**
      * Called when the chat tab becomes visible: publishes the encryption key,
-     * loads the student directory and starts presence + polling.
+     * loads the directory and starts the relay + presence loops.
      */
     fun startChatSync() {
         if (chatIsDirectoryVisible) return
@@ -527,6 +502,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
 
+        // One inbox loop for the whole tab: it both delivers new messages and
+        // keeps unread badges accurate even while no conversation is open.
+        chatInboxJob?.cancel()
+        chatInboxJob = viewModelScope.launch {
+            while (true) {
+                fetchChatInbox()
+                delay(CHAT_INBOX_POLL_MS)
+            }
+        }
+
         chatPresenceJob?.cancel()
         chatPresenceJob = viewModelScope.launch {
             while (true) {
@@ -538,8 +523,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         _chatState.update { it.copy(onlineCount = onlineCount.toInt()) }
                     }
                 }
-                // 2 s heartbeat: the server treats 10 s of silence as offline,
-                // so online / offline flips within a couple of seconds.
+                // 2 s heartbeat: the server treats 10 s of silence as offline.
                 delay(CHAT_PRESENCE_MS)
             }
         }
@@ -550,13 +534,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatIsDirectoryVisible = false
         chatDirectoryJob?.cancel()
         chatDirectoryJob = null
+        chatInboxJob?.cancel()
+        chatInboxJob = null
         chatPresenceJob?.cancel()
         chatPresenceJob = null
         closeChat()
     }
 
     fun refreshChatDirectoryNow() {
-        viewModelScope.launch { refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty()) }
+        viewModelScope.launch {
+            refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty())
+            fetchChatInbox()
+        }
     }
 
     /**
@@ -569,28 +558,42 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val identity = ChatCrypto.ensureIdentity(appContext, chatAccountKey)
         if (identity.publicKeyBase64.isBlank()) return
 
-        // A brand-new key pair on a device that already has server-side history
-        // means the app was reinstalled: the old private key is gone, so the
-        // restore card has to unlock the password-wrapped backup first.
-        if (identity.isNew) {
-            _chatState.update { it.copy(restoreNeedsPassword = true) }
-        }
-
         val result = TheStudentChatClient.publishIdentity(
             context = appContext,
             accountKey = chatAccountKey,
             backendBaseUrl = baseUrl,
-            token = token,
-            passwordForBackup = null
+            token = token
         )
-        if (result.dataOrNull() != null) {
+        val published = result.dataOrNull()
+        if (published != null) {
             _chatState.update { it.copy(isEncryptionReady = true) }
-        } else if ((result as? ChatResult.Failure)?.statusCode == 409) {
-            // The server already holds a key for this account that this device
-            // cannot reproduce (reinstall). Do not send anything until the
-            // password-protected backup has been unlocked.
-            _chatState.update { it.copy(isEncryptionReady = false, restoreNeedsPassword = true) }
+            return
         }
+
+        if ((result as? ChatResult.Failure)?.statusCode != 409) return
+
+        // The server already published a different key for this account. That
+        // only happens after a reinstall: the old private key is gone with the
+        // old install, and so is the local history. Rotation is safe then — and
+        // necessary, otherwise nothing could ever be decrypted again.
+        if (chatDao.countChatMessages() > 0) {
+            _chatState.update {
+                it.copy(
+                    errorMessage = "Secure chat could not start: this account already has a " +
+                        "different encryption key."
+                )
+            }
+            return
+        }
+
+        val rotated = TheStudentChatClient.publishIdentity(
+            context = appContext,
+            accountKey = chatAccountKey,
+            backendBaseUrl = baseUrl,
+            token = token,
+            allowReplace = true
+        )
+        _chatState.update { it.copy(isEncryptionReady = rotated.dataOrNull() != null) }
     }
 
     private suspend fun refreshChatDirectory(showSpinner: Boolean) {
@@ -607,18 +610,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         if (showSpinner) _chatState.update { it.copy(isLoadingDirectory = true) }
 
-        val result = TheStudentChatClient.loadDirectory(
-            context = appContext,
-            accountKey = chatAccountKey,
-            backendBaseUrl = baseUrl,
-            token = token
-        )
+        val result = TheStudentChatClient.loadDirectory(baseUrl, token)
         val directory = result.dataOrNull()
         if (directory != null) {
-            val promptHandled = preferences.chatHistoryPromptHandled
-            // The key on this device must be the one the server published,
-            // otherwise anything we encrypt would be unreadable for the other
-            // student (this happens right after a reinstall).
+            chatPeers = directory.threads.map { it.peer }
             val localKey = ChatCrypto.publicKeyBase64(appContext, chatAccountKey)
             val encryptionReady = !localKey.isNullOrBlank() &&
                 (directory.myPublicKey.isNullOrBlank() || directory.myPublicKey == localKey)
@@ -626,24 +621,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 state.copy(
                     isLoadingDirectory = false,
                     errorMessage = null,
-                    threads = directory.threads,
                     onlineCount = directory.onlineCount,
                     totalStudents = directory.totalStudents,
                     safetyAcknowledged = directory.safetyAcknowledged,
-                    historyBackup = directory.historyBackup,
-                    // Offer the backup only once per install and only while there
-                    // is something to restore.
-                    showRestorePrompt = !promptHandled &&
-                        directory.historyBackup.available &&
-                        !state.isRestoring,
                     isEncryptionReady = encryptionReady,
-                    restoreNeedsPassword = !encryptionReady &&
-                        directory.keyBackupAvailable,
-                    activePeer = state.activePeer?.let { active ->
-                        directory.threads.firstOrNull { it.peer.id == active.id }?.peer ?: active
-                    }
+                    activePeer = chatActivePeerId?.let { id ->
+                        chatPeers.firstOrNull { it.id == id }
+                    } ?: state.activePeer
                 )
             }
+            rebuildChatThreads()
         } else {
             val message = result.failureMessage
             _chatState.update {
@@ -656,182 +643,81 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    // ── Backup restore ───────────────────────────────────────────────────────
-
-    /**
-     * Restore the server-side history.
-     *
-     * On a re-installed app the private key is gone, so [password] is required
-     * to unwrap the password-protected copy from the server. Without it the
-     * messages stay ciphertext — there is no back door, by design.
-     */
-    fun restoreChatHistory(password: String? = null) {
-        if (_chatState.value.isRestoring) return
-        val session = chatSession() ?: return
-        val (baseUrl, token) = session
-
-        viewModelScope.launch {
-            closeChat()
-            _chatState.update {
-                it.copy(isRestoring = true, restoreError = null, restoreProgress = 0.04f)
-            }
-
-            if (_chatState.value.restoreNeedsPassword) {
-                val typed = password.orEmpty()
-                if (typed.isBlank()) {
-                    _chatState.update {
-                        it.copy(isRestoring = false, restoreError = "Enter your account password.")
-                    }
-                    return@launch
-                }
-
-                val unlocked = TheStudentChatClient
-                    .unlockKeyBackup(baseUrl, token, typed)
-                    .dataOrNull()
-
-                if (unlocked == null) {
-                    _chatState.update {
-                        it.copy(
-                            isRestoring = false,
-                            restoreProgress = 0f,
-                            restoreError = "That password could not unlock your encrypted backup."
-                        )
-                    }
-                    return@launch
-                }
-
-                val restored = ChatCrypto.restoreIdentity(
-                    context = appContext,
-                    accountKey = chatAccountKey,
-                    wrappedPrivateKeyBase64 = unlocked.wrappedPrivateKeyBase64,
-                    saltBase64 = unlocked.saltBase64,
-                    password = typed,
-                    publishedPublicKey = unlocked.publicKey
-                )
-                if (!restored) {
-                    _chatState.update {
-                        it.copy(
-                            isRestoring = false,
-                            restoreProgress = 0f,
-                            restoreError = "That password could not unlock your encrypted backup."
-                        )
-                    }
-                    return@launch
-                }
-
-                _chatState.update {
-                    it.copy(restoreNeedsPassword = false, restoreProgress = 0.2f)
-                }
-            }
-
-            // Reload the directory so peer keys are available, then walk every
-            // conversation to rebuild the history (this is the visible progress).
-            refreshChatDirectory(showSpinner = false)
-            val peers = _chatState.value.threads.filter { it.hasConversation }
-            if (peers.isEmpty()) {
-                _chatState.update { it.copy(restoreProgress = 1f) }
-            } else {
-                peers.forEachIndexed { index, thread ->
-                    TheStudentChatClient.loadMessages(
-                        context = appContext,
-                        accountKey = chatAccountKey,
-                        backendBaseUrl = baseUrl,
-                        token = token,
-                        peerId = thread.peer.id,
-                        afterId = 0L
-                    )
-                    _chatState.update {
-                        it.copy(
-                            restoreProgress = 0.2f + 0.78f * ((index + 1).toFloat() / peers.size)
-                        )
-                    }
-                }
-            }
-
-            preferences.chatHistoryPromptHandled = true
-            _chatState.update {
-                it.copy(
-                    isRestoring = false,
-                    restoreProgress = 1f,
-                    showRestorePrompt = false,
-                    restoreError = null
-                )
-            }
-            refreshChatDirectory(showSpinner = false)
-        }
+    /** Merge the peer directory with the device database into UI rows. */
+    private fun rebuildChatThreads() {
+        val summaryByPeer = chatSummaries.associateBy { it.peerId }
+        val threads = chatPeers.map { peer ->
+            val summary = summaryByPeer[peer.id]
+            ChatThread(
+                peer = peer,
+                lastMessage = summary?.lastBody,
+                lastMessageIsMine = summary?.lastIsMine ?: false,
+                lastMessageEpoch = summary?.lastEpoch ?: 0L,
+                unreadCount = summary?.unreadCount ?: 0
+            )
+        }.sortedWith(
+            compareByDescending<ChatThread> { it.lastMessageEpoch > 0L }
+                .thenByDescending { it.lastMessageEpoch }
+                .thenBy { it.peer.name.lowercase() }
+        )
+        _chatState.update { it.copy(threads = threads) }
     }
 
     /**
-     * "Skip" on the restore card: delete this account's chat history from the
-     * database as well, so it cannot come back on the next install.
+     * Pull everything the relay is holding for me and persist it locally.
+     * The server deletes each row as it hands it over, so this is the only
+     * chance to keep it.
      */
-    fun skipChatHistory() {
-        if (_chatState.value.isRestoring) return
+    private suspend fun fetchChatInbox() {
         val session = chatSession() ?: return
         val (baseUrl, token) = session
 
-        viewModelScope.launch {
-            _chatState.update {
-                it.copy(isRestoring = true, restoreError = null, restoreProgress = 0.06f)
-            }
-            _chatState.update { it.copy(restoreProgress = 0.45f) }
+        val inbox = TheStudentChatClient.fetchInbox(
+            context = appContext,
+            accountKey = chatAccountKey,
+            backendBaseUrl = baseUrl,
+            token = token
+        ).dataOrNull() ?: return
 
-            val deleted = TheStudentChatClient.discardHistory(baseUrl, token).dataOrNull()
-            preferences.chatHistoryPromptHandled = true
+        val activePeerId = chatActivePeerId
+        var newForActivePeer = false
 
-            // The history is gone, so the old key is useless: publish this
-            // device's key as the account's key so chat keeps working.
-            if (deleted != null) {
-                val published = TheStudentChatClient.publishIdentity(
-                    context = appContext,
-                    accountKey = chatAccountKey,
-                    backendBaseUrl = baseUrl,
-                    token = token,
-                    allowReplace = true
+        inbox.messages.forEach { message ->
+            val peerId = message.senderId
+            val isForOpenChat = activePeerId == peerId
+            if (isForOpenChat) newForActivePeer = true
+            chatDao.upsertChatMessage(
+                ChatMessageEntity(
+                    localId = message.localId,
+                    serverId = message.serverId,
+                    peerId = peerId,
+                    senderId = message.senderId,
+                    isMine = false,
+                    body = message.body,
+                    sentAtEpoch = message.sentAtEpoch,
+                    isRead = isForOpenChat
                 )
-                if (published.dataOrNull() != null) {
-                    _chatState.update { it.copy(isEncryptionReady = true) }
-                }
-            }
+            )
+        }
 
-            _chatState.update { state ->
-                state.copy(
-                    isRestoring = false,
-                    restoreProgress = 0f,
-                    showRestorePrompt = false,
-                    messages = emptyList(),
-                    historyBackup = ChatHistoryBackup(),
-                    threads = if (deleted != null) {
-                        state.threads.map {
-                            it.copy(
-                                lastMessage = null,
-                                lastMessageIsMine = false,
-                                lastMessageEpoch = 0L,
-                                unreadCount = 0
-                            )
-                        }
-                    } else {
-                        state.threads
-                    },
-                    errorMessage = if (deleted == null) {
-                        "Could not delete the chat history. Please try again."
-                    } else {
-                        state.errorMessage
-                    }
-                )
+        // Read receipts tell me which of my messages the peer has seen.
+        inbox.receipts.forEach { (peerId, upTo) ->
+            chatDao.markPeerMessagesRead(peerId, upTo)
+        }
+
+        if (newForActivePeer) {
+            val upTo = chatDao.newestServerIdFromPeer(activePeerId ?: 0) ?: 0L
+            if (upTo > 0) {
+                TheStudentChatClient.sendReadReceipt(baseUrl, token, activePeerId ?: 0, upTo)
             }
         }
-    }
-
-    fun dismissRestorePrompt() {
-        preferences.chatHistoryPromptHandled = true
-        _chatState.update { it.copy(showRestorePrompt = false) }
     }
 
     // ── Conversation ─────────────────────────────────────────────────────────
 
     /** Open a 1:1 conversation with a registered student. */
     fun openChat(peer: ChatPeer) {
+        chatActivePeerId = peer.id
         _chatState.update {
             it.copy(
                 activePeer = peer,
@@ -844,130 +730,103 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         chatMessagesJob?.cancel()
         chatMessagesJob = viewModelScope.launch {
-            val session = chatSession()
-            if (session == null) {
+            // Room is the source of truth: the list re-renders itself whenever a
+            // message is added, sent, delivered or marked read.
+            chatDao.observeConversation(peer.id).collect { rows ->
                 _chatState.update {
-                    it.copy(isLoadingMessages = false, errorMessage = "Sign in to chat.")
+                    it.copy(
+                        isLoadingMessages = false,
+                        messages = rows.map { row -> row.toChatMessage() }
+                    )
                 }
-                return@launch
             }
+        }
+
+        viewModelScope.launch {
+            // Opening a chat marks everything already received as read and tells
+            // the other side.
+            chatDao.markConversationRead(peer.id)
+            val session = chatSession() ?: return@launch
             val (baseUrl, token) = session
-
-            // Initial history
-            val initial = TheStudentChatClient.loadMessages(
-                context = appContext,
-                accountKey = chatAccountKey,
-                backendBaseUrl = baseUrl,
-                token = token,
-                peerId = peer.id,
-                afterId = 0L
-            )
-            val snapshot = initial.dataOrNull()
-            if (snapshot == null) {
-                _chatState.update {
-                    it.copy(isLoadingMessages = false, errorMessage = initial.failureMessage)
-                }
-                return@launch
-            }
-            applyMessages(snapshot, replace = true)
-            TheStudentChatClient.markRead(baseUrl, token, peer.id)
-
-            // Incremental polling
-            while (true) {
-                delay(CHAT_MESSAGES_POLL_MS)
-                val afterId = _chatState.value.messages.lastOrNull()?.id ?: 0L
-                val polled = TheStudentChatClient.loadMessages(
-                    context = appContext,
-                    accountKey = chatAccountKey,
-                    backendBaseUrl = baseUrl,
-                    token = token,
-                    peerId = peer.id,
-                    afterId = afterId
-                ).dataOrNull()
-                if (polled != null) {
-                    applyMessages(polled, replace = afterId == 0L)
-                }
+            val upTo = chatDao.newestServerIdFromPeer(peer.id) ?: 0L
+            if (upTo > 0) {
+                TheStudentChatClient.sendReadReceipt(baseUrl, token, peer.id, upTo)
             }
         }
     }
 
-    private fun applyMessages(snapshot: ChatConversationState, replace: Boolean) {
-        _chatState.update { state ->
-            val merged = if (replace) {
-                snapshot.messages
-            } else {
-                val known = state.messages.associateBy { it.id }
-                val incoming = snapshot.messages.filter { known[it.id] == null }
-                if (incoming.isEmpty()) state.messages else state.messages + incoming
-            }
-            state.copy(
-                isLoadingMessages = false,
-                activePeer = snapshot.peer,
-                messages = merged,
-                safetyAcknowledged = snapshot.safetyAcknowledged || state.safetyAcknowledged
-            )
-        }
-        // Clear the unread badge for this peer in the directory immediately.
-        val peerId = snapshot.peer.id
-        if (snapshot.messages.any { !it.isMine && !it.isRead }) {
-            _chatState.update { state ->
-                state.copy(
-                    threads = state.threads.map {
-                        if (it.peer.id == peerId) it.copy(unreadCount = 0) else it
-                    }
-                )
-            }
-        }
-    }
+    private fun ChatMessageEntity.toChatMessage(): ChatMessage = ChatMessage(
+        localId = localId,
+        serverId = serverId,
+        senderId = senderId,
+        body = body,
+        isMine = isMine,
+        sentAtEpoch = sentAtEpoch,
+        isRead = isRead,
+        isPending = isPending
+    )
 
     fun closeChat() {
         chatMessagesJob?.cancel()
         chatMessagesJob = null
+        chatActivePeerId = null
         chatTypingJob?.cancel()
         chatTypingJob = null
         _chatState.update { it.copy(activePeer = null, messages = emptyList()) }
         _uiState.update { it.copy(isChatConversationOpen = false) }
     }
 
-    /** Send a message to the open conversation (encrypted before it leaves). */
+    /**
+     * Send a message: it is stored locally first (so it appears instantly, even
+     * offline), then encrypted and handed to the relay.
+     */
     fun sendChatMessage(text: String) {
         val body = text.trim()
         val peer = _chatState.value.activePeer ?: return
         if (body.isEmpty() || _chatState.value.isSending) return
         if (!_chatState.value.isEncryptionReady) {
             _chatState.update {
-                it.copy(
-                    restoreError = null,
-                    errorMessage = "Unlock your encrypted chat backup first, then send your message.",
-                    showRestorePrompt = it.historyBackup.available
-                )
+                it.copy(errorMessage = "Secure chat is still starting on this device. Please try again.")
             }
             return
         }
 
         val session = chatSession() ?: return
         val (baseUrl, token) = session
+        val localId = UUID.randomUUID().toString()
+        val sentAt = System.currentTimeMillis() / 1000
 
         _chatState.update { it.copy(isSending = true, errorMessage = null) }
         viewModelScope.launch {
+            chatDao.upsertChatMessage(
+                ChatMessageEntity(
+                    localId = localId,
+                    peerId = peer.id,
+                    senderId = 0,
+                    isMine = true,
+                    body = body,
+                    sentAtEpoch = sentAt,
+                    isRead = false,
+                    isPending = true
+                )
+            )
+
             val result = TheStudentChatClient.sendMessage(
                 context = appContext,
                 accountKey = chatAccountKey,
                 backendBaseUrl = baseUrl,
                 token = token,
                 peer = peer,
-                body = body
+                plaintext = body
             )
-            val sent = result.dataOrNull()
-            if (sent != null) {
-                _chatState.update { state ->
-                    val alreadyThere = state.messages.any { it.id == sent.id }
-                    state.copy(
-                        isSending = false,
-                        messages = if (alreadyThere) state.messages else state.messages + sent
-                    )
-                }
+            val serverId = result.dataOrNull()
+            if (serverId != null) {
+                chatDao.markChatMessageSent(localId, serverId, sentAt)
+                _chatState.update { it.copy(isSending = false) }
             } else {
+                // Keep the bubble (marked pending) so nothing the student typed
+                // is ever lost, and show why it did not go out.
+                chatDao.markChatMessageFailed(localId)
                 _chatState.update {
                     it.copy(isSending = false, errorMessage = result.failureMessage)
                 }
@@ -1000,18 +859,24 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Clear my copy of the open conversation (the other student keeps theirs). */
+    /** Delete the open conversation from this device only. */
     fun clearActiveChat() {
         val peer = _chatState.value.activePeer ?: return
-        val session = chatSession() ?: return
-        val (baseUrl, token) = session
         viewModelScope.launch {
-            val result = TheStudentChatClient.clearConversation(baseUrl, token, peer.id)
-            if (result.dataOrNull() != null) {
-                _chatState.update { it.copy(messages = emptyList()) }
-                refreshChatDirectory(showSpinner = false)
-            } else {
-                _chatState.update { it.copy(errorMessage = result.failureMessage) }
+            chatDao.clearConversation(peer.id)
+            _chatState.update { it.copy(messages = emptyList()) }
+        }
+    }
+
+    /**
+     * Collect conversation previews and unread badges from the device database.
+     * Started once; Room re-emits whenever a message changes.
+     */
+    private fun observeChatDatabase() {
+        viewModelScope.launch {
+            chatDao.observeSummaries().collect { rows ->
+                chatSummaries = rows
+                rebuildChatThreads()
             }
         }
     }
@@ -1023,10 +888,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private companion object {
         /** Presence ping. The server calls 10 s of silence "offline". */
         const val CHAT_PRESENCE_MS = 2_000L
-        /** Directory (names, avatars, online dots, unread) refresh. */
+        /** Directory (names, avatars, online dots) refresh. */
         const val CHAT_DIRECTORY_POLL_MS = 3_000L
-        /** Open conversation refresh. */
-        const val CHAT_MESSAGES_POLL_MS = 2_000L
+        /** Relay fetch: new messages + read receipts. */
+        const val CHAT_INBOX_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
     }
 
@@ -1425,6 +1290,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             preferences.logout()
             stopChatSync()
             ChatCrypto.clearSessionCache()
+            // Chat history is device storage: a different student signing in on
+            // this phone must not be able to read the previous one's messages.
+            runCatching { chatDao.clearAllChatMessages() }
+            chatSummaries = emptyList()
+            chatPeers = emptyList()
             _chatState.value = ChatUiState()
             repository.clearUserProfile()
             _isAdmin.value = false

@@ -20,8 +20,8 @@ data class ChatPeer(
     val isTyping: Boolean = false,
     /**
      * Public half of their end-to-end encryption key (base64 SPKI).
-     * Null when the student has never opened the chat on an updated build, so
-     * no encrypted message can be delivered to them yet.
+     * Null when the student has never opened chat on an updated build, so no
+     * encrypted message can be delivered to them yet.
      */
     val publicKey: String? = null
 ) {
@@ -52,14 +52,22 @@ data class ChatPeer(
         }
 }
 
-/** One message in a 1:1 conversation. */
+/**
+ * One message in a 1:1 conversation.
+ *
+ * [localId] is generated on the device, so a message has an identity before the
+ * server ever sees it (offline-first). [serverId] stays 0 until the relay
+ * accepted it, and is what read receipts refer to.
+ */
 data class ChatMessage(
-    val id: Long,
+    val localId: String,
+    val serverId: Long = 0L,
     val senderId: Int,
     val body: String,
     val isMine: Boolean,
     val sentAtEpoch: Long,
-    val isRead: Boolean
+    val isRead: Boolean = false,
+    val isPending: Boolean = false
 )
 
 /** A directory row: a student plus the state of my conversation with them. */
@@ -73,45 +81,14 @@ data class ChatThread(
     val hasConversation: Boolean get() = lastMessageEpoch > 0L
 }
 
-/** Server-side history that survived a reinstall (see `history_backup`). */
-data class ChatHistoryBackup(
-    val available: Boolean = false,
-    val messageCount: Int = 0,
-    val threadCount: Int = 0,
-    val newestEpoch: Long = 0L
-)
-
 /** Everything the chat UI needs for the directory + presence counters. */
 data class ChatDirectory(
     val threads: List<ChatThread> = emptyList(),
+    /** Other students currently online (never includes me — see the API). */
     val onlineCount: Int = 0,
     val totalStudents: Int = 0,
     val safetyAcknowledged: Boolean = false,
     val serverEpoch: Long = 0L,
-    val historyBackup: ChatHistoryBackup = ChatHistoryBackup(),
     /** The server's copy of my own published key (null until I publish one). */
-    val myPublicKey: String? = null,
-    /** True when the server holds a password-wrapped copy of my private key. */
-    val keyBackupAvailable: Boolean = false
-)
-
-/** Snapshot of one open conversation. */
-data class ChatConversationState(
-    val peer: ChatPeer,
-    val messages: List<ChatMessage> = emptyList(),
-    val isSending: Boolean = false,
-    val safetyAcknowledged: Boolean = false,
-    val serverEpoch: Long = 0L
-)
-
-/**
- * Result of the "unlock my encrypted key backup" call.
- *
- * The wrapped private key and its salt are useless without the account
- * password: the server only stores an AES-GCM blob.
- */
-data class ChatKeyBackup(
-    val wrappedPrivateKeyBase64: String,
-    val saltBase64: String,
-    val publicKey: String?
+    val myPublicKey: String? = null
 )

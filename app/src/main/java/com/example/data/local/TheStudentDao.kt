@@ -59,4 +59,60 @@ interface TheStudentDao {
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun saveUserProfile(profile: UserProfileEntity)
+
+    // ── Chat (device-only history) ──────────────────────────────────────────
+
+    @Query("SELECT * FROM chat_messages WHERE peerId = :peerId ORDER BY sentAtEpoch ASC, serverId ASC")
+    fun observeConversation(peerId: Int): Flow<List<ChatMessageEntity>>
+
+    @Query(
+        """SELECT peerId,
+               (SELECT body FROM chat_messages b WHERE b.peerId = a.peerId
+                 ORDER BY b.sentAtEpoch DESC, b.serverId DESC LIMIT 1) AS lastBody,
+               (SELECT isMine FROM chat_messages c WHERE c.peerId = a.peerId
+                 ORDER BY c.sentAtEpoch DESC, c.serverId DESC LIMIT 1) AS lastIsMine,
+               (SELECT sentAtEpoch FROM chat_messages d WHERE d.peerId = a.peerId
+                 ORDER BY d.sentAtEpoch DESC, d.serverId DESC LIMIT 1) AS lastEpoch,
+               SUM(CASE WHEN a.isMine = 0 AND a.isRead = 0 THEN 1 ELSE 0 END) AS unreadCount
+        FROM chat_messages a
+        GROUP BY a.peerId"""
+    )
+    fun observeSummaries(): Flow<List<ChatSummaryRow>>
+
+    @Query("SELECT * FROM chat_messages WHERE serverId > 0 ORDER BY serverId DESC LIMIT 1")
+    suspend fun newestReceivedMessage(): ChatMessageEntity?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun upsertChatMessage(message: ChatMessageEntity)
+
+    @Query("UPDATE chat_messages SET serverId = :serverId, isPending = 0, sentAtEpoch = :sentAt WHERE localId = :localId")
+    suspend fun markChatMessageSent(localId: String, serverId: Long, sentAt: Long)
+
+    @Query("UPDATE chat_messages SET isPending = 0 WHERE localId = :localId")
+    suspend fun markChatMessageFailed(localId: String)
+
+    /** Read receipts: everything from this peer up to [upToServerId] is read. */
+    @Query(
+        "UPDATE chat_messages SET isRead = 1 " +
+            "WHERE peerId = :peerId AND isMine = 0 AND serverId > 0 AND serverId <= :upToServerId"
+    )
+    suspend fun markPeerMessagesRead(peerId: Int, upToServerId: Long)
+
+    @Query("SELECT MAX(serverId) FROM chat_messages WHERE peerId = :peerId AND isMine = 0")
+    suspend fun newestServerIdFromPeer(peerId: Int): Long?
+
+    @Query("SELECT COUNT(*) FROM chat_messages WHERE isMine = 0 AND isRead = 0")
+    fun observeTotalUnread(): Flow<Int>
+
+    @Query("UPDATE chat_messages SET isRead = 1 WHERE peerId = :peerId AND isMine = 0")
+    suspend fun markConversationRead(peerId: Int)
+
+    @Query("DELETE FROM chat_messages WHERE peerId = :peerId")
+    suspend fun clearConversation(peerId: Int)
+
+    @Query("DELETE FROM chat_messages")
+    suspend fun clearAllChatMessages()
+
+    @Query("SELECT COUNT(*) FROM chat_messages")
+    suspend fun countChatMessages(): Int
 }

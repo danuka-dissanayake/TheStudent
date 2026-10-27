@@ -20,9 +20,7 @@ import javax.crypto.Cipher
 import javax.crypto.KeyAgreement
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
-import javax.crypto.SecretKeyFactory
 import javax.crypto.spec.GCMParameterSpec
-import javax.crypto.spec.PBEKeySpec
 import javax.crypto.spec.SecretKeySpec
 
 /**
@@ -40,10 +38,10 @@ import javax.crypto.spec.SecretKeySpec
  * 3. Every message body is encrypted with AES-256-GCM (random 12-byte IV) before
  *    it is uploaded, so the MySQL database — and anyone who dumps it — only ever
  *    sees ciphertext. The server cannot read a single message.
- * 4. The identity key can be uploaded **wrapped with a key derived from the
- *    student's account password** (PBKDF2), so a re-installed app can restore
- *    the history after the password is typed once. The server stores only the
- *    wrapped blob: it cannot unwrap it without the password.
+ * 4. Decrypted history is stored only in the device database (Room). The server
+ *    is a relay: it holds a message only until the recipient fetches it, so
+ *    there is no cloud copy of a conversation to leak. Reinstalling the app
+ *    therefore starts with an empty history — that is the privacy trade-off.
  *
  * Wire format of an encrypted body:  `e2ee:v1:` + Base64( IV || ciphertext+tag )
  * Bodies without that prefix are legacy plain text and are shown unchanged.
@@ -64,12 +62,6 @@ object ChatCrypto {
     private const val KEY_PUBLIC = "public_key_b64"
     private const val KEY_PRIVATE_SEALED = "private_key_sealed_b64"
 
-    /** PBKDF2 settings for the password-protected key backup. */
-    private const val PBKDF2_ITERATIONS = 120_000
-    private const val BACKUP_ALG_SHA256 = "PBKDF2WithHmacSHA256"
-    private const val BACKUP_ALG_SHA1 = "PBKDF2WithHmacSHA1"
-    private const val BACKUP_SALT_BYTES = 16
-
     /** Placeholder shown when a body cannot be decrypted on this device. */
     const val UNDECRYPTABLE = "🔒 This message can't be decrypted on this device."
 
@@ -80,12 +72,6 @@ object ChatCrypto {
         val publicKeyBase64: String,
         /** True when the key pair was created by this call. */
         val isNew: Boolean
-    )
-
-    /** Wrapped key material for the server-side (password protected) backup. */
-    data class KeyBackup(
-        val wrappedPrivateKeyBase64: String,
-        val saltBase64: String
     )
 
     // -----------------------------------------------------------------------
@@ -154,112 +140,6 @@ object ChatCrypto {
             Log.e(TAG, "Private key parse failed: ${e.message}")
             null
         }
-    }
-
-    // -----------------------------------------------------------------------
-    // Password-protected key backup (used to restore history on a new device)
-    // -----------------------------------------------------------------------
-
-    /** Wrap the identity private key with a password-derived key. */
-    fun exportBackup(context: Context, accountKey: String, password: String): KeyBackup? {
-        if (password.length < 8) return null
-        val privateKey = privateKey(context, accountKey) ?: return null
-        return try {
-            val salt = ByteArray(BACKUP_SALT_BYTES).also { random.nextBytes(it) }
-            val key = deriveKey(password, salt, BACKUP_ALG_SHA256) ?: deriveKey(password, salt, BACKUP_ALG_SHA1)
-                ?: return null
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.ENCRYPT_MODE, key)
-            val iv = cipher.iv
-            val cipherText = cipher.doFinal(privateKey.encoded)
-            val packed = iv + cipherText
-            KeyBackup(
-                wrappedPrivateKeyBase64 = Base64.encodeToString(packed, Base64.NO_WRAP),
-                saltBase64 = Base64.encodeToString(salt, Base64.NO_WRAP)
-            )
-        } catch (e: Exception) {
-            Log.e(TAG, "Backup export failed: ${e.message}", e)
-            null
-        }
-    }
-
-    /**
-     * Unwrap a server-side backup into a usable identity.
-     *
-     * @param publishedPublicKey the public key the server already stores for
-     *   this account (it is the pair of the wrapped private key).
-     * @return true when the password unlocked the backup.
-     */
-    @Synchronized
-    fun restoreIdentity(
-        context: Context,
-        accountKey: String,
-        wrappedPrivateKeyBase64: String,
-        saltBase64: String,
-        password: String,
-        publishedPublicKey: String?
-    ): Boolean {
-        val pkcs8 = unwrapPrivateKey(wrappedPrivateKeyBase64, saltBase64, password) ?: return false
-        if (publishedPublicKey.isNullOrBlank()) return false
-        return try {
-            storePrivateKey(context, accountKey, pkcs8)
-            prefs(context, accountKey).edit()
-                .putString(KEY_PUBLIC, publishedPublicKey)
-                .apply()
-            true
-        } catch (e: Exception) {
-            Log.e(TAG, "Restored identity could not be stored: ${e.message}")
-            false
-        }
-    }
-
-    private fun unwrapPrivateKey(
-        wrappedPrivateKeyBase64: String,
-        saltBase64: String,
-        password: String
-    ): ByteArray? = try {
-        val salt = Base64.decode(saltBase64, Base64.NO_WRAP)
-        val packed = Base64.decode(wrappedPrivateKeyBase64, Base64.NO_WRAP)
-        if (packed.size <= IV_LENGTH) {
-            null
-        } else {
-            val iv = packed.copyOfRange(0, IV_LENGTH)
-            val cipherText = packed.copyOfRange(IV_LENGTH, packed.size)
-            var result: ByteArray? = null
-            for (algorithm in listOf(BACKUP_ALG_SHA256, BACKUP_ALG_SHA1)) {
-                val key = deriveKey(password, salt, algorithm) ?: continue
-                result = try {
-                    val cipher = Cipher.getInstance(TRANSFORMATION)
-                    cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
-                    cipher.doFinal(cipherText)
-                } catch (e: Exception) {
-                    null
-                }
-                if (result != null) break
-            }
-            result
-        }
-    } catch (e: Exception) {
-        Log.w(TAG, "Backup unwrap failed: ${e.message}")
-        null
-    }
-
-    private fun storePrivateKey(context: Context, accountKey: String, pkcs8: ByteArray) {
-        val store = prefs(context, accountKey)
-        val sealed = seal(accountSuffix(accountKey), pkcs8)
-            ?: throw IllegalStateException("Keystore unavailable")
-        store.edit().putString(KEY_PRIVATE_SEALED, sealed).apply()
-        conversationKeys.keys.removeAll { it.startsWith("$accountKey:") }
-    }
-
-    private fun deriveKey(password: String, salt: ByteArray, algorithm: String): SecretKey? = try {
-        val spec = PBEKeySpec(password.toCharArray(), salt, PBKDF2_ITERATIONS, 256)
-        val factory = SecretKeyFactory.getInstance(algorithm)
-        val encoded = factory.generateSecret(spec).encoded
-        spec.clearPassword()
-        SecretKeySpec(encoded, "AES")
-    } catch (e: Exception) {
-        null
     }
 
     // -----------------------------------------------------------------------

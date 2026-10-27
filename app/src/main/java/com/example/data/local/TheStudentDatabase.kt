@@ -12,9 +12,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedPaperEntity::class,
         SavedCourseEntity::class,
         LearningActivityEntity::class,
-        UserProfileEntity::class
+        UserProfileEntity::class,
+        ChatMessageEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -34,6 +35,39 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v2 -> v3: chat history moved onto the device.
+         *
+         * The SQL matches the schema Room generates for [ChatMessageEntity]
+         * exactly (Room validates it on open), so existing installs keep their
+         * saved papers, streak and profile while gaining the chat table.
+         */
+        private val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `chat_messages` (" +
+                        "`localId` TEXT NOT NULL, " +
+                        "`serverId` INTEGER NOT NULL, " +
+                        "`peerId` INTEGER NOT NULL, " +
+                        "`senderId` INTEGER NOT NULL, " +
+                        "`isMine` INTEGER NOT NULL, " +
+                        "`body` TEXT NOT NULL, " +
+                        "`sentAtEpoch` INTEGER NOT NULL, " +
+                        "`isRead` INTEGER NOT NULL, " +
+                        "`isPending` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`localId`))"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_chat_messages_peerId` " +
+                        "ON `chat_messages` (`peerId`)"
+                )
+                db.execSQL(
+                    "CREATE INDEX IF NOT EXISTS `index_chat_messages_sentAtEpoch` " +
+                        "ON `chat_messages` (`sentAtEpoch`)"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -41,10 +75,12 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     TheStudentDatabase::class.java,
                     "the_student_database"
                 )
-                    // v2 adds the profile-setup columns. A real migration keeps the
-                    // student's saved papers and streak instead of wiping the cache.
-                    .addMigrations(MIGRATION_1_2)
-                    .fallbackToDestructiveMigration()
+                    // v2 adds the profile-setup columns; v3 adds the chat history,
+                    // which exists nowhere else — the phone is the only copy. So the
+                    // migrations are explicit and there is deliberately **no**
+                    // destructive fallback: a schema bug must fail loudly in
+                    // development instead of silently deleting a student's chats.
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 instance

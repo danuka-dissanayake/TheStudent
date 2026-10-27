@@ -132,12 +132,6 @@ fun AuthScreen(
     initialPendingProfile: UserProfile? = null,
     initialOtpCode: String? = null,
     onAuthSuccess: (UserProfile) -> Unit,
-    /**
-     * Called with the account password the moment an e-mail sign-in / sign-up
-     * succeeds. The view model uses it once to wrap the chat encryption key
-     * (so the history can be restored on a new phone) and never stores it.
-     */
-    onPasswordAvailable: (String) -> Unit = {},
     backendBaseUrl: String = "https://app.quizontal.site/",
     onBack: (() -> Unit)? = null,
     onContinueAsGuest: (() -> Unit)? = null,
@@ -377,7 +371,6 @@ fun AuthScreen(
                         role = result.role,
                         expiresAt = result.expiresAt
                     )
-                    if (password.isNotBlank()) onPasswordAvailable(password)
                     onAuthSuccess(result.profile)
                 }
                 is AuthApiResult.ResetRequired -> {
@@ -448,7 +441,6 @@ fun AuthScreen(
                         role = result.role,
                         expiresAt = result.expiresAt
                     )
-                    if (password.isNotBlank()) onPasswordAvailable(password)
                     onAuthSuccess(result.profile)
                 }
                 is AuthApiResult.ResetRequired -> {
