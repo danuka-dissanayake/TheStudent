@@ -54,6 +54,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.yield
 
 enum class AppScreenFlow {
     SPLASH,
@@ -1096,6 +1097,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun observeChatDatabase() {
         viewModelScope.launch {
+            // MUST suspend before touching anything declared below the init
+            // block. viewModelScope runs on Dispatchers.Main.immediate, so when
+            // this is called from the constructor the body would otherwise run
+            // inline — while `chatDao` and `chatSummaries` are still null. That
+            // threw a NullPointerException into the catch below on every launch,
+            // which is why the chat list showed "Say hello 👋" and never a
+            // preview or an unread badge, even though conversations worked.
+            yield()
             while (true) {
                 try {
                     chatDao.observeSummaries().collect { rows ->

@@ -121,6 +121,15 @@ plus a local Room table that owns the actual history.
   not read yet (from read receipts).
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
+* **Never touch a property from the ViewModel `init` block without suspending
+  first.** `viewModelScope` runs on `Dispatchers.Main.immediate`, so a `launch`
+  started in `init` executes its body inline — before any `val` declared below
+  the `init` block exists. `observeChatDatabase()` did exactly that, hit a null
+  `chatDao`, and its `runCatching` swallowed the `NullPointerException`: the
+  summaries collector never started, so the chat list had no previews and no
+  unread badges at all, while conversations (which open later) worked fine.
+  A single `yield()` at the top of the launched body, or `Dispatchers.IO`,
+  avoids the whole class of bug.
 * Only full names and avatars are ever exposed about another student.
 
 ## 4. State layer — `TheStudentViewModel` (1660 lines)
