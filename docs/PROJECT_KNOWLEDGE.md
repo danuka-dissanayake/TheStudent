@@ -116,6 +116,9 @@ plus a local Room table that owns the actual history.
 * **Delete for everyone**: long-press → the row is removed locally (and its cached
   file), then `delete_message` queues a `delete` envelope the peer applies to its
   own copy on the next inbox poll.
+* The chat list shows two different counters: the emerald badge for messages I
+  have not read, and a quiet `✓ n` chip for my delivered messages the peer has
+  not read yet (from read receipts).
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
 * Only full names and avatars are ever exposed about another student.

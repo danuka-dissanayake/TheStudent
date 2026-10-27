@@ -24,6 +24,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
@@ -623,30 +624,65 @@ private fun ChatThreadRow(
                     fontWeight = if (thread.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
                 )
                 Spacer(Modifier.height(6.dp))
-                if (thread.unreadCount > 0) {
-                    Box(
-                        modifier = Modifier
-                            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
-                            .background(EmeraldPrimary, CircleShape)
-                            .padding(horizontal = 6.dp, vertical = 2.dp),
-                        contentAlignment = Alignment.Center
-                    ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Messages from them I still have to read: the loud badge.
+                    if (thread.unreadCount > 0) {
+                        Box(
+                            modifier = Modifier
+                                .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                                .background(EmeraldPrimary, CircleShape)
+                                .padding(horizontal = 6.dp, vertical = 2.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = if (thread.unreadCount > 99) "99+" else thread.unreadCount.toString(),
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 10.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    // My messages they have not opened yet: a quiet counter, so
+                    // it reads as status rather than as a notification.
+                    if (thread.myUnreadCount > 0) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFFF1F5F9))
+                                .border(1.dp, ChatHairline, RoundedCornerShape(50))
+                                .padding(horizontal = 6.dp, vertical = 2.dp)
+                                .testTag("chat_unread_by_peer_${peer.id}")
+                        ) {
+                            Icon(
+                                Icons.Default.Done,
+                                contentDescription = null,
+                                tint = ChatMuted,
+                                modifier = Modifier.size(11.dp)
+                            )
+                            Spacer(Modifier.width(3.dp))
+                            Text(
+                                text = if (thread.myUnreadCount > 99) "99+" else thread.myUnreadCount.toString(),
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 10.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ChatMuted
+                            )
+                        }
+                    }
+                    if (thread.unreadCount == 0 && thread.myUnreadCount == 0 && peer.isOnline) {
                         Text(
-                            text = if (thread.unreadCount > 99) "99+" else thread.unreadCount.toString(),
+                            text = "online",
                             fontFamily = MaisonNeueFontFamily,
                             fontSize = 10.5.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White
+                            color = ChatOnline,
+                            fontWeight = FontWeight.Medium
                         )
                     }
-                } else if (peer.isOnline) {
-                    Text(
-                        text = "online",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
-                        color = ChatOnline,
-                        fontWeight = FontWeight.Medium
-                    )
                 }
             }
         }

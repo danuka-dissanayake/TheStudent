@@ -685,7 +685,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 lastMessage = preview,
                 lastMessageIsMine = summary?.lastIsMine ?: false,
                 lastMessageEpoch = summary?.lastEpoch ?: 0L,
-                unreadCount = summary?.unreadCount ?: 0
+                unreadCount = summary?.unreadCount ?: 0,
+                myUnreadCount = summary?.myUnreadCount ?: 0
             )
         }.sortedWith(
             compareByDescending<ChatThread> { it.lastMessageEpoch > 0L }

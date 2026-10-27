@@ -77,7 +77,9 @@ interface TheStudentDao {
                (SELECT attachmentKind FROM chat_messages e WHERE e.peerId = a.peerId
                  ORDER BY e.sentAtEpoch DESC, e.serverId DESC LIMIT 1) AS lastAttachmentKind,
                (SELECT attachmentName FROM chat_messages f WHERE f.peerId = a.peerId
-                 ORDER BY f.sentAtEpoch DESC, f.serverId DESC LIMIT 1) AS lastAttachmentName
+                 ORDER BY f.sentAtEpoch DESC, f.serverId DESC LIMIT 1) AS lastAttachmentName,
+               SUM(CASE WHEN a.isMine = 1 AND a.isRead = 0 AND a.isPending = 0
+                        THEN 1 ELSE 0 END) AS myUnreadCount
         FROM chat_messages a
         GROUP BY a.peerId"""
     )

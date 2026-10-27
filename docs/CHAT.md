@@ -19,7 +19,7 @@ messages, real presence.
 | --- | --- | --- |
 | Chat tab | Every active, e-mail-verified student — **full name only** (privacy), plus their uploaded profile picture when they have one, else an initials avatar | `GET api/chat.php?action=threads` |
 | Online row | Students active in the last 10 seconds (2 s heartbeats), with a live count ("12 online") | same response, `online_count` |
-| Thread row | Last message preview ("📷 Photo", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp | **device database** |
+| Thread row | Last message preview ("📷 Photo", "🎤 Voice note", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp, and a quiet **✓ counter** for my messages the student has not opened yet | **device database** |
 | Day separators | The conversation is grouped as **Today**, **Yesterday**, then "12 October" / "12 October 2024" | message timestamps |
 | Conversation | History, own bubbles on the right in **black**, tighter padding, **Markdown** formatting, emoji-only messages rendered large, replies quoted, voice notes playable, upload/download progress on files, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
@@ -45,6 +45,17 @@ the constants at the bottom of `TheStudentViewModel`):
 | Attachment fetch | with the inbox | a failed blob is retried after 60 s, not every poll |
 
 Nothing is faked or randomised client-side.
+
+**The two badges are different**
+
+| Badge | Meaning | Where it comes from |
+| --- | --- | --- |
+| Emerald filled circle with a number | Messages from that student **I** have not opened | `isMine = 0 AND isRead = 0` in the local table |
+| Quiet grey `✓ n` chip | My delivered messages that student has **not read yet** | `isMine = 1 AND isRead = 0 AND isPending = 0`, cleared by their read receipt |
+
+The grey chip never counts a message that is still pending (not yet accepted by
+the relay), and it disappears on the next 2 s inbox poll after their phone sends
+the read receipt — the same signal that turns my ✓ into ✓✓ inside the chat.
 
 **Privacy guarantees**
 

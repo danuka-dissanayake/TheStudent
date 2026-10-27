@@ -125,5 +125,13 @@ data class ChatSummaryRow(
     val unreadCount: Int,
     /** "image" / "file" when the newest message carries an attachment. */
     val lastAttachmentKind: String? = null,
-    val lastAttachmentName: String? = null
+    val lastAttachmentName: String? = null,
+    /**
+     * How many of MY delivered messages this peer has not read yet.
+     *
+     * Shown on the chat list as a quiet counter so the sender knows a message is
+     * still unopened, instead of having to open the conversation to look for
+     * single ticks.
+     */
+    val myUnreadCount: Int = 0
 )
