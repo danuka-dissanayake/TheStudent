@@ -13,6 +13,7 @@ import android.net.Uri
 import android.os.Build
 import android.util.Log
 import androidx.core.app.NotificationCompat
+import androidx.core.app.RemoteInput
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.drawable.IconCompat
@@ -69,6 +70,13 @@ object ChatNotifications {
 
     /** Extra key consumed by MainActivity to open one conversation. */
     const val EXTRA_PEER_ID = "com.thestudent.sl.extra.PEER_ID"
+
+    /** Expanded-notification actions, handled by [ChatNotificationReceiver]. */
+    const val ACTION_REPLY = "com.thestudent.sl.action.CHAT_REPLY"
+    const val ACTION_MARK_READ = "com.thestudent.sl.action.CHAT_MARK_READ"
+
+    /** RemoteInput result key for the inline reply box. */
+    const val REPLY_KEY = "chat_reply_text"
 
     /**
      * The conversation currently on screen, set by the view model when a chat is
@@ -204,14 +212,13 @@ object ChatNotifications {
             )
             .build()
 
-        // A 1:1 chat is NOT a group conversation. Saying it was (true) makes
-        // Android print the sender's name above every message *and* keep the
-        // conversation title, which is exactly the doubled name.
-        //
-        // The title is set here, once: that is the name Android shows in the
-        // collapsed row (app icon · name · time).
+        // Exactly the WhatsApp shape: a 1:1 conversation is NOT a group, and it
+        // has NO conversation title. Android then uses the sender of the newest
+        // message as the collapsed title ("Tharindu") and the text as the body,
+        // while the header keeps app name · time. Setting either of them
+        // explicitly is what duplicated the name in earlier attempts.
         val style = NotificationCompat.MessagingStyle(me)
-            .setConversationTitle(peerName)
+            .setConversationTitle(null)
             .setGroupConversation(false)
 
         messages.takeLast(MAX_MESSAGES_IN_NOTIFICATION).forEach { message ->
@@ -245,6 +252,9 @@ object ChatNotifications {
             .setOnlyAlertOnce(false)
             .setContentIntent(conversationIntent(context, peerId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
+            // Shown in the expanded view, side by side, like the reference.
+            .addAction(replyAction(context, peerId, peerName))
+            .addAction(markReadAction(context, peerId))
 
         if (grouped) {
             // Only when there is a summary above it: then expanding the group
@@ -320,6 +330,62 @@ object ChatNotifications {
     /** Remove every chat notification (sign-out, or "clear all"). */
     fun clearAll(context: Context) {
         runCatching { NotificationManagerCompat.from(context).cancelAll() }
+    }
+
+    // ── actions ───────────────────────────────────────────────────────────────
+
+    /** Inline "Reply" box: types straight into the shade, no app launch. */
+    private fun replyAction(context: Context, peerId: Int, peerName: String) =
+        NotificationCompat.Action.Builder(
+            R.drawable.ic_chat_notification,
+            "Reply",
+            actionIntent(context, ACTION_REPLY, peerId, mutable = true)
+        )
+            .addRemoteInput(
+                RemoteInput.Builder(REPLY_KEY)
+                    .setLabel("Reply to $peerName")
+                    .build()
+            )
+            // Lets the reply text be suggested from the conversation (API 29+).
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_REPLY)
+            .setAllowGeneratedReplies(true)
+            .build()
+
+    /** "Mark as read": clears the thread here and sends the read receipt. */
+    private fun markReadAction(context: Context, peerId: Int) =
+        NotificationCompat.Action.Builder(
+            R.drawable.ic_chat_notification,
+            "Mark as read",
+            actionIntent(context, ACTION_MARK_READ, peerId, mutable = false)
+        )
+            .setSemanticAction(NotificationCompat.Action.SEMANTIC_ACTION_MARK_AS_READ)
+            .build()
+
+    /**
+     * Broadcast for an action. [mutable] must be true when the intent carries a
+     * RemoteInput result — Android 12+ rejects a mutable PendingIntent that has
+     * no RemoteInput, and drops the reply text from an immutable one.
+     */
+    private fun actionIntent(
+        context: Context,
+        action: String,
+        peerId: Int,
+        mutable: Boolean
+    ): PendingIntent {
+        val intent = Intent(context, ChatNotificationReceiver::class.java).apply {
+            this.action = action
+            putExtra(EXTRA_PEER_ID, peerId)
+        }
+        var flags = PendingIntent.FLAG_UPDATE_CURRENT
+        flags = flags or if (mutable) {
+            PendingIntent.FLAG_MUTABLE
+        } else {
+            PendingIntent.FLAG_IMMUTABLE
+        }
+        // Distinct request codes per peer and per action, so one never reuses
+        // another's extras.
+        val requestCode = peerId + if (action == ACTION_REPLY) 100_000 else 200_000
+        return PendingIntent.getBroadcast(context, requestCode, intent, flags)
     }
 
     // ── intents ───────────────────────────────────────────────────────────────

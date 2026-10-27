@@ -46,6 +46,12 @@
             </intent-filter>
         </service>
 
+        <!-- Handles the expanded notification's Reply / Mark as read actions.
+             Not exported: only our own PendingIntents can reach it. -->
+        <receiver
+            android:name=".notifications.ChatNotificationReceiver"
+            android:exported="false" />
+
         <meta-data
             android:name="com.google.firebase.messaging.default_notification_channel_id"
             android:value="chat_messages_v2" />
