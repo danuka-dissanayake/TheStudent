@@ -78,8 +78,10 @@ Theme (`ui/theme`): emerald/teal/lime brand palette, light + dark schemes, custo
 
 `ChatScreen` → `TheStudentViewModel.chatState` → `TheStudentChatClient` → `api/chat.php`.
 
-* Polling: directory 5 s, open conversation 2.5 s, presence heartbeat 20 s
-  (online window on the server is 45 s).
+* Polling: directory 3 s, open conversation 2 s, presence heartbeat 2 s
+  (online window on the server is 10 s).
+* End-to-end encryption: `data/local/ChatCrypto.kt` (EC P-256 ECDH + AES-256-GCM,
+  Keystore-sealed private key, password-wrapped key backup for restore).
 * Tables: `chat_messages`, `chat_typing`, `chat_clears` + `users.last_seen_at`
   and `users.chat_safety_ack_at` (`backend/database_chat.sql`, self-healed by the API).
 * Only full names and avatars are ever exposed about another student.

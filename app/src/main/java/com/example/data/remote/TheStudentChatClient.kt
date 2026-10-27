@@ -1,8 +1,12 @@
 package com.example.data.remote
 
+import android.content.Context
 import android.util.Log
+import com.example.data.local.ChatCrypto
 import com.example.data.model.ChatConversationState
 import com.example.data.model.ChatDirectory
+import com.example.data.model.ChatHistoryBackup
+import com.example.data.model.ChatKeyBackup
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatThread
@@ -16,6 +20,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import javax.crypto.SecretKey
 
 /**
  * Result of a chat call. Network failures are kept separate from real server
@@ -51,8 +56,11 @@ sealed class ChatResult<out T> {
  * Contract
  * --------
  * • Bearer token only (never a query string), same session as `auth.php`.
+ * • Message bodies are **encrypted on the device** before upload (see
+ *   [ChatCrypto]); the server and the database only ever see ciphertext.
+ * • Only full names + avatars come back for other students — no e-mail, phone
+ *   or school.
  * • Every method is safe to call from `Dispatchers.IO` and never throws.
- * • Only full names + avatars come back — no e-mail, phone or school.
  */
 object TheStudentChatClient {
 
@@ -75,27 +83,95 @@ object TheStudentChatClient {
     }
 
     // -----------------------------------------------------------------------
+    // Encryption identity
+    // -----------------------------------------------------------------------
+
+    /**
+     * Make sure this device has a chat identity and that the server knows its
+     * public half. The identity is created (and sealed in the Keystore) on the
+     * first call.
+     *
+     * @param passwordForBackup when supplied, an extra copy of the private key
+     *   wrapped with this password is uploaded, so the history can be restored
+     *   on a new phone.
+     */
+    suspend fun publishIdentity(
+        context: Context,
+        accountKey: String,
+        backendBaseUrl: String,
+        token: String,
+        passwordForBackup: String? = null,
+        /** Replace a key the server already published (only after a history wipe). */
+        allowReplace: Boolean = false
+    ): ChatResult<String> = withContext(Dispatchers.IO) {
+        val identity = ChatCrypto.ensureIdentity(context, accountKey)
+        if (identity.publicKeyBase64.isBlank()) {
+            return@withContext ChatResult.Failure("Secure chat could not start on this device.")
+        }
+
+        val payload = JSONObject().put("public_key", identity.publicKeyBase64)
+        if (allowReplace) payload.put("allow_replace", 1)
+        if (!passwordForBackup.isNullOrBlank()) {
+            val backup = ChatCrypto.exportBackup(context, accountKey, passwordForBackup)
+            if (backup != null) {
+                payload.put("key_backup", backup.wrappedPrivateKeyBase64)
+                payload.put("key_salt", backup.saltBase64)
+            }
+        }
+
+        post(backendBaseUrl, token, "set_key", payload) { identity.publicKeyBase64 }
+    }
+
+    /** Fetch the password-wrapped private key so a new device can decrypt history. */
+    suspend fun unlockKeyBackup(
+        backendBaseUrl: String,
+        token: String,
+        password: String
+    ): ChatResult<ChatKeyBackup> = withContext(Dispatchers.IO) {
+        post(backendBaseUrl, token, "unlock_key_backup", JSONObject().put("password", password)) { json ->
+            ChatKeyBackup(
+                wrappedPrivateKeyBase64 = json.optString("key_backup"),
+                saltBase64 = json.optString("key_salt"),
+                publicKey = json.optString("public_key").takeIf { it.isNotBlank() }
+            )
+        }
+    }
+
+    // -----------------------------------------------------------------------
     // Directory + presence
     // -----------------------------------------------------------------------
 
-    suspend fun loadDirectory(backendBaseUrl: String, token: String): ChatResult<ChatDirectory> =
-        withContext(Dispatchers.IO) {
-            get(backendBaseUrl, token, "threads") { json ->
-                val arr = json.optJSONArray("threads") ?: JSONArray()
-                val threads = ArrayList<ChatThread>(arr.length())
-                for (i in 0 until arr.length()) {
-                    val obj = arr.optJSONObject(i) ?: continue
-                    threads += parseThread(obj)
-                }
-                ChatDirectory(
-                    threads = threads,
-                    onlineCount = json.optInt("online_count", 0),
-                    totalStudents = json.optInt("total_students", threads.size),
-                    safetyAcknowledged = json.optBoolean("safety_acknowledged", false),
-                    serverEpoch = json.optLong("server_epoch", 0L)
-                )
+    suspend fun loadDirectory(
+        context: Context,
+        accountKey: String,
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<ChatDirectory> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "threads") { json ->
+            val arr = json.optJSONArray("threads") ?: JSONArray()
+            val threads = ArrayList<ChatThread>(arr.length())
+            for (i in 0 until arr.length()) {
+                val obj = arr.optJSONObject(i) ?: continue
+                threads += parseThread(context, accountKey, obj)
             }
+            val backup = json.optJSONObject("history_backup")
+            ChatDirectory(
+                threads = threads,
+                onlineCount = json.optInt("online_count", 0),
+                totalStudents = json.optInt("total_students", threads.size),
+                safetyAcknowledged = json.optBoolean("safety_acknowledged", false),
+                serverEpoch = json.optLong("server_epoch", 0L),
+                historyBackup = ChatHistoryBackup(
+                    available = backup?.optBoolean("available", false) ?: false,
+                    messageCount = backup?.optInt("message_count", 0) ?: 0,
+                    threadCount = backup?.optInt("thread_count", 0) ?: 0,
+                    newestEpoch = backup?.optLong("newest_epoch", 0L) ?: 0L
+                ),
+                myPublicKey = json.optString("my_public_key").takeIf { it.isNotBlank() },
+                keyBackupAvailable = json.optBoolean("key_backup_available", false)
+            )
         }
+    }
 
     suspend fun heartbeat(backendBaseUrl: String, token: String): ChatResult<Long> =
         withContext(Dispatchers.IO) {
@@ -113,6 +189,8 @@ object TheStudentChatClient {
      *   pass 0 for the initial history load.
      */
     suspend fun loadMessages(
+        context: Context,
+        accountKey: String,
         backendBaseUrl: String,
         token: String,
         peerId: Int,
@@ -132,11 +210,12 @@ object TheStudentChatClient {
                 val peer = parsePeer(peerObj).copy(
                     isTyping = json.optBoolean("peer_is_typing", false)
                 )
+                val key = conversationKey(context, accountKey, peer)
                 val arr = json.optJSONArray("messages") ?: JSONArray()
                 val messages = ArrayList<ChatMessage>(arr.length())
                 for (i in 0 until arr.length()) {
                     val obj = arr.optJSONObject(i) ?: continue
-                    messages += parseMessage(obj)
+                    messages += parseMessage(obj, key)
                 }
                 ChatConversationState(
                     peer = peer,
@@ -150,19 +229,42 @@ object TheStudentChatClient {
         }
     }
 
+    /**
+     * Encrypt [body] for [peer] and send it. Fails when the peer has not
+     * published an encryption key yet — we never fall back to plain text.
+     */
     suspend fun sendMessage(
+        context: Context,
+        accountKey: String,
         backendBaseUrl: String,
         token: String,
-        peerId: Int,
+        peer: ChatPeer,
         body: String
     ): ChatResult<ChatMessage> = withContext(Dispatchers.IO) {
+        val key = conversationKey(context, accountKey, peer)
+        if (key == null) {
+            return@withContext ChatResult.Failure(
+                if (peer.canReceiveEncrypted) {
+                    "Secure chat is still starting on this device. Please try again."
+                } else {
+                    "${peer.name} hasn't opened secure chat yet, so encrypted messages " +
+                        "can't be delivered to them."
+                }
+            )
+        }
+        val cipher = ChatCrypto.encrypt(key, body)
+            ?: return@withContext ChatResult.Failure("This message could not be encrypted.")
+
         post(
             backendBaseUrl,
             token,
             "send",
-            JSONObject().put("peer_id", peerId).put("body", body)
+            JSONObject().put("peer_id", peer.id).put("body", cipher)
         ) { json ->
-            parseMessage(json.optJSONObject("message") ?: JSONObject())
+            // The server echoes the ciphertext back; decrypt it so the bubble is
+            // built from exactly what the recipient will read.
+            val obj = json.optJSONObject("message") ?: JSONObject()
+            parseMessage(obj, key).copy(body = body)
         }
     }
 
@@ -197,6 +299,14 @@ object TheStudentChatClient {
         post(backendBaseUrl, token, "clear", JSONObject().put("peer_id", peerId)) { }
     }
 
+    /** "Skip" on the restore card: delete my history from the database. */
+    suspend fun discardHistory(backendBaseUrl: String, token: String): ChatResult<Int> =
+        withContext(Dispatchers.IO) {
+            post(backendBaseUrl, token, "discard_history", JSONObject()) { json ->
+                json.optInt("deleted", 0)
+            }
+        }
+
     suspend fun acknowledgeSafetyNotice(
         backendBaseUrl: String,
         token: String
@@ -207,6 +317,12 @@ object TheStudentChatClient {
     // -----------------------------------------------------------------------
     // Plumbing
     // -----------------------------------------------------------------------
+
+    private fun conversationKey(context: Context, accountKey: String, peer: ChatPeer): SecretKey? {
+        val peerKey = peer.publicKey
+        if (peerKey.isNullOrBlank()) return null
+        return ChatCrypto.conversationKey(context, accountKey, peer.id, peerKey)
+    }
 
     private fun <T> get(
         backendBaseUrl: String,
@@ -291,27 +407,34 @@ object TheStudentChatClient {
             name = obj.optString("name").ifBlank { "Student" },
             avatarUrl = obj.optString("avatar_url").takeIf { it.isNotBlank() && !obj.isNull("avatar_url") },
             isOnline = obj.optBoolean("is_online", false),
-            lastSeenSeconds = lastSeen
+            lastSeenSeconds = lastSeen,
+            publicKey = obj.optString("public_key").takeIf { it.isNotBlank() && !obj.isNull("public_key") }
         )
     }
 
-    private fun parseMessage(obj: JSONObject): ChatMessage = ChatMessage(
-        id = obj.optLong("id", 0L),
-        senderId = obj.optInt("sender_id", 0),
-        body = obj.optString("body"),
-        isMine = obj.optBoolean("is_mine", false),
-        sentAtEpoch = obj.optLong("sent_epoch", 0L),
-        isRead = obj.optBoolean("is_read", false)
-    )
+    private fun parseMessage(obj: JSONObject, key: SecretKey?): ChatMessage {
+        val raw = obj.optString("body")
+        return ChatMessage(
+            id = obj.optLong("id", 0L),
+            senderId = obj.optInt("sender_id", 0),
+            body = ChatCrypto.decrypt(key, raw),
+            isMine = obj.optBoolean("is_mine", false),
+            sentAtEpoch = obj.optLong("sent_epoch", 0L),
+            isRead = obj.optBoolean("is_read", false)
+        )
+    }
 
-    private fun parseThread(obj: JSONObject): ChatThread {
+    private fun parseThread(context: Context, accountKey: String, obj: JSONObject): ChatThread {
         val peer = parsePeer(obj.optJSONObject("peer") ?: JSONObject()).copy(
             isTyping = obj.optBoolean("is_typing", false)
         )
         val last = obj.optJSONObject("last_message")
+        val preview = last?.optString("body")?.takeIf { it.isNotBlank() }?.let { raw ->
+            ChatCrypto.decrypt(conversationKey(context, accountKey, peer), raw)
+        }
         return ChatThread(
             peer = peer,
-            lastMessage = last?.optString("body")?.takeIf { it.isNotBlank() },
+            lastMessage = preview,
             lastMessageIsMine = last?.optBoolean("is_mine", false) ?: false,
             lastMessageEpoch = last?.optLong("sent_epoch", 0L) ?: 0L,
             unreadCount = obj.optInt("unread_count", 0)

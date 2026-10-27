@@ -1,11 +1,13 @@
 package com.example.viewmodel
 
 import android.app.Application
+import android.content.Context
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
+import com.example.data.local.ChatCrypto
 import com.example.data.local.LearningActivityEntity
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
@@ -25,6 +27,7 @@ import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
 import com.example.data.remote.SessionValidation
 import com.example.data.remote.TheStudentChatClient
+import com.example.data.remote.ChatResult
 import com.example.data.remote.EnglishVoiceTutorEngine
 import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
@@ -157,7 +160,26 @@ data class ChatUiState(
     val totalStudents: Int = 0,
     val safetyAcknowledged: Boolean = false,
     val activePeer: ChatPeer? = null,
-    val messages: List<ChatMessage> = emptyList()
+    val messages: List<ChatMessage> = emptyList(),
+
+    // ── Backup / restore (after a reinstall) ────────────────────────────────
+    /** Server-side history that belongs to this account. */
+    val historyBackup: ChatHistoryBackup = ChatHistoryBackup(),
+    /** True while the "you have a backup chat history" card is on screen. */
+    val showRestorePrompt: Boolean = false,
+    /** True while restoring (or deleting) the backup — drives the loader. */
+    val isRestoring: Boolean = false,
+    /** 0f..1f progress for the restore progress bar. */
+    val restoreProgress: Float = 0f,
+    /**
+     * True when this device has no private key of its own (fresh install) but
+     * the server holds a password-wrapped one, so the card must ask for the
+     * account password before it can decrypt the history.
+     */
+    val restoreNeedsPassword: Boolean = false,
+    val restoreError: String? = null,
+    /** True once the identity key is ready and the server knows the public key. */
+    val isEncryptionReady: Boolean = false
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
     val totalUnread: Int get() = threads.sumOf { it.unreadCount }
@@ -444,6 +466,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatTypingJob: Job? = null
     private var chatIsDirectoryVisible = false
 
+    private val appContext: Context
+        get() = getApplication<Application>().applicationContext
+
+    /**
+     * End-to-end encryption identity is scoped to the account, so two students
+     * signing in on the same phone never share (or break) each other's keys.
+     */
+    private val chatAccountKey: String
+        get() = preferences.userEmail?.takeIf { it.isNotBlank() } ?: "local-account"
+
     /** Backend + bearer token for chat calls, or null when signed out. */
     private fun chatSession(): Pair<String, String>? {
         val token = preferences.sessionToken
@@ -452,8 +484,34 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Called when the chat tab becomes visible: loads the student directory and
-     * starts the presence heartbeat + directory polling.
+     * Called by the auth screen the moment an e-mail sign-in / sign-up succeeds.
+     *
+     * The password is used here only to wrap a copy of the chat private key
+     * (PBKDF2 + AES-GCM) so the student can restore their history on a new
+     * phone. It is never stored, logged or sent anywhere: the server receives
+     * the wrapped blob, which is useless without the password.
+     */
+    fun protectChatBackupWithPassword(password: String) {
+        if (password.length < 8) return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        viewModelScope.launch {
+            val result = TheStudentChatClient.publishIdentity(
+                context = appContext,
+                accountKey = chatAccountKey,
+                backendBaseUrl = baseUrl,
+                token = token,
+                passwordForBackup = password
+            )
+            if (result.dataOrNull() != null) {
+                _chatState.update { it.copy(isEncryptionReady = true) }
+            }
+        }
+    }
+
+    /**
+     * Called when the chat tab becomes visible: publishes the encryption key,
+     * loads the student directory and starts presence + polling.
      */
     fun startChatSync() {
         if (chatIsDirectoryVisible) return
@@ -461,6 +519,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         chatDirectoryJob?.cancel()
         chatDirectoryJob = viewModelScope.launch {
+            publishChatIdentityIfNeeded()
             refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty())
             while (true) {
                 delay(CHAT_DIRECTORY_POLL_MS)
@@ -479,6 +538,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         _chatState.update { it.copy(onlineCount = onlineCount.toInt()) }
                     }
                 }
+                // 2 s heartbeat: the server treats 10 s of silence as offline,
+                // so online / offline flips within a couple of seconds.
                 delay(CHAT_PRESENCE_MS)
             }
         }
@@ -498,6 +559,40 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch { refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty()) }
     }
 
+    /**
+     * Make sure this device has a key pair and that the server knows the public
+     * half. Without the public half other students cannot encrypt to us.
+     */
+    private suspend fun publishChatIdentityIfNeeded() {
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        val identity = ChatCrypto.ensureIdentity(appContext, chatAccountKey)
+        if (identity.publicKeyBase64.isBlank()) return
+
+        // A brand-new key pair on a device that already has server-side history
+        // means the app was reinstalled: the old private key is gone, so the
+        // restore card has to unlock the password-wrapped backup first.
+        if (identity.isNew) {
+            _chatState.update { it.copy(restoreNeedsPassword = true) }
+        }
+
+        val result = TheStudentChatClient.publishIdentity(
+            context = appContext,
+            accountKey = chatAccountKey,
+            backendBaseUrl = baseUrl,
+            token = token,
+            passwordForBackup = null
+        )
+        if (result.dataOrNull() != null) {
+            _chatState.update { it.copy(isEncryptionReady = true) }
+        } else if ((result as? ChatResult.Failure)?.statusCode == 409) {
+            // The server already holds a key for this account that this device
+            // cannot reproduce (reinstall). Do not send anything until the
+            // password-protected backup has been unlocked.
+            _chatState.update { it.copy(isEncryptionReady = false, restoreNeedsPassword = true) }
+        }
+    }
+
     private suspend fun refreshChatDirectory(showSpinner: Boolean) {
         val session = chatSession() ?: run {
             _chatState.update {
@@ -512,9 +607,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         if (showSpinner) _chatState.update { it.copy(isLoadingDirectory = true) }
 
-        val result = TheStudentChatClient.loadDirectory(baseUrl, token)
+        val result = TheStudentChatClient.loadDirectory(
+            context = appContext,
+            accountKey = chatAccountKey,
+            backendBaseUrl = baseUrl,
+            token = token
+        )
         val directory = result.dataOrNull()
         if (directory != null) {
+            val promptHandled = preferences.chatHistoryPromptHandled
+            // The key on this device must be the one the server published,
+            // otherwise anything we encrypt would be unreadable for the other
+            // student (this happens right after a reinstall).
+            val localKey = ChatCrypto.publicKeyBase64(appContext, chatAccountKey)
+            val encryptionReady = !localKey.isNullOrBlank() &&
+                (directory.myPublicKey.isNullOrBlank() || directory.myPublicKey == localKey)
             _chatState.update { state ->
                 state.copy(
                     isLoadingDirectory = false,
@@ -523,7 +630,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     onlineCount = directory.onlineCount,
                     totalStudents = directory.totalStudents,
                     safetyAcknowledged = directory.safetyAcknowledged,
-                    // Keep the open conversation's presence fresh too.
+                    historyBackup = directory.historyBackup,
+                    // Offer the backup only once per install and only while there
+                    // is something to restore.
+                    showRestorePrompt = !promptHandled &&
+                        directory.historyBackup.available &&
+                        !state.isRestoring,
+                    isEncryptionReady = encryptionReady,
+                    restoreNeedsPassword = !encryptionReady &&
+                        directory.keyBackupAvailable,
                     activePeer = state.activePeer?.let { active ->
                         directory.threads.firstOrNull { it.peer.id == active.id }?.peer ?: active
                     }
@@ -540,6 +655,180 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             }
         }
     }
+
+    // ── Backup restore ───────────────────────────────────────────────────────
+
+    /**
+     * Restore the server-side history.
+     *
+     * On a re-installed app the private key is gone, so [password] is required
+     * to unwrap the password-protected copy from the server. Without it the
+     * messages stay ciphertext — there is no back door, by design.
+     */
+    fun restoreChatHistory(password: String? = null) {
+        if (_chatState.value.isRestoring) return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+
+        viewModelScope.launch {
+            closeChat()
+            _chatState.update {
+                it.copy(isRestoring = true, restoreError = null, restoreProgress = 0.04f)
+            }
+
+            if (_chatState.value.restoreNeedsPassword) {
+                val typed = password.orEmpty()
+                if (typed.isBlank()) {
+                    _chatState.update {
+                        it.copy(isRestoring = false, restoreError = "Enter your account password.")
+                    }
+                    return@launch
+                }
+
+                val unlocked = TheStudentChatClient
+                    .unlockKeyBackup(baseUrl, token, typed)
+                    .dataOrNull()
+
+                if (unlocked == null) {
+                    _chatState.update {
+                        it.copy(
+                            isRestoring = false,
+                            restoreProgress = 0f,
+                            restoreError = "That password could not unlock your encrypted backup."
+                        )
+                    }
+                    return@launch
+                }
+
+                val restored = ChatCrypto.restoreIdentity(
+                    context = appContext,
+                    accountKey = chatAccountKey,
+                    wrappedPrivateKeyBase64 = unlocked.wrappedPrivateKeyBase64,
+                    saltBase64 = unlocked.saltBase64,
+                    password = typed,
+                    publishedPublicKey = unlocked.publicKey
+                )
+                if (!restored) {
+                    _chatState.update {
+                        it.copy(
+                            isRestoring = false,
+                            restoreProgress = 0f,
+                            restoreError = "That password could not unlock your encrypted backup."
+                        )
+                    }
+                    return@launch
+                }
+
+                _chatState.update {
+                    it.copy(restoreNeedsPassword = false, restoreProgress = 0.2f)
+                }
+            }
+
+            // Reload the directory so peer keys are available, then walk every
+            // conversation to rebuild the history (this is the visible progress).
+            refreshChatDirectory(showSpinner = false)
+            val peers = _chatState.value.threads.filter { it.hasConversation }
+            if (peers.isEmpty()) {
+                _chatState.update { it.copy(restoreProgress = 1f) }
+            } else {
+                peers.forEachIndexed { index, thread ->
+                    TheStudentChatClient.loadMessages(
+                        context = appContext,
+                        accountKey = chatAccountKey,
+                        backendBaseUrl = baseUrl,
+                        token = token,
+                        peerId = thread.peer.id,
+                        afterId = 0L
+                    )
+                    _chatState.update {
+                        it.copy(
+                            restoreProgress = 0.2f + 0.78f * ((index + 1).toFloat() / peers.size)
+                        )
+                    }
+                }
+            }
+
+            preferences.chatHistoryPromptHandled = true
+            _chatState.update {
+                it.copy(
+                    isRestoring = false,
+                    restoreProgress = 1f,
+                    showRestorePrompt = false,
+                    restoreError = null
+                )
+            }
+            refreshChatDirectory(showSpinner = false)
+        }
+    }
+
+    /**
+     * "Skip" on the restore card: delete this account's chat history from the
+     * database as well, so it cannot come back on the next install.
+     */
+    fun skipChatHistory() {
+        if (_chatState.value.isRestoring) return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+
+        viewModelScope.launch {
+            _chatState.update {
+                it.copy(isRestoring = true, restoreError = null, restoreProgress = 0.06f)
+            }
+            _chatState.update { it.copy(restoreProgress = 0.45f) }
+
+            val deleted = TheStudentChatClient.discardHistory(baseUrl, token).dataOrNull()
+            preferences.chatHistoryPromptHandled = true
+
+            // The history is gone, so the old key is useless: publish this
+            // device's key as the account's key so chat keeps working.
+            if (deleted != null) {
+                val published = TheStudentChatClient.publishIdentity(
+                    context = appContext,
+                    accountKey = chatAccountKey,
+                    backendBaseUrl = baseUrl,
+                    token = token,
+                    allowReplace = true
+                )
+                if (published.dataOrNull() != null) {
+                    _chatState.update { it.copy(isEncryptionReady = true) }
+                }
+            }
+
+            _chatState.update { state ->
+                state.copy(
+                    isRestoring = false,
+                    restoreProgress = 0f,
+                    showRestorePrompt = false,
+                    messages = emptyList(),
+                    historyBackup = ChatHistoryBackup(),
+                    threads = if (deleted != null) {
+                        state.threads.map {
+                            it.copy(
+                                lastMessage = null,
+                                lastMessageIsMine = false,
+                                lastMessageEpoch = 0L,
+                                unreadCount = 0
+                            )
+                        }
+                    } else {
+                        state.threads
+                    },
+                    errorMessage = if (deleted == null) {
+                        "Could not delete the chat history. Please try again."
+                    } else {
+                        state.errorMessage
+                    }
+                )
+            }
+        }
+    }
+
+    fun dismissRestorePrompt() {
+        preferences.chatHistoryPromptHandled = true
+        _chatState.update { it.copy(showRestorePrompt = false) }
+    }
+
+    // ── Conversation ─────────────────────────────────────────────────────────
 
     /** Open a 1:1 conversation with a registered student. */
     fun openChat(peer: ChatPeer) {
@@ -565,7 +854,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val (baseUrl, token) = session
 
             // Initial history
-            val initial = TheStudentChatClient.loadMessages(baseUrl, token, peer.id, 0L)
+            val initial = TheStudentChatClient.loadMessages(
+                context = appContext,
+                accountKey = chatAccountKey,
+                backendBaseUrl = baseUrl,
+                token = token,
+                peerId = peer.id,
+                afterId = 0L
+            )
             val snapshot = initial.dataOrNull()
             if (snapshot == null) {
                 _chatState.update {
@@ -580,8 +876,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             while (true) {
                 delay(CHAT_MESSAGES_POLL_MS)
                 val afterId = _chatState.value.messages.lastOrNull()?.id ?: 0L
-                val polled = TheStudentChatClient.loadMessages(baseUrl, token, peer.id, afterId)
-                    .dataOrNull()
+                val polled = TheStudentChatClient.loadMessages(
+                    context = appContext,
+                    accountKey = chatAccountKey,
+                    backendBaseUrl = baseUrl,
+                    token = token,
+                    peerId = peer.id,
+                    afterId = afterId
+                ).dataOrNull()
                 if (polled != null) {
                     applyMessages(polled, replace = afterId == 0L)
                 }
@@ -627,18 +929,35 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { it.copy(isChatConversationOpen = false) }
     }
 
-    /** Send a message to the open conversation. */
+    /** Send a message to the open conversation (encrypted before it leaves). */
     fun sendChatMessage(text: String) {
         val body = text.trim()
         val peer = _chatState.value.activePeer ?: return
         if (body.isEmpty() || _chatState.value.isSending) return
+        if (!_chatState.value.isEncryptionReady) {
+            _chatState.update {
+                it.copy(
+                    restoreError = null,
+                    errorMessage = "Unlock your encrypted chat backup first, then send your message.",
+                    showRestorePrompt = it.historyBackup.available
+                )
+            }
+            return
+        }
 
         val session = chatSession() ?: return
         val (baseUrl, token) = session
 
         _chatState.update { it.copy(isSending = true, errorMessage = null) }
         viewModelScope.launch {
-            val result = TheStudentChatClient.sendMessage(baseUrl, token, peer.id, body)
+            val result = TheStudentChatClient.sendMessage(
+                context = appContext,
+                accountKey = chatAccountKey,
+                backendBaseUrl = baseUrl,
+                token = token,
+                peer = peer,
+                body = body
+            )
             val sent = result.dataOrNull()
             if (sent != null) {
                 _chatState.update { state ->
@@ -702,9 +1021,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     private companion object {
-        const val CHAT_DIRECTORY_POLL_MS = 5_000L
-        const val CHAT_MESSAGES_POLL_MS = 2_500L
-        const val CHAT_PRESENCE_MS = 20_000L
+        /** Presence ping. The server calls 10 s of silence "offline". */
+        const val CHAT_PRESENCE_MS = 2_000L
+        /** Directory (names, avatars, online dots, unread) refresh. */
+        const val CHAT_DIRECTORY_POLL_MS = 3_000L
+        /** Open conversation refresh. */
+        const val CHAT_MESSAGES_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
     }
 
@@ -1101,6 +1423,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val token = preferences.sessionToken
             val serverUrl = serverUrlState.value
             preferences.logout()
+            stopChatSync()
+            _chatState.value = ChatUiState()
             repository.clearUserProfile()
             _isAdmin.value = false
             _uiState.update { it.copy(isAdminPanelOpen = false, isSecurityPanelOpen = false) }

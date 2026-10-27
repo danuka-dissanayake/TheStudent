@@ -17,8 +17,17 @@ data class ChatPeer(
     /** Seconds since the student was last active; null when never seen. */
     val lastSeenSeconds: Long? = null,
     /** True while this student is typing to me right now. */
-    val isTyping: Boolean = false
+    val isTyping: Boolean = false,
+    /**
+     * Public half of their end-to-end encryption key (base64 SPKI).
+     * Null when the student has never opened the chat on an updated build, so
+     * no encrypted message can be delivered to them yet.
+     */
+    val publicKey: String? = null
 ) {
+    /** True when this student can receive end-to-end encrypted messages. */
+    val canReceiveEncrypted: Boolean get() = !publicKey.isNullOrBlank()
+
     val initials: String
         get() {
             val parts = name.trim().split(" ").filter { it.isNotBlank() }
@@ -64,13 +73,26 @@ data class ChatThread(
     val hasConversation: Boolean get() = lastMessageEpoch > 0L
 }
 
+/** Server-side history that survived a reinstall (see `history_backup`). */
+data class ChatHistoryBackup(
+    val available: Boolean = false,
+    val messageCount: Int = 0,
+    val threadCount: Int = 0,
+    val newestEpoch: Long = 0L
+)
+
 /** Everything the chat UI needs for the directory + presence counters. */
 data class ChatDirectory(
     val threads: List<ChatThread> = emptyList(),
     val onlineCount: Int = 0,
     val totalStudents: Int = 0,
     val safetyAcknowledged: Boolean = false,
-    val serverEpoch: Long = 0L
+    val serverEpoch: Long = 0L,
+    val historyBackup: ChatHistoryBackup = ChatHistoryBackup(),
+    /** The server's copy of my own published key (null until I publish one). */
+    val myPublicKey: String? = null,
+    /** True when the server holds a password-wrapped copy of my private key. */
+    val keyBackupAvailable: Boolean = false
 )
 
 /** Snapshot of one open conversation. */
@@ -80,4 +102,16 @@ data class ChatConversationState(
     val isSending: Boolean = false,
     val safetyAcknowledged: Boolean = false,
     val serverEpoch: Long = 0L
+)
+
+/**
+ * Result of the "unlock my encrypted key backup" call.
+ *
+ * The wrapped private key and its salt are useless without the account
+ * password: the server only stores an AES-GCM blob.
+ */
+data class ChatKeyBackup(
+    val wrappedPrivateKeyBase64: String,
+    val saltBase64: String,
+    val publicKey: String?
 )

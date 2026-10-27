@@ -14,9 +14,15 @@
 --   chat_typing    short-lived "X is typing…" markers (6 second lifetime)
 --   chat_clears    per-student "clear chat" marker (messages are never
 --                  destroyed for the other side)
--- and two columns on `users`:
---   last_seen_at        presence heartbeat (online = seen in the last 45 s)
+-- and five columns on `users`:
+--   last_seen_at        presence heartbeat (online = seen in the last 10 s)
 --   chat_safety_ack_at  when the student acknowledged the safety notice
+--   chat_public_key     E2EE identity public key (EC P-256, base64 SPKI)
+--   chat_key_backup     identity private key wrapped with the account password
+--   chat_key_salt       PBKDF2 salt for that wrapped key
+--
+-- The server can read none of the message bodies: every body is AES-256-GCM
+-- ciphertext produced on the sender's phone (see app ChatCrypto.kt).
 -- =====================================================================
 
 CREATE TABLE IF NOT EXISTS `chat_messages` (
@@ -56,7 +62,10 @@ CREATE TABLE IF NOT EXISTS `chat_clears` (
 -- ---------------------------------------------------------------------
 ALTER TABLE `users`
   ADD COLUMN `last_seen_at` DATETIME NULL DEFAULT NULL,
-  ADD COLUMN `chat_safety_ack_at` DATETIME NULL DEFAULT NULL;
+  ADD COLUMN `chat_safety_ack_at` DATETIME NULL DEFAULT NULL,
+  ADD COLUMN `chat_public_key` TEXT NULL DEFAULT NULL,
+  ADD COLUMN `chat_key_backup` TEXT NULL DEFAULT NULL,
+  ADD COLUMN `chat_key_salt` VARCHAR(64) NULL DEFAULT NULL;
 
 ALTER TABLE `users` ADD INDEX `idx_last_seen` (`last_seen_at`);
 
@@ -64,4 +73,7 @@ ALTER TABLE `users` ADD INDEX `idx_last_seen` (`last_seen_at`);
 -- Housekeeping (optional, run occasionally or schedule as a MySQL event)
 -- =====================================================================
 -- DELETE FROM `chat_typing` WHERE `updated_at` < (NOW() - INTERVAL 1 HOUR);
--- Students inactive for a year are not "online"; presence resets itself.
+-- Students are "online" while their app sends a heartbeat (every 2 s); the
+-- server treats anything older than 10 s as offline, so presence clears itself.
+-- Old typing rows are ignored after 6 s, but this keeps the table small:
+-- DELETE FROM `chat_typing` WHERE `updated_at` < (NOW() - INTERVAL 1 DAY);

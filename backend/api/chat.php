@@ -55,9 +55,9 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // Tunables
 // ---------------------------------------------------------------------------
 const TS_CHAT_API_VERSION          = '1.0.0';
-const TS_CHAT_ONLINE_WINDOW_SEC    = 45;    // "online" = seen in the last N s
+const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // "online" = seen in the last N s (2 s heartbeats)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
-const TS_CHAT_MAX_BODY_CHARS       = 2000;
+const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64, ~1.4x the plain text
 const TS_CHAT_MAX_MESSAGES_PER_MIN = 30;    // per student
 const TS_CHAT_PAGE_SIZE            = 120;   // history window per request
 const TS_CHAT_MAX_BODY_BYTES       = 16384;
@@ -223,7 +223,72 @@ function ts_chat_public_peer(array $row, int $now): array
         'is_online'          => $isOnline,
         'last_seen_at'       => $lastSeen > 0 ? gmdate('c', $lastSeen) : null,
         'last_seen_seconds'  => $lastSeen > 0 ? max(0, $now - $lastSeen) : null,
+        // Public half of their chat key. Without it this student cannot receive
+        // end-to-end encrypted messages yet (they have never opened the chat).
+        'public_key'         => $row['chat_public_key'] ?? null,
+        'key_ready'          => !empty($row['chat_public_key']),
     ];
+}
+
+/**
+ * How much server-side history this account has.
+ *
+ * Used by the app right after a reinstall to offer "restore your backup".
+ */
+function ts_chat_history_summary(PDO $pdo, int $userId): array
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) AS message_count,
+                    COUNT(DISTINCT IF(sender_id = :me, recipient_id, sender_id)) AS thread_count,
+                    UNIX_TIMESTAMP(MAX(created_at)) AS newest_epoch
+             FROM chat_messages
+             WHERE sender_id = :me2 OR recipient_id = :me3'
+        );
+        $stmt->execute(['me' => $userId, 'me2' => $userId, 'me3' => $userId]);
+        $row = $stmt->fetch() ?: [];
+        $count = (int) ($row['message_count'] ?? 0);
+        return [
+            'available'     => $count > 0,
+            'message_count' => $count,
+            'thread_count'  => (int) ($row['thread_count'] ?? 0),
+            'newest_epoch'  => isset($row['newest_epoch']) ? (int) $row['newest_epoch'] : 0,
+        ];
+    } catch (Throwable $e) {
+        error_log('[TheStudent] chat history summary failed: ' . $e->getMessage());
+        return ['available' => false, 'message_count' => 0, 'thread_count' => 0, 'newest_epoch' => 0];
+    }
+}
+
+/**
+ * Very small brute-force guard for the password that unlocks the key backup.
+ * Reuses the login_attempts table so there is no extra schema to deploy.
+ */
+function ts_chat_guard_backup_unlock(PDO $pdo, string $email, string $ip): void
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM login_attempts
+             WHERE email = :email AND attempted_at > (NOW() - INTERVAL 15 MINUTE)'
+        );
+        $stmt->execute(['email' => $email]);
+        if ((int) $stmt->fetchColumn() >= 5) {
+            header('Retry-After: 900');
+            ts_chat_json('error', 'Too many attempts. Please try again in 15 minutes.', [], 429);
+        }
+    } catch (Throwable $e) {
+        error_log('[TheStudent] backup unlock guard skipped: ' . $e->getMessage());
+    }
+}
+
+function ts_chat_record_failed_unlock(PDO $pdo, string $email, string $ip): void
+{
+    try {
+        $pdo->prepare('INSERT INTO login_attempts (ip_address, email) VALUES (:ip, :email)')
+            ->execute(['ip' => $ip, 'email' => $email]);
+    } catch (Throwable $e) {
+        error_log('[TheStudent] backup unlock attempt not recorded: ' . $e->getMessage());
+    }
 }
 
 function ts_chat_safety_acknowledged(array $user): bool
@@ -287,6 +352,12 @@ function ts_chat_ensure_schema(PDO $pdo): void
     // table being rebuilt.
     ts_ensure_column($pdo, 'users', 'last_seen_at', 'DATETIME NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'chat_safety_ack_at', 'DATETIME NULL DEFAULT NULL');
+    // End-to-end encryption: the published public half of the student's EC
+    // key pair, plus the private half wrapped with their account password so a
+    // re-installed app can recover its history. The server can decrypt neither.
+    ts_ensure_column($pdo, 'users', 'chat_public_key', 'TEXT NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'chat_key_backup', 'TEXT NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'chat_key_salt', 'VARCHAR(64) NULL DEFAULT NULL');
 }
 
 // ---------------------------------------------------------------------------
@@ -323,6 +394,7 @@ switch ($action) {
         $stmt = $pdo->prepare(
             'SELECT u.id, u.full_name, u.profile_picture, u.last_seen_at,
                     UNIX_TIMESTAMP(u.last_seen_at) AS last_seen_epoch,
+                    u.chat_public_key,
                     COALESCE(cc.cleared_seq, 0) AS cleared_seq
              FROM users u
              LEFT JOIN chat_clears cc ON cc.user_id = :me AND cc.peer_id = u.id
@@ -451,6 +523,10 @@ switch ($action) {
             'safety_acknowledged' => ts_chat_safety_acknowledged($me),
             'online_window_seconds' => TS_CHAT_ONLINE_WINDOW_SEC,
             'server_epoch'       => $now,
+            // "You have a backup chat history" prompt after a reinstall.
+            'history_backup'     => ts_chat_history_summary($pdo, $meId),
+            'my_public_key'      => $me['chat_public_key'] ?? null,
+            'key_backup_available' => !empty($me['chat_key_backup']),
         ]);
         break;
     }
@@ -470,7 +546,7 @@ switch ($action) {
 
         $peerStmt = $pdo->prepare(
             'SELECT id, full_name, profile_picture, last_seen_at,
-                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch
+                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch, chat_public_key
              FROM users WHERE id = :id AND is_active = 1 LIMIT 1'
         );
         $peerStmt->execute(['id' => $peerId]);
@@ -574,7 +650,7 @@ switch ($action) {
 
         $peerStmt = $pdo->prepare(
             'SELECT id, full_name, profile_picture, last_seen_at,
-                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch
+                    UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch, chat_public_key
              FROM users WHERE id = :id AND is_active = 1 AND is_email_verified = 1 LIMIT 1'
         );
         $peerStmt->execute(['id' => $peerId]);
@@ -743,10 +819,138 @@ switch ($action) {
         break;
     }
 
+    // -----------------------------------------------------------------------
+    // Publish the end-to-end encryption identity
+    // -----------------------------------------------------------------------
+    case 'set_key': {
+        ts_chat_require_post('set_key');
+        $body = ts_chat_read_body();
+
+        $publicKey = isset($body['public_key']) && is_string($body['public_key'])
+            ? trim($body['public_key'])
+            : '';
+        // A base64 SPKI P-256 key is ~124 characters; allow headroom but never
+        // store something that is obviously not a key.
+        if ($publicKey === '' || strlen($publicKey) > 512
+            || !preg_match('#^[A-Za-z0-9+/=]+$#', $publicKey)) {
+            ts_chat_json('error', 'A valid public key is required.', [], 422);
+        }
+
+        $backup = isset($body['key_backup']) && is_string($body['key_backup'])
+            ? trim($body['key_backup'])
+            : null;
+        $salt = isset($body['key_salt']) && is_string($body['key_salt'])
+            ? trim($body['key_salt'])
+            : null;
+
+        if ($backup !== null && (strlen($backup) > 4000 || !preg_match('#^[A-Za-z0-9+/=]+$#', $backup))) {
+            ts_chat_json('error', 'That key backup is not valid.', [], 422);
+        }
+        if ($salt !== null && (strlen($salt) > 64 || !preg_match('#^[A-Za-z0-9+/=]+$#', $salt))) {
+            ts_chat_json('error', 'That key backup salt is not valid.', [], 422);
+        }
+
+        // Never silently replace a published key: that would make every message
+        // encrypted to the old key unreadable for this account. Rotation is only
+        // allowed explicitly (or when there is no password-protected backup, so
+        // the account could not recover its history anyway).
+        $currentKey  = $me['chat_public_key'] ?? null;
+        $hasBackup   = !empty($me['chat_key_backup']);
+        $allowReplace = !empty($body['allow_replace']);
+        if (!empty($currentKey) && $currentKey !== $publicKey && $hasBackup && !$allowReplace) {
+            ts_chat_json(
+                'error',
+                'This account already has an encryption key. Unlock your encrypted backup to restore it.',
+                ['can_unlock_backup' => true],
+                409
+            );
+        }
+
+        $sql = 'UPDATE users SET chat_public_key = :pk';
+        $params = ['pk' => $publicKey, 'id' => $meId];
+        if ($backup !== null && $salt !== null && $backup !== '') {
+            $sql .= ', chat_key_backup = :backup, chat_key_salt = :salt';
+            $params['backup'] = $backup;
+            $params['salt'] = $salt;
+        }
+        $sql .= ' WHERE id = :id';
+        $pdo->prepare($sql)->execute($params);
+
+        ts_chat_json('success', 'Encryption key published.', [
+            'public_key'   => $publicKey,
+            'key_backup_available' => $backup !== null && $backup !== '',
+        ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Unlock the password-protected key backup (new device / reinstall)
+    // -----------------------------------------------------------------------
+    case 'unlock_key_backup': {
+        ts_chat_require_post('unlock_key_backup');
+        $body = ts_chat_read_body();
+        $password = isset($body['password']) && is_string($body['password']) ? $body['password'] : '';
+        if ($password === '') {
+            ts_chat_json('error', 'Enter your account password.', [], 422);
+        }
+
+        if (empty($me['password_hash'])) {
+            ts_chat_json(
+                'error',
+                'This account signs in with Google, so the encrypted backup cannot be unlocked on a new device.',
+                [],
+                409
+            );
+        }
+        if (empty($me['chat_key_backup']) || empty($me['chat_key_salt'])) {
+            ts_chat_json('error', 'There is no encrypted backup for this account yet.', [], 404);
+        }
+
+        ts_chat_guard_backup_unlock($pdo, (string) $me['email'], ts_client_ip());
+
+        if (!password_verify($password, (string) $me['password_hash'])) {
+            ts_chat_record_failed_unlock($pdo, (string) $me['email'], ts_client_ip());
+            ts_chat_json('error', 'That password is not correct.', [], 401);
+        }
+
+        ts_chat_json('success', 'Backup unlocked.', [
+            'key_backup' => (string) $me['chat_key_backup'],
+            'key_salt'   => (string) $me['chat_key_salt'],
+            'public_key' => $me['chat_public_key'] ?? null,
+        ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // "Skip" on the restore card: delete this student's history server-side
+    // -----------------------------------------------------------------------
+    case 'discard_history': {
+        ts_chat_require_post('discard_history');
+        try {
+            $stmt = $pdo->prepare(
+                'DELETE FROM chat_messages WHERE sender_id = :me OR recipient_id = :me2'
+            );
+            $stmt->execute(['me' => $meId, 'me2' => $meId]);
+            $deleted = $stmt->rowCount();
+
+            $pdo->prepare('DELETE FROM chat_typing WHERE user_id = :me OR peer_id = :me2')
+                ->execute(['me' => $meId, 'me2' => $meId]);
+            $pdo->prepare('DELETE FROM chat_clears WHERE user_id = :me OR peer_id = :me2')
+                ->execute(['me' => $meId, 'me2' => $meId]);
+
+            ts_chat_json('success', 'Chat history deleted.', ['deleted' => $deleted]);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat history delete failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not delete the history right now.', [], 500);
+        }
+        break;
+    }
+
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
-                'threads', 'messages', 'send', 'typing', 'read', 'clear', 'ack_safety', 'heartbeat',
+                'threads', 'messages', 'send', 'typing', 'read', 'clear', 'ack_safety',
+                'heartbeat', 'set_key', 'unlock_key_backup', 'discard_history',
             ],
         ], 400);
 }

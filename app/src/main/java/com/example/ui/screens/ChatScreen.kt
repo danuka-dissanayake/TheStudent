@@ -11,6 +11,8 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.border
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -30,11 +32,15 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -133,6 +139,8 @@ fun ChatScreen(
         onRefresh = { viewModel.refreshChatDirectoryNow() },
         onDismissError = { viewModel.dismissChatError() },
         onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
+        onRestoreHistory = { password -> viewModel.restoreChatHistory(password) },
+        onSkipHistory = { viewModel.skipChatHistory() },
         modifier = modifier
     )
 }
@@ -147,6 +155,8 @@ private fun ChatDirectoryScreen(
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
     onAcknowledgeSafety: () -> Unit,
+    onRestoreHistory: (String?) -> Unit,
+    onSkipHistory: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var searchQuery by remember { mutableStateOf("") }
@@ -404,16 +414,32 @@ private fun ChatDirectoryScreen(
 
                 Spacer(Modifier.height(6.dp))
 
+                // ── "you have a backup chat history" card ────────────────────
+                AnimatedVisibility(
+                    visible = state.showRestorePrompt || state.isRestoring,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    BackupRestoreCard(
+                        state = state,
+                        onRestore = onRestoreHistory,
+                        onSkip = onSkipHistory
+                    )
+                }
+
                 // ── student list ─────────────────────────────────────────────
                 when {
                     state.isLoadingDirectory && state.threads.isEmpty() -> {
-                        ChatDirectorySkeleton()
+                        Column(modifier = Modifier.weight(1f)) {
+                            ChatDirectorySkeleton()
+                        }
                     }
 
                     visibleThreads.isEmpty() -> {
                         Box(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .weight(1f)
+                                .fillMaxWidth()
                                 .padding(horizontal = 40.dp),
                             contentAlignment = Alignment.Center
                         ) {
@@ -452,7 +478,8 @@ private fun ChatDirectoryScreen(
                     else -> {
                         LazyColumn(
                             modifier = Modifier
-                                .fillMaxSize()
+                                .weight(1f)
+                                .fillMaxWidth()
                                 .padding(horizontal = 12.dp),
                             contentPadding = PaddingValues(
                                 bottom = if (state.safetyAcknowledged) 24.dp else 190.dp
@@ -484,6 +511,293 @@ private fun ChatDirectoryScreen(
                 }
             }
         }
+    }
+}
+
+/**
+ * "You have a backup chat history" card.
+ *
+ * Shown once (per install) when the server still holds messages for this
+ * account — which is exactly what happens after a reinstall. Restoring walks
+ * every conversation and rebuilds it locally; skipping deletes the history from
+ * the database as well.
+ *
+ * Premium look: emerald gradient, soft glow, floating icon, animated entry, and
+ * the rotating cube loader + progress bar while the restore runs.
+ */
+@Composable
+private fun BackupRestoreCard(
+    state: ChatUiState,
+    onRestore: (String?) -> Unit,
+    onSkip: () -> Unit
+) {
+    var password by remember { mutableStateOf("") }
+    val backup = state.historyBackup
+
+    val glow by rememberInfiniteTransition(label = "backup_glow").animateFloat(
+        initialValue = 0.35f,
+        targetValue = 0.75f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1_800, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "backup_glow_alpha"
+    )
+
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    listOf(Color(0xFF064E3B), Color(0xFF047857), Color(0xFF059669))
+                )
+            )
+            .border(
+                width = 1.dp,
+                color = Color(0xFF34D399).copy(alpha = glow),
+                shape = RoundedCornerShape(24.dp)
+            )
+            .padding(horizontal = 16.dp, vertical = 16.dp)
+            .testTag("chat_backup_card")
+    ) {
+        Column(modifier = Modifier.fillMaxWidth()) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(RoundedCornerShape(14.dp))
+                        .background(Color.White.copy(alpha = 0.14f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.CloudSync,
+                        contentDescription = null,
+                        tint = Color(0xFFBBF7D0),
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+                Spacer(Modifier.width(12.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = if (state.isRestoring) "Restoring your chats" else "You have a backup chat history",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 15.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = Color.White,
+                        letterSpacing = (-0.2).sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = when {
+                            state.isRestoring -> "Please keep the app open for a moment."
+                            backup.messageCount > 0 -> {
+                                "${backup.messageCount} message" +
+                                    (if (backup.messageCount == 1) "" else "s") +
+                                    " in ${backup.threadCount} chat" +
+                                    (if (backup.threadCount == 1) "" else "s") +
+                                    " from your previous install."
+                            }
+                            else -> "Your encrypted messages are stored safely on our server."
+                        },
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        lineHeight = 16.sp,
+                        color = Color(0xFFD1FAE5)
+                    )
+                }
+            }
+
+            if (state.isRestoring) {
+                Spacer(Modifier.height(14.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    CubeDotsLoader(size = 46.dp)
+                    Spacer(Modifier.width(14.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        LinearProgressIndicator(
+                            progress = { state.restoreProgress.coerceIn(0f, 1f) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(6.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = Color(0xFF91FF00),
+                            trackColor = Color.White.copy(alpha = 0.18f),
+                            gapSize = 0.dp,
+                            drawStopIndicator = {}
+                        )
+                        Spacer(Modifier.height(6.dp))
+                        Text(
+                            text = "${(state.restoreProgress.coerceIn(0f, 1f) * 100).toInt()}%",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFFBBF7D0)
+                        )
+                    }
+                }
+            } else {
+                if (state.restoreNeedsPassword) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = password,
+                        onValueChange = { password = it },
+                        singleLine = true,
+                        placeholder = {
+                            Text(
+                                "Account password to unlock the backup",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                color = Color(0xFF94A3B8)
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Lock,
+                                contentDescription = null,
+                                tint = Color(0xFF94A3B8),
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        visualTransformation = androidx.compose.ui.text.input.PasswordVisualTransformation(),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = Color(0xFF91FF00),
+                            unfocusedBorderColor = Color.White.copy(alpha = 0.4f),
+                            focusedTextColor = ChatInk,
+                            unfocusedTextColor = ChatInk
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("chat_backup_password_field")
+                    )
+                }
+
+                state.restoreError?.let { message ->
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = message,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 11.5.sp,
+                        color = Color(0xFFFECACA)
+                    )
+                }
+
+                Spacer(Modifier.height(12.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = {
+                            onRestore(if (state.restoreNeedsPassword) password else null)
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFF91FF00),
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chat_backup_restore_button")
+                    ) {
+                        Text(
+                            text = "Restore messages",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF052E16),
+                            textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 11.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Surface(
+                        onClick = onSkip,
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color.White.copy(alpha = 0.12f),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.25f)),
+                        modifier = Modifier.testTag("chat_backup_skip_button")
+                    ) {
+                        Text(
+                            text = "Skip",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = Color.White,
+                            modifier = Modifier.padding(horizontal = 20.dp, vertical = 11.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Skipping deletes this history from our servers. " +
+                        "Your messages stay end-to-end encrypted either way.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    lineHeight = 14.sp,
+                    color = Color(0xFFA7F3D0)
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Compose port of the CSS "rotating cube" loader: two counter-orbiting dots on
+ * flattened (rotateX / rotateY 70°) ellipses, the whole thing spun 45°.
+ */
+@Composable
+private fun CubeDotsLoader(
+    size: Dp = 48.dp,
+    primary: Color = Color(0xFF91FF00),
+    secondary: Color = Color(0xFFFF7A45)
+) {
+    val transition = rememberInfiniteTransition(label = "cube_loader")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "cube_loader_angle"
+    )
+
+    Canvas(
+        modifier = Modifier
+            .size(size)
+            .graphicsLayer { rotationZ = 45f }
+    ) {
+        val radius = this.size.minDimension / 2f - 3.dp.toPx()
+        val flatten = 0.34 // cos(70°), kept as Double for the trig maths
+        val dotRadius = 2.6.dp.toPx()
+        val centre = Offset(this.size.width / 2f, this.size.height / 2f)
+
+        fun drawDot(position: Offset, color: Color) {
+            drawCircle(color = color.copy(alpha = 0.25f), radius = dotRadius * 2.1f, center = position)
+            drawCircle(color = color, radius = dotRadius, center = position)
+        }
+
+        val r = radius.toDouble()
+
+        // Orbit 1 — rotateX(70deg): flattened vertically.
+        val a1 = Math.toRadians(angle.toDouble())
+        drawDot(
+            Offset(
+                centre.x + (kotlin.math.cos(a1) * r).toFloat(),
+                centre.y + (kotlin.math.sin(a1) * r * flatten).toFloat()
+            ),
+            primary
+        )
+
+        // Orbit 2 — rotateY(70deg): flattened horizontally, delayed 0.4 s.
+        val a2 = Math.toRadians((angle + 144f).toDouble())
+        drawDot(
+            Offset(
+                centre.x + (kotlin.math.cos(a2) * r * flatten).toFloat(),
+                centre.y + (kotlin.math.sin(a2) * r).toFloat()
+            ),
+            secondary
+        )
     }
 }
 
@@ -673,7 +987,7 @@ private fun ChatConversationScreen(
                             overflow = TextOverflow.Ellipsis
                         )
                         Text(
-                            text = peer.presenceLabel,
+                            text = peer.presenceLabel + "  ·  🔒 end-to-end encrypted",
                             fontFamily = MaisonNeueFontFamily,
                             fontSize = 11.5.sp,
                             fontWeight = FontWeight.Medium,
@@ -782,7 +1096,7 @@ private fun ChatConversationScreen(
                                 }
 
                                 if (peer.isTyping) {
-                                    item { TypingBubble(peerName = peer.name.substringBefore(" ")) }
+                                    item { TypingIndicator() }
                                 }
                             }
                         }
@@ -812,6 +1126,30 @@ private fun ChatConversationScreen(
                             modifier = Modifier
                                 .clickable { onDismissError() }
                                 .padding(start = 8.dp)
+                        )
+                    }
+                }
+
+                // ── secure-chat availability (peer has not published a key) ──
+                if (!peer.canReceiveEncrypted) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 2.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Lock,
+                            contentDescription = null,
+                            tint = ChatMuted,
+                            modifier = Modifier.size(12.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "${peer.name} hasn't opened secure chat yet, so messages can't be delivered.",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            color = ChatMuted
                         )
                     }
                 }
@@ -868,9 +1206,13 @@ private fun ChatConversationScreen(
                                 input = ""
                             }
                         },
-                        enabled = input.isNotBlank() && !state.isSending,
+                        enabled = input.isNotBlank() && !state.isSending && peer.canReceiveEncrypted,
                         shape = CircleShape,
-                        color = if (input.isNotBlank()) EmeraldPrimary else Color(0xFFCBD5E1),
+                        color = if (input.isNotBlank() && peer.canReceiveEncrypted) {
+                            EmeraldPrimary
+                        } else {
+                            Color(0xFFCBD5E1)
+                        },
                         modifier = Modifier
                             .size(50.dp)
                             .testTag("chat_send_button")
@@ -1038,44 +1380,58 @@ private fun ChatBubble(message: ChatMessage) {
     }
 }
 
+/**
+ * WhatsApp-style "typing…" indicator.
+ *
+ * A rounded bubble with one squared corner (no card, no elevation, no label —
+ * just the dots) holding three dots. Each dot runs an infinite 1.2 s loop that
+ * lifts it 7 px and brightens it at the 30 % mark, staggered by 160 ms so the
+ * bounce travels from left to right.
+ */
 @Composable
-private fun TypingBubble(peerName: String) {
-    val transition = rememberInfiniteTransition(label = "typing")
-    val phase by transition.animateFloat(
+private fun TypingIndicator() {
+    val transition = rememberInfiniteTransition(label = "typing_indicator")
+    // One shared clock; each dot reads a delayed slice of it.
+    val clock by transition.animateFloat(
         initialValue = 0f,
-        targetValue = 3f,
+        targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(900, easing = LinearEasing),
+            animation = tween(1_200, easing = LinearEasing),
             repeatMode = RepeatMode.Restart
         ),
-        label = "typing_phase"
+        label = "typing_clock"
     )
 
-    Surface(
-        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 5.dp),
-        color = Color.White,
-        border = BorderStroke(1.dp, ChatHairline)
+    Box(
+        modifier = Modifier
+            .clip(
+                RoundedCornerShape(
+                    topStart = 18.dp,
+                    topEnd = 18.dp,
+                    bottomEnd = 18.dp,
+                    bottomStart = 5.dp
+                )
+            )
+            .background(Color.White)
+            .padding(horizontal = 16.dp, vertical = 14.dp)
     ) {
-        Row(
-            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
-            horizontalArrangement = Arrangement.spacedBy(5.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
+        Row(horizontalArrangement = Arrangement.spacedBy(5.dp)) {
             repeat(3) { index ->
-                val lift = if (phase.toInt() == index) 1f else 0.45f
+                // 160 ms stagger → 0.1333 of the 1.2 s cycle.
+                val phase = (clock - index * 0.1333f + 1f) % 1f
+                // Arc that peaks exactly at the 30 % mark and rests otherwise.
+                val lift = if (phase < 0.3f) {
+                    kotlin.math.sin((phase / 0.3f).toDouble() * Math.PI).toFloat()
+                } else {
+                    0f
+                }
                 Box(
                     modifier = Modifier
-                        .size(6.dp)
-                        .background(ChatMuted.copy(alpha = lift), CircleShape)
+                        .offset(y = (-7f * lift).dp)
+                        .size(7.dp)
+                        .background(ChatMuted.copy(alpha = 0.35f + 0.65f * lift), CircleShape)
                 )
             }
-            Spacer(Modifier.width(4.dp))
-            Text(
-                text = "$peerName is typing",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
-                color = ChatFaint
-            )
         }
     }
 }
