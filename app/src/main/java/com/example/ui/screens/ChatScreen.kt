@@ -27,6 +27,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -50,12 +51,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
@@ -187,6 +191,7 @@ fun ChatScreen(
             onStartVoiceNote = { viewModel.startVoiceNote() },
             onStopVoiceNote = { viewModel.stopVoiceNote() },
             onCancelVoiceNote = { viewModel.cancelVoiceNote() },
+            onStopTyping = { viewModel.stopChatTyping() },
             modifier = modifier
         )
         return
@@ -668,6 +673,7 @@ private fun ChatConversationScreen(
     onStartVoiceNote: () -> Boolean,
     onStopVoiceNote: () -> Unit,
     onCancelVoiceNote: () -> Unit,
+    onStopTyping: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -683,7 +689,17 @@ private fun ChatConversationScreen(
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
     val onLongPressMessage: (ChatMessage) -> Unit = { selectedMessage = it }
+
+    // Tapping anywhere outside the composer closes the keyboard, drops the input
+    // border (focus) and clears the "typing…" flag for the other student.
+    val dismissComposer: () -> Unit = {
+        focusManager.clearFocus()
+        keyboard?.hide()
+        onStopTyping()
+    }
 
     // Voice notes need the microphone. Everything else in chat needs nothing.
     val micPermission = rememberLauncherForActivityResult(
@@ -786,6 +802,11 @@ private fun ChatConversationScreen(
                             .only(WindowInsetsSides.Bottom)
                             .union(WindowInsets.ime)
                     )
+                    // Taps on the header / message area / day chips land here.
+                    // Gestures already claimed by a bubble never reach it.
+                    .pointerInput(Unit) {
+                        detectTapGestures(onTap = { dismissComposer() })
+                    }
             ) {
                 // ── top bar ──────────────────────────────────────────────────
                 Row(
@@ -1283,6 +1304,11 @@ private fun ChatConversationScreen(
                             modifier = Modifier
                                 .weight(1f)
                                 .heightIn(min = 50.dp)
+                                // Keyboard dismissed with the back gesture, or focus
+                                // moved elsewhere, must not leave "typing…" behind.
+                                .onFocusChanged { state ->
+                                    if (!state.isFocused) onStopTyping()
+                                }
                                 .testTag("chat_input_field")
                         )
                         Spacer(Modifier.width(8.dp))
@@ -2391,20 +2417,34 @@ private fun AudioNoteContent(
         }
     }
 
-    // Keep the progress line in sync while playing.
+    // Keep the progress line in sync, and stop the moment the clip ends.
+    //
+    // Two independent signals, because trusting only the recorded duration was
+    // what left the button stuck on "pause" at the end of a note:
+    //  1. the player's own completion callback (fires exactly at the end), and
+    //  2. a watchdog on isPlaying() for players that never deliver it.
     LaunchedEffect(playing) {
         while (playing) {
             val active = playerState.value ?: break
-            positionMs = runCatching { active.currentPosition.toLong() }.getOrDefault(0L)
-            val duration = attachment.durationMs.takeIf { it > 0 }
-                ?: runCatching { active.duration.toLong() }.getOrDefault(0L)
-            if (duration > 0 && positionMs >= duration) {
+            val reported = runCatching { active.currentPosition.toLong() }.getOrDefault(0L)
+            positionMs = reported
+
+            val finished = runCatching { !active.isPlaying }.getOrDefault(true) || run {
+                val duration = attachment.durationMs.takeIf { it > 0 }
+                    ?: runCatching { active.duration.toLong() }.getOrDefault(0L)
+                duration > 0 && reported >= duration
+            }
+
+            if (finished) {
                 playing = false
                 positionMs = 0L
-                runCatching { active.seekTo(0) }
+                runCatching {
+                    active.pause()
+                    active.seekTo(0)
+                }
                 break
             }
-            delay(150)
+            delay(120)
         }
     }
 
@@ -2424,6 +2464,12 @@ private fun AudioNoteContent(
                         MediaPlayer().apply {
                             setDataSource(source.absolutePath)
                             prepare()
+                            setOnCompletionListener {
+                                // End of clip: rewind and flip the button back to play.
+                                playing = false
+                                positionMs = 0L
+                                runCatching { seekTo(0) }
+                            }
                         }
                     }.getOrNull()?.also { playerState.value = it }
 
@@ -2683,7 +2729,10 @@ private fun ChatBubble(
                         }
                     ) { _, dragAmount ->
                         scope.launch {
-                            val next = (swipe.value - dragAmount * direction).coerceIn(0f, maxSwipe)
+                            // dragAmount is positive when the finger moves right,
+                            // so it must be ADDED: subtracting made the bubble react
+                            // only to a right-to-left drag.
+                            val next = (swipe.value + dragAmount * direction).coerceIn(0f, maxSwipe)
                             swipe.snapTo(next)
                             if (next >= triggerAt) {
                                 if (!replyTriggered) {

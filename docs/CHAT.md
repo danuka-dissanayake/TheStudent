@@ -27,6 +27,7 @@ messages, real presence.
 | Message actions | Long-press a bubble: **Reply**, **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
 | Reply | **Swipe a bubble from left to right** (both sides) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble | encrypted envelope `r` |
 | Loading | Opening a chat shows a two-dot orbit loader (45° tilt, green + orange on perpendicular planes, 0.4 s apart) for at least ~0.4 s instead of a skeleton flash | – |
+| Composer focus | Tapping anywhere outside the input bar closes the keyboard, drops the focus border and clears the "typing…" indicator for the other student | – |
 | Search | Magnifier in the conversation header. Nothing is hidden: every hit is highlighted in **green**, the ↑ / ↓ buttons jump between them (with a `2/7` counter), the bubble you land on gets a green ring, and typing a new query jumps to the first hit | local database |
 | Emoji | Smiley button in the input toggles a scrollable strip of 50 common emoji; taps append to the text | – |
 | Voice notes | Mic button (empty composer, no attachment) records AAC/M4A; a live timer with a pulsing dot, cancel or send; the bubble plays it back with a progress line | `upload_attachment` (kind `audio`) |
@@ -103,8 +104,8 @@ still a single `Text` and the emoji-sizing and search highlight keep working):
 
 | Syntax | Result |
 | --- | --- |
-| `**bold**`, `__bold__` | bold |
-| `*italic*`, `_italic_` | italic |
+| `**bold**` | bold (two asterisks) |
+| `_italic_` | italic (two underscores, never inside a word) |
 | `~~strike~~` | struck through |
 | ``` `code` ``` | monospace chip with a tinted background |
 | ```` ``` ```` fenced block | monospace lines on a tinted background (fences hidden) |
@@ -113,6 +114,10 @@ still a single `Text` and the emoji-sizing and search highlight keep working):
 | `1. item` | numbered line |
 | `> quote` | italic with a `▍` marker |
 | `[label](url)` | underlined link colour (tap behaviour unchanged) |
+
+Not supported on purpose: a single `*` for italic (it collides with `*` bullets
+and with maths like `2 * 3 * 4`) and `__bold__` (underscores double as part of
+identifiers such as `student_id`). Both are left exactly as typed.
 
 Colours adapt to the bubble: white text, translucent code chips and a mint link
 colour inside the black outgoing bubble; ink text, grey chips and emerald links

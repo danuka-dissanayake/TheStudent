@@ -1026,6 +1026,23 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Stop the typing indicator immediately — used when the composer loses focus
+     * (the student taps the conversation, closes the keyboard, or leaves), so the
+     * other side is not left looking at "typing…" for the 6 s server window.
+     */
+    fun stopChatTyping() {
+        val peer = _chatState.value.activePeer ?: return
+        if (chatTypingJob == null) return
+        chatTypingJob?.cancel()
+        chatTypingJob = null
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        viewModelScope.launch {
+            TheStudentChatClient.setTyping(baseUrl, token, peer.id, false)
+        }
+    }
+
     /** Acknowledge the one-time "don't share personal details" notice. */
     fun acknowledgeChatSafetyNotice() {
         val session = chatSession() ?: return

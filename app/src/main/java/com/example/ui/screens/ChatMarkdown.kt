@@ -26,8 +26,13 @@ data class ChatMarkdownColors(
  * A deliberately small Markdown renderer for chat bubbles.
  *
  * Supports what students actually type in a chat, not a full CommonMark parser:
- * **bold**, *italic*, ~~strikethrough~~, `inline code`, fenced code blocks,
- * # headings, - / * / 1. lists, > quotes, and [links](https://…).
+ * `**bold**` (two asterisks), `_italic_` (two underscores), `~~strike~~`,
+ * `` `code` ``, fenced blocks, `# headings`, `-`/`*`/`1.` lists, `>` quotes and
+ * `[links](https://…)`.
+ *
+ * Deliberately *not* supported: a single `*` for italic (it collides with
+ * bullets and with maths like 2 * 3 * 4) and `__bold__` (underscores double as
+ * part of identifiers such as student_id).
  *
  * Everything is rendered into a single [AnnotatedString], so a message still
  * lays out as one text block (no extra composables per line) and the existing
@@ -179,8 +184,8 @@ object ChatMarkdown {
                 }
             }
 
-            // **bold** or __bold__
-            val bold = matchDelimited(text, index, "**", "**") ?: matchDelimited(text, index, "__", "__")
+            // **bold** — asterisks doubled. A single * is left as typed.
+            val bold = matchDelimited(text, index, "**", "**")
             if (bold != null) {
                 withSpan(base.copy(fontWeight = FontWeight.Bold)) {
                     appendInline(bold.first, base.copy(fontWeight = FontWeight.Bold), colors, highlight)
@@ -204,8 +209,10 @@ object ChatMarkdown {
                 continue
             }
 
-            // *italic* or _italic_
-            val italic = matchDelimited(text, index, "*", "*") ?: matchDelimited(text, index, "_", "_")
+            // _italic_ — underscores only. Guarded so snake_case / file_names
+            // are not half-italicised: the opening _ must not follow a letter or
+            // digit, and the closing one must not precede one.
+            val italic = matchUnderscoreItalic(text, index)
             if (italic != null) {
                 withSpan(base.copy(fontStyle = FontStyle.Italic)) {
                     appendInline(italic.first, base.copy(fontStyle = FontStyle.Italic), colors, highlight)
@@ -241,6 +248,31 @@ object ChatMarkdown {
             appendPlain(text.substring(index, next), base, colors, highlight)
             index = next
         }
+    }
+
+    /**
+     * `_italic_`, with the word-boundary guard described above.
+     */
+    private fun matchUnderscoreItalic(text: String, start: Int): Pair<String, Int>? {
+        if (start >= text.length || text[start] != '_') return null
+        if (start > 0 && (text[start - 1].isLetterOrDigit())) return null
+
+        val contentStart = start + 1
+        if (contentStart >= text.length) return null
+        if (text[contentStart] == ' ' || text[contentStart] == '_') return null
+
+        var cursor = contentStart
+        while (cursor < text.length) {
+            if (text[cursor] == '_') {
+                val after = cursor + 1
+                val closesWord = after < text.length && text[after].isLetterOrDigit()
+                if (!closesWord) {
+                    return text.substring(contentStart, cursor) to after
+                }
+            }
+            cursor++
+        }
+        return null
     }
 
     /** Returns the content and the index just past the closing marker. */
