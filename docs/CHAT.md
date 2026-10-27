@@ -21,10 +21,14 @@ messages, real presence.
 | Online row | Students active in the last 10 seconds (2 s heartbeats), with a live count ("12 online") | same response, `online_count` |
 | Thread row | Last message preview ("📷 Photo", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp | **device database** |
 | Day separators | The conversation is grouped as **Today**, **Yesterday**, then "12 October" / "12 October 2024" | message timestamps |
-| Conversation | History, own bubbles on the right in **black**, tighter padding, emoji-only messages rendered large, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
+| Conversation | History, own bubbles on the right in **black**, tighter padding, emoji-only messages rendered large, replies quoted, voice notes playable, upload/download progress on files, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
 | Attachments | Paperclip opens a styled sheet: **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP), each with its icon tile and description. The pick is previewed above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open it. Max **25 MB**. | `upload_attachment` + `attachment` |
-| Message actions | Long-press a bubble: **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
+| Message actions | Long-press a bubble: **Reply**, **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
+| Reply | Swipe-free quoting: pick Reply, the quoted message shows above the composer, and the bubble renders it as a small quoted block | encrypted envelope `r` |
+| Search | Magnifier in the conversation header filters the chat live and shows "3 matching messages"; an empty result gets its own state | local database |
+| Emoji | Smiley button in the input toggles a scrollable strip of 50 common emoji; taps append to the text | – |
+| Voice notes | Mic button (empty composer, no attachment) records AAC/M4A; a live timer with a pulsing dot, cancel or send; the bubble plays it back with a progress line | `upload_attachment` (kind `audio`) |
 | Safety notice | Bottom banner: *never share phone numbers, home address, school, bank details or passwords* — shown **once per account** until acknowledged | `users.chat_safety_ack_at` |
 | Typing | Three-dot bubble (rounded, one squared corner): each dot lifts 7 px and brightens at the 30 % mark of a 1.2 s loop, staggered 160 ms left→right | `chat_typing` |
 
@@ -110,7 +114,25 @@ once, then deleted from the server**.
    first and downloads the blob on the next poll, decrypting it before it ever
    touches the disk.
 5. Tapping a bubble opens the file with `FILE_VIEW` through a `FileProvider` —
-   no permission is requested and nothing is exported.
+   no permission is requested and nothing is exported. A voice note plays
+   inline instead (play/pause, progress line and length).
+
+**Photos are re-encoded first.** `ChatMediaPrep` downscales anything above
+1600 px on its longer edge, bakes in the EXIF rotation (otherwise portraits
+arrive sideways) and saves JPEG at quality 85. A 9 MB camera photo typically
+becomes 300–500 KB — 10–20x less to encrypt, upload, download and store — and
+looks identical in a bubble. GIFs are never touched so they keep animating, and
+if re-encoding would ever produce a bigger file the original is used.
+
+**Progress instead of a spinner.** Uploads stream through a counting
+`RequestBody` and downloads through a counting `InputStream`, both feeding
+`attachmentUploadProgress` / `attachmentDownloadProgress`, so a 25 MB document
+shows a percentage and a thin bar on the draft card and in the bubble.
+
+**Voice notes** are recorded with `MediaRecorder` (AAC, mono, 44.1 kHz, 96 kbps —
+about 240 KB/minute) into the cache, then travel exactly like any other
+attachment with `kind = audio` and their length in the encrypted envelope. A
+recording under one second is discarded rather than sent.
 
 Why this stays private: the blob is ciphertext on the server, the relay deletes
 it on delivery (or after 7 days), the file name, type and caption are inside the
@@ -178,7 +200,7 @@ never accepted in a query string. Successful responses use
 | GET | `attachment` | `id` | raw `application/octet-stream`; **deleted once the recipient has it** |
 | POST | `delete_message` | `{peer_id, server_id}` | queues a `delete` envelope so both sides drop the message |
 | POST | `set_key` | `{public_key, allow_replace?}` | `public_key` (409 when a different key is already published and `allow_replace` is absent) |
-| GET | `version` | – | deploy fingerprint (`2.0.0`) |
+| GET | `version` | – | deploy fingerprint (`2.2.0`) |
 
 Rules enforced server-side:
 
@@ -208,9 +230,11 @@ both endpoints is what stops the count flickering between 1 and 0.
 | --- | --- |
 | `data/model/ChatModels.kt` | `ChatPeer`, `ChatMessage`, `ChatThread`, `ChatDirectory` |
 | `data/local/TheStudentEntities.kt` | `ChatMessageEntity` (history, device only), `ChatSummaryRow` (thread previews) |
+| `data/local/ChatMediaPrep.kt` | downscales + re-encodes photos, EXIF-aware, 1600 px / q85 |
+| `data/local/ChatVoiceRecorder.kt` | AAC voice-note recorder with duration guard |
 | `data/local/ChatAttachmentStore.kt` | decrypted attachment files in `filesDir/chat_attachments`, 120 MB cap, wiped on sign-out |
 | `data/local/TheStudentDao.kt` | `observeConversation`, `observeSummaries`, upserts, read/pending flags, per-thread and full wipes |
-| `data/local/TheStudentDatabase.kt` | Room **version 3** — `MIGRATION_2_3` creates `chat_messages` + indices |
+| `data/local/TheStudentDatabase.kt` | Room **version 5** — `MIGRATION_2_3` (history), `MIGRATION_3_4` (attachments), `MIGRATION_4_5` (replies + voice length) |
 | `data/remote/TheStudentChatClient.kt` | OkHttp client for every action above (never throws; returns `ChatResult`) |
 | `viewmodel/TheStudentViewModel.kt` | `chatState`, directory/inbox/presence polling, typing throttle, send, Room observation |
 | `data/local/ChatCrypto.kt` | E2EE identity, ECDH conversation keys, AES-256-GCM bodies |
@@ -236,6 +260,8 @@ both endpoints is what stops the count flickering between 1 and 0.
 ```
 chat_messages  localId (PK, UUID)  serverId  peerId  senderId  isMine
                body (plain text, decrypted)  sentAtEpoch  isRead  isPending
+               attachmentId/Name/Mime/Size/Kind/Local/DurationMs
+               replyToServerId  replyToIsMine  replyToPreview
                indices: peerId, sentAtEpoch
 
 chat_summaries (projection)  peerId  lastBody  lastIsMine  lastEpoch  unreadCount
@@ -267,7 +293,7 @@ CHAT_TYPING_THROTTLE_MS = 3_000
 | "Sign in to chat with other students." | No stored session token | Sign in again (session may have expired after 30 days) |
 | "No other students have signed up yet" | Only one verified account exists | Register a second account and verify it |
 | Everyone shows as offline | Heartbeat can't run (app in background) or `users.last_seen_at` missing | Open the chat tab in both apps; confirm `database_chat.sql` was applied |
-| Online count flickers | Should not happen on 2.0.0 — both `threads` and `heartbeat` use one shared, caller-excluded 10 s count on the database clock | Confirm `api/chat.php` was uploaded completely (`api/chat.php?action=version` → 2.0.0) |
+| Online count flickers | Should not happen on 2.1.0+ — both `threads` and `heartbeat` use one shared, caller-excluded 10 s count on the database clock | Confirm `api/chat.php` was uploaded completely (`api/chat.php?action=version` → 2.2.0) |
 | Chat list empty after deploy | `chat.php` returned a 500 | Check `php-error.log`; verify the upload completed |
 | Messages send but the other side never sees them | Polling blocked by battery saver, or the recipient's app never fetched the relay before the 7-day TTL | Keep the conversation open; the app polls every 2 s while visible |
 | Composer disabled in a conversation | That student has not opened chat on an updated build, so they have no public key yet | They must open the chat tab once |

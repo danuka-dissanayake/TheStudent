@@ -103,7 +103,17 @@ data class ChatMessageEntity(
     /** "image" or "file" — picks the bubble layout. */
     val attachmentKind: String? = null,
     /** True once the decrypted file is available on this device. */
-    val attachmentLocal: Boolean = false
+    val attachmentLocal: Boolean = false,
+    /** Voice note length in milliseconds, 0 otherwise. */
+    val attachmentDurationMs: Long = 0L,
+
+    // ── Reply (optional) ────────────────────────────────────────────────────
+    /** Relay id of the quoted message, 0 when this is not a reply. */
+    val replyToServerId: Long = 0L,
+    /** True when the quoted message is mine. */
+    val replyToIsMine: Boolean = false,
+    /** Short preview of the quoted message. */
+    val replyToPreview: String? = null
 )
 
 /** Per-conversation projection used to build the chat list. */

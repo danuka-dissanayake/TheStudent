@@ -11,7 +11,9 @@ import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
 import com.example.data.local.ChatCrypto
 import com.example.data.local.ChatAttachmentStore
+import com.example.data.local.ChatMediaPrep
 import com.example.data.local.ChatMessageEntity
+import com.example.data.local.ChatVoiceRecorder
 import com.example.data.local.ChatSummaryRow
 import com.example.data.local.LearningActivityEntity
 import com.example.data.local.SavedCourseEntity
@@ -172,7 +174,17 @@ data class ChatUiState(
     /** Image or document picked in the composer, not sent yet. */
     val pendingAttachment: ChatAttachmentDraft? = null,
     /** True while a picked file is being encrypted and uploaded. */
-    val isUploadingAttachment: Boolean = false
+    val isUploadingAttachment: Boolean = false,
+    /** 0f..1f while an attachment uploads. */
+    val attachmentUploadProgress: Float = 0f,
+    /** attachmentId -> 0..100 while a received file downloads. */
+    val attachmentDownloadProgress: Map<String, Int> = emptyMap(),
+    /** Message the composer is currently replying to. */
+    val pendingReply: ChatReply? = null,
+    /** True while a voice note is being recorded. */
+    val isRecordingVoiceNote: Boolean = false,
+    /** Elapsed time of that recording, in milliseconds. */
+    val voiceNoteElapsedMs: Long = 0L
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
     val totalUnread: Int get() = threads.sumOf { it.unreadCount }
@@ -663,6 +675,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val preview = when {
                 summary == null -> null
                 summary.lastAttachmentKind == ChatAttachment.IMAGE -> "📷 Photo"
+                summary.lastAttachmentKind == ChatAttachment.AUDIO -> "🎤 Voice note"
                 summary.lastAttachmentKind != null ->
                     "📎 " + (summary.lastAttachmentName ?: "Attachment")
                 else -> summary.lastBody
@@ -721,8 +734,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     attachmentMime = attachment?.mime,
                     attachmentSize = attachment?.size ?: 0L,
                     attachmentKind = attachment?.kind,
+                    attachmentDurationMs = attachment?.durationMs ?: 0L,
                     attachmentLocal = attachment != null &&
-                        ChatAttachmentStore.exists(appContext, attachment.id)
+                        ChatAttachmentStore.exists(appContext, attachment.id),
+                    replyToServerId = message.replyTo?.serverId ?: 0L,
+                    replyToIsMine = message.replyTo?.isMine ?: false,
+                    replyToPreview = message.replyTo?.preview
                 )
             )
         }
@@ -808,10 +825,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 name = attachmentName ?: "attachment",
                 mime = attachmentMime ?: "application/octet-stream",
                 size = attachmentSize,
-                kind = attachmentKind ?: ChatAttachment.FILE
+                kind = attachmentKind ?: ChatAttachment.FILE,
+                durationMs = attachmentDurationMs
             )
         },
-        attachmentAvailable = attachmentLocal
+        attachmentAvailable = attachmentLocal,
+        replyTo = replyToPreview?.takeIf { it.isNotBlank() }?.let { preview ->
+            ChatReply(
+                serverId = replyToServerId,
+                isMine = replyToIsMine,
+                preview = preview
+            )
+        }
     )
 
     fun closeChat() {
@@ -820,7 +845,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatActivePeerId = null
         chatTypingJob?.cancel()
         chatTypingJob = null
-        // A file picked but never sent must not survive the conversation.
+        // A file picked (or a recording in progress) must not survive the chat.
+        if (voiceRecorder.isRecording) cancelVoiceNote()
         _chatState.value.pendingAttachment?.let { draft ->
             runCatching { File(draft.path).delete() }
         }
@@ -829,7 +855,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 activePeer = null,
                 messages = emptyList(),
                 pendingAttachment = null,
-                isUploadingAttachment = false
+                isUploadingAttachment = false,
+                attachmentUploadProgress = 0f,
+                pendingReply = null,
+                isRecordingVoiceNote = false,
+                voiceNoteElapsedMs = 0L
             )
         }
         _uiState.update { it.copy(isChatConversationOpen = false) }
@@ -853,10 +883,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         val session = chatSession() ?: return
         val (baseUrl, token) = session
+        val reply = _chatState.value.pendingReply
         val localId = UUID.randomUUID().toString()
         val sentAt = System.currentTimeMillis() / 1000
 
-        _chatState.update { it.copy(isSending = true, errorMessage = null) }
+        _chatState.update {
+            it.copy(isSending = true, errorMessage = null, attachmentUploadProgress = 0f)
+        }
         viewModelScope.launch {
             // 1. A picked file is encrypted first and dropped on the relay; the
             //    message that follows only carries its metadata.
@@ -882,7 +915,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     backendBaseUrl = baseUrl,
                     token = token,
                     peer = peer,
-                    bytes = bytes
+                    bytes = bytes,
+                    onProgress = { fraction ->
+                        // Called on the upload thread; the state flow is safe to
+                        // write from here and only redraws the progress bar.
+                        _chatState.update { it.copy(attachmentUploadProgress = fraction) }
+                    }
                 )
                 val attachmentId = uploaded.dataOrNull()
                 if (attachmentId == null) {
@@ -903,10 +941,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     name = draft.name,
                     mime = draft.mime,
                     size = draft.size.takeIf { it > 0L } ?: bytes.size.toLong(),
-                    kind = draft.kind
+                    kind = draft.kind,
+                    durationMs = draft.durationMs
                 )
                 File(draft.path).delete()
-                _chatState.update { it.copy(pendingAttachment = null, isUploadingAttachment = false) }
+                _chatState.update {
+                    it.copy(
+                        pendingAttachment = null,
+                        isUploadingAttachment = false,
+                        attachmentUploadProgress = 0f
+                    )
+                }
             }
 
             // 2. Show the bubble immediately, before the relay confirms it.
@@ -925,7 +970,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     attachmentMime = attachment?.mime,
                     attachmentSize = attachment?.size ?: 0L,
                     attachmentKind = attachment?.kind,
-                    attachmentLocal = attachment != null
+                    attachmentDurationMs = attachment?.durationMs ?: 0L,
+                    attachmentLocal = attachment != null,
+                    replyToServerId = reply?.serverId ?: 0L,
+                    replyToIsMine = reply?.isMine ?: false,
+                    replyToPreview = reply?.preview
                 )
             )
 
@@ -935,13 +984,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 backendBaseUrl = baseUrl,
                 token = token,
                 peer = peer,
-                // Encrypt caption + attachment metadata as one envelope.
-                plaintext = ChatEnvelope.encode(body, attachment)
+                // Encrypt caption + attachment metadata + quote as one envelope.
+                plaintext = ChatEnvelope.encode(body, attachment, reply)
             )
             val serverId = result.dataOrNull()
             if (serverId != null) {
                 chatDao.markChatMessageSent(localId, serverId, sentAt)
-                _chatState.update { it.copy(isSending = false) }
+                _chatState.update { it.copy(isSending = false, pendingReply = null) }
             } else {
                 // Keep the bubble (marked pending) so nothing the student typed
                 // is ever lost, and show why it did not go out.
@@ -1111,6 +1160,23 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             return null
         }
 
+        // Photos are downscaled and re-encoded before they are ever encrypted:
+        // a 9 MB camera JPEG becomes ~400 KB, which sends far faster and looks
+        // the same on a phone. Documents are never touched.
+        if (ChatMediaPrep.isCompressible(mime, displayName)) {
+            val compressed = ChatMediaPrep.compress(target, appContext.cacheDir)
+            if (compressed != null) {
+                target.delete()
+                return ChatAttachmentDraft(
+                    path = compressed.absolutePath,
+                    name = displayName.substringBeforeLast('.').take(110) + ".jpg",
+                    mime = "image/jpeg",
+                    size = compressed.length(),
+                    kind = ChatAttachment.IMAGE
+                )
+            }
+        }
+
         return ChatAttachmentDraft(
             path = target.absolutePath,
             name = displayName.take(120),
@@ -1118,8 +1184,80 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             size = copied,
             // Only real image types are rendered inline; everything else (PDF,
             // DOCX, ZIP, …) becomes a document card.
-            kind = if (mime.startsWith("image/")) ChatAttachment.IMAGE else ChatAttachment.FILE
+            kind = when {
+                mime.startsWith("image/") -> ChatAttachment.IMAGE
+                mime.startsWith("audio/") -> ChatAttachment.AUDIO
+                else -> ChatAttachment.FILE
+            }
         )
+    }
+
+    // ── Replies ──────────────────────────────────────────────────────────────
+
+    /** Quote [message] in the next outgoing message. */
+    fun setChatReply(message: ChatMessage) {
+        val preview = when {
+            message.body.isNotBlank() -> message.body.take(120)
+            message.attachment?.isImage == true -> "Photo"
+            message.attachment?.isAudio == true -> "Voice note"
+            message.attachment != null -> message.attachment.name
+            else -> "Message"
+        }
+        _chatState.update {
+            it.copy(pendingReply = ChatReply(message.serverId, message.isMine, preview))
+        }
+    }
+
+    fun clearChatReply() {
+        _chatState.update { it.copy(pendingReply = null) }
+    }
+
+    // ── Voice notes ──────────────────────────────────────────────────────────
+
+    private val voiceRecorder: ChatVoiceRecorder by lazy { ChatVoiceRecorder(appContext) }
+    private var voiceTickerJob: Job? = null
+
+    /** Start recording. Returns false when the microphone is unavailable. */
+    fun startVoiceNote(): Boolean {
+        if (voiceRecorder.isRecording) return true
+        // A recording replaces any pending file/photo pick.
+        _chatState.value.pendingAttachment?.let { clearStagedChatAttachment() }
+        if (!voiceRecorder.start()) {
+            _chatState.update { it.copy(errorMessage = "Could not start recording on this device.") }
+            return false
+        }
+        _chatState.update {
+            it.copy(isRecordingVoiceNote = true, voiceNoteElapsedMs = 0L, errorMessage = null)
+        }
+        voiceTickerJob?.cancel()
+        voiceTickerJob = viewModelScope.launch {
+            while (voiceRecorder.isRecording) {
+                _chatState.update { it.copy(voiceNoteElapsedMs = voiceRecorder.elapsedMs()) }
+                delay(200L)
+            }
+        }
+        return true
+    }
+
+    /** Finish recording and stage the note in the composer. */
+    fun stopVoiceNote() {
+        voiceTickerJob?.cancel()
+        voiceTickerJob = null
+        val draft = voiceRecorder.stop()
+        _chatState.update { it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L) }
+        if (draft == null) {
+            _chatState.update { it.copy(errorMessage = "That recording was too short to send.") }
+            return
+        }
+        _chatState.update { it.copy(pendingAttachment = draft) }
+    }
+
+    /** Throw the recording away. */
+    fun cancelVoiceNote() {
+        voiceTickerJob?.cancel()
+        voiceTickerJob = null
+        voiceRecorder.cancel()
+        _chatState.update { it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L) }
     }
 
     /**
@@ -1146,9 +1284,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 backendBaseUrl = baseUrl,
                 token = token,
                 peer = peer,
-                attachmentId = attachmentId
+                attachmentId = attachmentId,
+                onProgress = { fraction ->
+                    _chatState.update {
+                        it.copy(
+                            attachmentDownloadProgress = it.attachmentDownloadProgress +
+                                (attachmentId to (fraction * 100).toInt().coerceIn(0, 100))
+                        )
+                    }
+                }
             )
             val bytes = result.dataOrNull()
+            _chatState.update {
+                it.copy(attachmentDownloadProgress = it.attachmentDownloadProgress - attachmentId)
+            }
             if (bytes == null) {
                 attachmentRetryAt[attachmentId] = now + CHAT_ATTACHMENT_RETRY_MS
                 continue
@@ -1176,7 +1325,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         /** Relay fetch: new messages + read receipts. */
         const val CHAT_INBOX_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
-        /** Files larger than this are refused before they are read into memory. */
+        /** Uploaded bytes per file. Photos are re-encoded well below this. */
         const val CHAT_MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
         /** How long to wait before retrying a blob the relay no longer has. */
         const val CHAT_ATTACHMENT_RETRY_MS = 60_000L

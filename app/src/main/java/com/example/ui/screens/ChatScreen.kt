@@ -1,9 +1,11 @@
 package com.example.ui.screens
 
+import android.Manifest
 import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.BackHandler
@@ -53,13 +55,16 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
 import coil.compose.AsyncImage
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import com.example.data.local.ChatAttachmentStore
 import com.example.data.model.ChatAttachment
 import com.example.data.model.ChatAttachmentDraft
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
+import com.example.data.model.ChatReply
 import com.example.data.model.ChatThread
 import com.example.ui.components.TheStudentAppBackground
 import com.example.ui.theme.EmeraldDark
@@ -67,6 +72,7 @@ import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.example.viewmodel.ChatUiState
 import com.example.viewmodel.TheStudentViewModel
+import android.media.MediaPlayer
 import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
@@ -151,6 +157,11 @@ fun ChatScreen(
             onPickAttachment = { uri -> viewModel.stageChatAttachment(uri) },
             onClearAttachment = { viewModel.clearStagedChatAttachment() },
             onDeleteMessage = { message -> viewModel.deleteChatMessage(message) },
+            onReply = { message -> viewModel.setChatReply(message) },
+            onClearReply = { viewModel.clearChatReply() },
+            onStartVoiceNote = { viewModel.startVoiceNote() },
+            onStopVoiceNote = { viewModel.stopVoiceNote() },
+            onCancelVoiceNote = { viewModel.cancelVoiceNote() },
             modifier = modifier
         )
         return
@@ -627,6 +638,11 @@ private fun ChatConversationScreen(
     onPickAttachment: (Uri) -> Unit,
     onClearAttachment: () -> Unit,
     onDeleteMessage: (ChatMessage) -> Unit,
+    onReply: (ChatMessage) -> Unit,
+    onClearReply: () -> Unit,
+    onStartVoiceNote: () -> Boolean,
+    onStopVoiceNote: () -> Unit,
+    onCancelVoiceNote: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -636,9 +652,23 @@ private fun ChatConversationScreen(
     var showAttachSheet by remember { mutableStateOf(false) }
     var selectedMessage by remember { mutableStateOf<ChatMessage?>(null) }
     var pendingDelete by remember { mutableStateOf<ChatMessage?>(null) }
+    var searchOpen by remember { mutableStateOf(false) }
+    var searchQuery by remember { mutableStateOf("") }
+    var emojiRowOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
     val onLongPressMessage: (ChatMessage) -> Unit = { selectedMessage = it }
+
+    // Voice notes need the microphone. Everything else in chat needs nothing.
+    val micPermission = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        if (granted) {
+            onStartVoiceNote()
+        } else {
+            Toast.makeText(context, "Microphone access is needed for voice notes.", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     // Gallery and document pickers. Neither needs a runtime permission: the
     // system picker hands back a one-off readable Uri.
@@ -649,12 +679,22 @@ private fun ChatConversationScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onPickAttachment) }
 
-    // Day separators are computed once per message list, not per recomposition.
-    val rows = remember(state.messages) { buildChatRows(state.messages) }
+    // Search filters what the list shows; day separators are then computed once
+    // per visible list, not per recomposition.
+    val visibleMessages = remember(state.messages, searchQuery) {
+        val query = searchQuery.trim()
+        if (query.isEmpty()) {
+            state.messages
+        } else {
+            state.messages.filter { it.body.contains(query, ignoreCase = true) }
+        }
+    }
+    val rows = remember(visibleMessages) { buildChatRows(visibleMessages) }
+    val searchActive = searchOpen && searchQuery.isNotBlank()
 
-    // Follow the conversation as new messages arrive.
-    LaunchedEffect(rows.size) {
-        if (rows.isNotEmpty()) {
+    // Follow the conversation as new messages arrive (unless searching).
+    LaunchedEffect(rows.size, searchActive) {
+        if (rows.isNotEmpty() && !searchActive) {
             listState.animateScrollToItem(rows.lastIndex)
         }
     }
@@ -739,6 +779,28 @@ private fun ChatConversationScreen(
                         )
                     }
 
+                    Surface(
+                        onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) searchQuery = ""
+                        },
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("chat_conversation_search")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (searchOpen) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = if (searchOpen) "Close search" else "Search this chat",
+                                tint = ChatInk,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
                     Box {
                         Surface(
                             onClick = { showMenu = true },
@@ -778,6 +840,67 @@ private fun ChatConversationScreen(
                     }
                 }
 
+                // ── in-conversation search ───────────────────────────────────
+                AnimatedVisibility(visible = searchOpen, enter = fadeIn(), exit = fadeOut()) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = {
+                            Text(
+                                "Search in this chat",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.5.sp,
+                                color = ChatFaint
+                            )
+                        },
+                        singleLine = true,
+                        leadingIcon = {
+                            Icon(
+                                Icons.Default.Search,
+                                contentDescription = null,
+                                tint = ChatMuted,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        },
+                        trailingIcon = {
+                            if (searchQuery.isNotEmpty()) {
+                                Icon(
+                                    Icons.Default.Close,
+                                    contentDescription = "Clear search",
+                                    tint = ChatMuted,
+                                    modifier = Modifier
+                                        .size(18.dp)
+                                        .clickable { searchQuery = "" }
+                                )
+                            }
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = EmeraldPrimary,
+                            unfocusedBorderColor = ChatHairline
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp)
+                    )
+                }
+
+                if (searchActive) {
+                    Text(
+                        text = when (visibleMessages.size) {
+                            0 -> "No messages match \"${searchQuery.trim()}\""
+                            1 -> "1 matching message"
+                            else -> "${visibleMessages.size} matching messages"
+                        },
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 11.sp,
+                        color = ChatMuted,
+                        modifier = Modifier.padding(start = 18.dp, top = 2.dp, bottom = 2.dp)
+                    )
+                }
+
                 // ── messages ─────────────────────────────────────────────────
                 Box(modifier = Modifier.weight(1f)) {
                     when {
@@ -785,7 +908,7 @@ private fun ChatConversationScreen(
                             ChatMessageSkeleton()
                         }
 
-                        state.messages.isEmpty() -> {
+                        visibleMessages.isEmpty() -> {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -793,6 +916,32 @@ private fun ChatConversationScreen(
                                 contentAlignment = Alignment.Center
                             ) {
                                 Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    if (searchActive) {
+                                        Icon(
+                                            Icons.Default.SearchOff,
+                                            contentDescription = null,
+                                            tint = ChatFaint,
+                                            modifier = Modifier.size(38.dp)
+                                        )
+                                        Spacer(Modifier.height(10.dp))
+                                        Text(
+                                            text = "No messages match your search",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 13.5.sp,
+                                            fontWeight = FontWeight.SemiBold,
+                                            color = ChatMuted,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                        Spacer(Modifier.height(4.dp))
+                                        Text(
+                                            text = "Try a different word or clear the search.",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 12.sp,
+                                            color = ChatFaint,
+                                            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                        )
+                                        return@Column
+                                    }
                                     ChatAvatar(
                                         peer = peer,
                                         size = 64.dp,
@@ -843,6 +992,9 @@ private fun ChatConversationScreen(
                                         is ChatRow.Day -> DayDivider(row.label)
                                         is ChatRow.Msg -> ChatBubble(
                                             message = row.message,
+                                            downloadProgress = row.message.attachment?.let { attachment ->
+                                                state.attachmentDownloadProgress[attachment.id]
+                                            },
                                             onLongPress = onLongPressMessage
                                         )
                                     }
@@ -918,24 +1070,60 @@ private fun ChatConversationScreen(
 
                 // ── composer ─────────────────────────────────────────────────
 
-                // Picked file, previewed small above the input until it is sent.
-                state.pendingAttachment?.let { draft ->
-                    AttachmentDraftCard(
-                        draft = draft,
-                        onRemove = onClearAttachment,
+                // Quoted message the next send will reply to.
+                state.pendingReply?.let { reply ->
+                    ReplyComposerBar(
+                        reply = reply,
+                        peerName = peer.name,
+                        onCancel = onClearReply,
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(start = 12.dp, end = 12.dp, top = 6.dp)
                     )
                 }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.Bottom
-                ) {
-                    Box {
+                // Picked file, previewed small above the input until it is sent.
+                state.pendingAttachment?.let { draft ->
+                    AttachmentDraftCard(
+                        draft = draft,
+                        onRemove = onClearAttachment,
+                        uploadProgress = if (state.isUploadingAttachment) {
+                            state.attachmentUploadProgress
+                        } else {
+                            null
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 6.dp)
+                    )
+                }
+
+                // Emoji strip: quick access without switching keyboards.
+                AnimatedVisibility(visible = emojiRowOpen, enter = fadeIn(), exit = fadeOut()) {
+                    EmojiPickerRow(
+                        onPick = { emoji -> input += emoji },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 4.dp)
+                    )
+                }
+
+                if (state.isRecordingVoiceNote) {
+                    VoiceRecordingBar(
+                        elapsedMs = state.voiceNoteElapsedMs,
+                        onCancel = onCancelVoiceNote,
+                        onStop = onStopVoiceNote,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)
+                    )
+                } else {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.Bottom
+                    ) {
                         Surface(
                             onClick = { showAttachSheet = true },
                             enabled = peer.canReceiveEncrypted && !state.isSending,
@@ -955,67 +1143,129 @@ private fun ChatConversationScreen(
                                 )
                             }
                         }
-                    }
-                    Spacer(Modifier.width(7.dp))
-                    OutlinedTextField(
-                        value = input,
-                        onValueChange = {
-                            input = it
-                            if (it.isNotBlank()) onTyping()
-                        },
-                        placeholder = {
-                            Text(
-                                "Message ${peer.name.substringBefore(" ")}…",
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 14.sp,
-                                color = ChatFaint
-                            )
-                        },
-                        maxLines = 5,
-                        shape = RoundedCornerShape(24.dp),
-                        colors = OutlinedTextFieldDefaults.colors(
-                            focusedContainerColor = Color.White,
-                            unfocusedContainerColor = Color.White,
-                            focusedBorderColor = EmeraldPrimary,
-                            unfocusedBorderColor = ChatHairline
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 50.dp)
-                            .testTag("chat_input_field")
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    val canSend = (input.isNotBlank() || state.pendingAttachment != null) &&
-                        !state.isSending && peer.canReceiveEncrypted
-                    Surface(
-                        onClick = {
-                            val text = input.trim()
-                            if (canSend) {
-                                onSend(text)
-                                input = ""
+                        Spacer(Modifier.width(7.dp))
+                        OutlinedTextField(
+                            value = input,
+                            onValueChange = {
+                                input = it
+                                if (it.isNotBlank()) onTyping()
+                            },
+                            placeholder = {
+                                Text(
+                                    "Message ${peer.name.substringBefore(" ")}…",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 14.sp,
+                                    color = ChatFaint
+                                )
+                            },
+                            maxLines = 5,
+                            shape = RoundedCornerShape(24.dp),
+                            trailingIcon = {
+                                Surface(
+                                    onClick = { emojiRowOpen = !emojiRowOpen },
+                                    shape = CircleShape,
+                                    color = Color.Transparent,
+                                    modifier = Modifier.size(34.dp)
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Icon(
+                                            imageVector = if (emojiRowOpen) {
+                                                Icons.Default.Keyboard
+                                            } else {
+                                                Icons.Default.EmojiEmotions
+                                            },
+                                            contentDescription = if (emojiRowOpen) {
+                                                "Hide emoji"
+                                            } else {
+                                                "Show emoji"
+                                            },
+                                            tint = if (emojiRowOpen) EmeraldPrimary else ChatMuted,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
+                            },
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White,
+                                focusedBorderColor = EmeraldPrimary,
+                                unfocusedBorderColor = ChatHairline
+                            ),
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 50.dp)
+                                .testTag("chat_input_field")
+                        )
+                        Spacer(Modifier.width(8.dp))
+
+                        val hasSomethingToSend = input.isNotBlank() || state.pendingAttachment != null
+                        val canSend = hasSomethingToSend && !state.isSending && peer.canReceiveEncrypted
+                        // Empty composer -> microphone; anything typed or attached
+                        // -> send. Exactly one primary action, like every chat app.
+                        if (!hasSomethingToSend) {
+                            Surface(
+                                onClick = {
+                                    if (peer.canReceiveEncrypted) {
+                                        if (ContextCompat.checkSelfPermission(
+                                                context,
+                                                Manifest.permission.RECORD_AUDIO
+                                            ) == PackageManager.PERMISSION_GRANTED
+                                        ) {
+                                            onStartVoiceNote()
+                                        } else {
+                                            micPermission.launch(Manifest.permission.RECORD_AUDIO)
+                                        }
+                                    }
+                                },
+                                enabled = peer.canReceiveEncrypted && !state.isSending,
+                                shape = CircleShape,
+                                color = Color.White,
+                                border = BorderStroke(1.dp, ChatHairline),
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .testTag("chat_mic_button")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Mic,
+                                        contentDescription = "Record a voice note",
+                                        tint = if (peer.canReceiveEncrypted) EmeraldDark else ChatFaint,
+                                        modifier = Modifier.size(22.dp)
+                                    )
+                                }
                             }
-                        },
-                        enabled = canSend,
-                        shape = CircleShape,
-                        color = if (canSend) EmeraldPrimary else Color(0xFFCBD5E1),
-                        modifier = Modifier
-                            .size(50.dp)
-                            .testTag("chat_send_button")
-                    ) {
-                        Box(contentAlignment = Alignment.Center) {
-                            if (state.isSending) {
-                                CircularProgressIndicator(
-                                    modifier = Modifier.size(20.dp),
-                                    color = Color.White,
-                                    strokeWidth = 2.dp
-                                )
-                            } else {
-                                Icon(
-                                    Icons.AutoMirrored.Filled.Send,
-                                    contentDescription = "Send",
-                                    tint = Color.White,
-                                    modifier = Modifier.size(20.dp)
-                                )
+                        } else {
+                            Surface(
+                                onClick = {
+                                    val text = input.trim()
+                                    if (canSend) {
+                                        onSend(text)
+                                        input = ""
+                                    }
+                                },
+                                enabled = canSend,
+                                shape = CircleShape,
+                                color = if (canSend) EmeraldPrimary else Color(0xFFCBD5E1),
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .testTag("chat_send_button")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    if (state.isSending) {
+                                        CircularProgressIndicator(
+                                            modifier = Modifier.size(20.dp),
+                                            color = Color.White,
+                                            strokeWidth = 2.dp
+                                        )
+                                    } else {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = "Send",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
@@ -1093,6 +1343,10 @@ private fun ChatConversationScreen(
         MessageActionsSheet(
             message = message,
             onDismiss = { selectedMessage = null },
+            onReply = {
+                onReply(message)
+                selectedMessage = null
+            },
             onCopy = {
                 copyToClipboard(context, message.body)
                 selectedMessage = null
@@ -1267,12 +1521,259 @@ private fun AttachmentOptionRow(
     }
 }
 
+/** Quoted-message bar shown above the composer while replying. */
+@Composable
+private fun ReplyComposerBar(
+    reply: ChatReply,
+    peerName: String,
+    onCancel: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(14.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(start = 10.dp, end = 6.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .width(3.dp)
+                    .height(34.dp)
+                    .clip(RoundedCornerShape(2.dp))
+                    .background(EmeraldPrimary)
+            )
+            Spacer(Modifier.width(9.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = if (reply.isMine) {
+                        "Replying to your message"
+                    } else {
+                        "Replying to ${peerName.substringBefore(" ")}"
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EmeraldDark
+                )
+                Spacer(Modifier.height(1.dp))
+                Text(
+                    text = reply.preview,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    color = ChatMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Surface(
+                onClick = onCancel,
+                shape = CircleShape,
+                color = Color(0xFFF1F5F9),
+                modifier = Modifier.size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Cancel reply",
+                        tint = ChatMuted,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Quoted block rendered at the top of a bubble. */
+@Composable
+private fun ReplyQuoteBlock(reply: ChatReply, isMine: Boolean) {
+    val accent = if (isMine) Color.White.copy(alpha = 0.55f) else EmeraldPrimary
+    val background = if (isMine) Color.White.copy(alpha = 0.12f) else Color(0xFFF1F5F9)
+    Row(
+        modifier = Modifier
+            .widthIn(max = 220.dp)
+            .clip(RoundedCornerShape(9.dp))
+            .background(background)
+            .padding(vertical = 5.dp, horizontal = 7.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .width(2.dp)
+                .height(26.dp)
+                .clip(RoundedCornerShape(1.dp))
+                .background(accent)
+        )
+        Spacer(Modifier.width(7.dp))
+        Column {
+            Text(
+                text = if (reply.isMine) "You" else "Them",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 9.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = accent
+            )
+            Text(
+                text = reply.preview,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                color = if (isMine) Color.White.copy(alpha = 0.88f) else ChatMuted,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/** A scrollable strip of common emoji, tap to insert. */
+@Composable
+private fun EmojiPickerRow(onPick: (String) -> Unit, modifier: Modifier = Modifier) {
+    LazyRow(
+        modifier = modifier,
+        horizontalArrangement = Arrangement.spacedBy(4.dp),
+        contentPadding = PaddingValues(horizontal = 2.dp)
+    ) {
+        items(CHAT_EMOJI) { emoji ->
+            Surface(
+                onClick = { onPick(emoji) },
+                shape = RoundedCornerShape(10.dp),
+                color = Color.White,
+                border = BorderStroke(1.dp, ChatHairline),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Text(text = emoji, fontSize = 19.sp)
+                }
+            }
+        }
+    }
+}
+
+/** Replaces the composer while a voice note is being recorded. */
+@Composable
+private fun VoiceRecordingBar(
+    elapsedMs: Long,
+    onCancel: () -> Unit,
+    onStop: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val seconds = (elapsedMs / 1000L)
+    val clock = String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
+
+    Surface(
+        shape = RoundedCornerShape(25.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Surface(
+                onClick = onCancel,
+                shape = CircleShape,
+                color = Color(0xFFF1F5F9),
+                modifier = Modifier.size(38.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.DeleteOutline,
+                        contentDescription = "Cancel recording",
+                        tint = ChatError,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+
+            // Pulsing dot + timer, so it is obvious that recording is live.
+            val transition = rememberInfiniteTransition(label = "recording_pulse")
+            val dotAlpha by transition.animateFloat(
+                initialValue = 0.25f,
+                targetValue = 1f,
+                animationSpec = infiniteRepeatable(
+                    animation = tween(700, easing = LinearEasing),
+                    repeatMode = RepeatMode.Reverse
+                ),
+                label = "recording_dot"
+            )
+            Box(
+                modifier = Modifier
+                    .size(9.dp)
+                    .alpha(dotAlpha)
+                    .background(ChatError, CircleShape)
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = clock,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 14.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ChatInk
+            )
+            Spacer(Modifier.width(8.dp))
+            Text(
+                text = "Recording voice note…",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                color = ChatMuted,
+                modifier = Modifier.weight(1f),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Surface(
+                onClick = onStop,
+                shape = CircleShape,
+                color = EmeraldPrimary,
+                modifier = Modifier.size(44.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.AutoMirrored.Filled.Send,
+                        contentDescription = "Stop and keep the recording",
+                        tint = Color.White,
+                        modifier = Modifier.size(19.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/** Thin progress line used while an attachment uploads or downloads. */
+@Composable
+private fun AttachmentProgressBar(progress: Float, onDark: Boolean, modifier: Modifier = Modifier) {
+    val clamped = progress.coerceIn(0f, 1f)
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .height(3.dp)
+            .clip(RoundedCornerShape(2.dp))
+            .background(if (onDark) Color.White.copy(alpha = 0.28f) else Color(0xFFE2E8F0))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxHeight()
+                .fillMaxWidth(clamped)
+                .clip(RoundedCornerShape(2.dp))
+                .background(if (onDark) Color.White else EmeraldPrimary)
+        )
+    }
+}
+
 /** Actions available by long-pressing a bubble. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun MessageActionsSheet(
     message: ChatMessage,
     onDismiss: () -> Unit,
+    onReply: () -> Unit,
     onCopy: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -1306,6 +1807,14 @@ private fun MessageActionsSheet(
                 overflow = TextOverflow.Ellipsis
             )
             Spacer(Modifier.height(14.dp))
+
+            MessageActionRow(
+                label = "Reply",
+                icon = Icons.AutoMirrored.Filled.Reply,
+                tint = ChatInk,
+                onClick = onReply
+            )
+            Spacer(Modifier.height(8.dp))
 
             if (hasText) {
                 MessageActionRow(
@@ -1397,6 +1906,15 @@ private fun isEmojiOnlyMessage(text: String): Boolean {
     }
     return emojiCount in 1..6
 }
+
+/** Quick-access emoji for the composer strip. */
+private val CHAT_EMOJI = listOf(
+    "😀", "😁", "😂", "🤣", "😊", "😍", "🥰", "😘", "😎", "🤔",
+    "😅", "😢", "😭", "😡", "🥺", "😴", "🤗", "🙃", "😇", "🤩",
+    "👍", "👎", "👏", "🙏", "💪", "🤝", "✌️", "👌", "🫶", "🤙",
+    "❤️", "🧡", "💚", "💙", "💜", "🔥", "✨", "🎉", "💯", "⭐",
+    "📚", "📝", "✏️", "📖", "🎓", "🧪", "🧮", "🖊️", "📐", "🔬"
+)
 
 /** File types offered by the document picker. */
 private val CHAT_DOCUMENT_TYPES = arrayOf(
@@ -1492,6 +2010,7 @@ private fun DayDivider(label: String) {
 private fun AttachmentDraftCard(
     draft: ChatAttachmentDraft,
     onRemove: () -> Unit,
+    uploadProgress: Float? = null,
     modifier: Modifier = Modifier
 ) {
     Surface(
@@ -1518,6 +2037,13 @@ private fun AttachmentDraftCard(
                         contentScale = ContentScale.Crop,
                         modifier = Modifier.fillMaxSize()
                     )
+                } else if (draft.isAudio) {
+                    Icon(
+                        Icons.Default.Mic,
+                        contentDescription = null,
+                        tint = EmeraldDark,
+                        modifier = Modifier.size(22.dp)
+                    )
                 } else {
                     Icon(
                         Icons.Default.Description,
@@ -1540,11 +2066,21 @@ private fun AttachmentDraftCard(
                 )
                 Spacer(Modifier.height(2.dp))
                 Text(
-                    text = readableBytes(draft.size) + "  ·  ready to send",
+                    text = when {
+                        uploadProgress != null ->
+                            "Encrypting and sending… ${(uploadProgress * 100).toInt()}%"
+                        draft.isAudio ->
+                            formatDuration(draft.durationMs) + "  ·  voice note"
+                        else -> readableBytes(draft.size) + "  ·  ready to send"
+                    },
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 10.5.sp,
                     color = ChatMuted
                 )
+                if (uploadProgress != null) {
+                    Spacer(Modifier.height(5.dp))
+                    AttachmentProgressBar(progress = uploadProgress, onDark = false)
+                }
             }
             Surface(
                 onClick = onRemove,
@@ -1570,7 +2106,11 @@ private fun AttachmentDraftCard(
  * and size. Tapping opens it with whatever app can handle that type.
  */
 @Composable
-private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachment) {
+private fun ChatAttachmentContent(
+    message: ChatMessage,
+    attachment: ChatAttachment,
+    downloadProgress: Int? = null
+) {
     val context = LocalContext.current
     val path = if (message.attachmentAvailable) {
         ChatAttachmentStore.pathFor(context, attachment.id)
@@ -1578,6 +2118,16 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
         null
     }
     val file = path?.let { File(it) }?.takeIf { it.exists() }
+
+    if (attachment.isAudio) {
+        AudioNoteContent(
+            message = message,
+            attachment = attachment,
+            file = file,
+            downloadProgress = downloadProgress
+        )
+        return
+    }
 
     if (attachment.isImage) {
         Box(
@@ -1613,11 +2163,23 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
                     )
                     Spacer(Modifier.height(4.dp))
                     Text(
-                        text = if (message.isPending) "Sending photo…" else "Fetching photo…",
+                        text = when {
+                            message.isPending -> "Sending photo…"
+                            downloadProgress != null -> "$downloadProgress%"
+                            else -> "Fetching photo…"
+                        },
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 10.5.sp,
                         color = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
                     )
+                    if (downloadProgress != null) {
+                        Spacer(Modifier.height(6.dp))
+                        AttachmentProgressBar(
+                            progress = downloadProgress / 100f,
+                            onDark = message.isMine,
+                            modifier = Modifier.width(96.dp)
+                        )
+                    }
                 }
             }
         }
@@ -1670,6 +2232,7 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
                         file != null -> attachment.extensionLabel +
                             (attachment.readableSize.takeIf { it.isNotBlank() }?.let { "  ·  $it" } ?: "")
                         message.isPending -> "Sending…"
+                        downloadProgress != null -> "Downloading $downloadProgress%"
                         else -> "Fetching…"
                     },
                     fontFamily = MaisonNeueFontFamily,
@@ -1679,6 +2242,148 @@ private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachme
             }
         }
     }
+}
+
+/**
+ * Playable voice note: play/pause circle, a progress line and the length.
+ * Playback is local — the file is already decrypted in filesDir.
+ */
+@Composable
+private fun AudioNoteContent(
+    message: ChatMessage,
+    attachment: ChatAttachment,
+    file: File?,
+    downloadProgress: Int? = null
+) {
+    val isMine = message.isMine
+    var playing by remember(file?.absolutePath) { mutableStateOf(false) }
+    var positionMs by remember(file?.absolutePath) { mutableStateOf(0L) }
+    // Prepared on the first tap, not when the bubble scrolls into view: a chat
+    // full of voice notes should not decode every clip up front.
+    val playerState = remember(file?.absolutePath) { mutableStateOf<MediaPlayer?>(null) }
+
+    DisposableEffect(file?.absolutePath) {
+        onDispose {
+            runCatching {
+                playerState.value?.let { active ->
+                    if (active.isPlaying) active.stop()
+                    active.release()
+                }
+            }
+            playerState.value = null
+        }
+    }
+
+    // Keep the progress line in sync while playing.
+    LaunchedEffect(playing) {
+        while (playing) {
+            val active = playerState.value ?: break
+            positionMs = runCatching { active.currentPosition.toLong() }.getOrDefault(0L)
+            val duration = attachment.durationMs.takeIf { it > 0 }
+                ?: runCatching { active.duration.toLong() }.getOrDefault(0L)
+            if (duration > 0 && positionMs >= duration) {
+                playing = false
+                positionMs = 0L
+                runCatching { active.seekTo(0) }
+                break
+            }
+            delay(150)
+        }
+    }
+
+    val total = attachment.durationMs.takeIf { it > 0 } ?: 1L
+    val fraction = (positionMs.toFloat() / total).coerceIn(0f, 1f)
+    val accent = if (isMine) Color.White else EmeraldPrimary
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.widthIn(max = 224.dp)
+    ) {
+        Surface(
+            onClick = {
+                val source = file
+                if (source != null) {
+                    val active = playerState.value ?: runCatching {
+                        MediaPlayer().apply {
+                            setDataSource(source.absolutePath)
+                            prepare()
+                        }
+                    }.getOrNull()?.also { playerState.value = it }
+
+                    if (active != null) {
+                        if (playing) {
+                            runCatching { active.pause() }
+                            playing = false
+                        } else {
+                            runCatching { active.start() }
+                            playing = true
+                        }
+                    }
+                }
+            },
+            shape = CircleShape,
+            color = if (isMine) Color.White.copy(alpha = 0.18f) else Color(0xFFE9F9EF),
+            modifier = Modifier.size(38.dp)
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = if (playing) Icons.Default.Pause else Icons.Default.PlayArrow,
+                    contentDescription = if (playing) "Pause voice note" else "Play voice note",
+                    tint = if (file == null) {
+                        if (isMine) Color.White.copy(alpha = 0.45f) else ChatFaint
+                    } else {
+                        accent
+                    },
+                    modifier = Modifier.size(20.dp)
+                )
+            }
+        }
+        Spacer(Modifier.width(9.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            // Static bar chart standing in for a waveform: cheap and readable.
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(2.5.dp),
+                modifier = Modifier.height(20.dp)
+            ) {
+                repeat(20) { index ->
+                    val reached = index / 19f <= fraction
+                    val baseHeight = 6 + ((index * 7) % 12)
+                    Box(
+                        modifier = Modifier
+                            .width(2.5.dp)
+                            .height(baseHeight.dp)
+                            .clip(RoundedCornerShape(2.dp))
+                            .background(
+                                when {
+                                    reached -> accent
+                                    isMine -> Color.White.copy(alpha = 0.35f)
+                                    else -> Color(0xFFCBD5E1)
+                                }
+                            )
+                    )
+                }
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = when {
+                    file == null && message.isPending -> "Sending voice note…"
+                    file == null && downloadProgress != null -> "Downloading $downloadProgress%"
+                    file == null -> "Fetching voice note…"
+                    playing -> formatDuration(positionMs)
+                    else -> attachment.readableDuration
+                },
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 10.5.sp,
+                color = if (isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
+            )
+        }
+    }
+}
+
+private fun formatDuration(ms: Long): String {
+    val totalSeconds = (ms / 1000L).coerceAtLeast(0L)
+    return String.format(Locale.US, "%d:%02d", totalSeconds / 60, totalSeconds % 60)
 }
 
 /** Open a decrypted attachment with the system viewer. */
@@ -1774,6 +2479,7 @@ private fun ChatAvatar(
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
+    downloadProgress: Int? = null,
     onLongPress: (ChatMessage) -> Unit = {}
 ) {
     val isMine = message.isMine
@@ -1807,8 +2513,16 @@ private fun ChatBubble(
                     vertical = if (message.attachment != null) 6.dp else 7.dp
                 )
             ) {
+                message.replyTo?.let { reply ->
+                    ReplyQuoteBlock(reply = reply, isMine = isMine)
+                    Spacer(Modifier.height(6.dp))
+                }
                 message.attachment?.let { attachment ->
-                    ChatAttachmentContent(message = message, attachment = attachment)
+                    ChatAttachmentContent(
+                        message = message,
+                        attachment = attachment,
+                        downloadProgress = downloadProgress
+                    )
                     if (message.body.isNotBlank()) Spacer(Modifier.height(6.dp))
                 }
                 if (message.body.isNotBlank()) {

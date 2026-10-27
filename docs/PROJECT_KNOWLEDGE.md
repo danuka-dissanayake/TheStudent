@@ -84,7 +84,8 @@ plus a local Room table that owns the actual history.
   deletes exactly the rows it handed out; anything older than 7 days is purged
   on the next request. There is no message, clear or key-backup table.
 * **History lives on the device**: `chat_messages` (Room **v4**,
-  `MIGRATION_2_3` + `MIGRATION_3_4`, entity `ChatMessageEntity`) stores decrypted bubbles with
+  `MIGRATION_2_3` + `MIGRATION_3_4` + `MIGRATION_4_5`, entity
+  `ChatMessageEntity`) stores decrypted bubbles with
   `localId` PK (`srv-<id>` for delivered rows, a UUID for outgoing pending
   ones), and `ChatSummaryRow` drives the thread previews. `endSession()`
   wipes the table on sign-out. A reinstall loses the history by design — there
@@ -95,13 +96,18 @@ plus a local Room table that owns the actual history.
 * End-to-end encryption: `data/local/ChatCrypto.kt` (EC P-256 ECDH + AES-256-GCM,
   Keystore-sealed private key). The server rejects anything that is not
   `e2ee:v1:…`.
-* **Attachments** (photos + documents, ≤25 MB): the file is encrypted with the
+* **Attachments** (photos, documents, voice notes, ≤25 MB): photos are
+  re-encoded first (`ChatMediaPrep`, 1600 px / q85, EXIF-aware); uploads and
+  downloads report real progress; the file is encrypted with the
   same ECDH conversation key, uploaded as an opaque blob to
   `upload_attachment`, and deleted from the server when the recipient downloads
   it. Bubbles carry only an encrypted JSON envelope with the caption and file
   metadata; decrypted bytes live in `filesDir/chat_attachments` through
   `ChatAttachmentStore` (120 MB cap, wiped on sign-out) and open through a
   `FileProvider`.
+* **Replies** quote a message through the encrypted envelope (`r`), and
+  in-conversation search filters the local table — nothing extra leaves the
+  phone. Voice notes are AAC recordings sent as `kind = audio`.
 * **Delete for everyone**: long-press → the row is removed locally (and its cached
   file), then `delete_message` queues a `delete` envelope the peer applies to its
   own copy on the next inbox poll.

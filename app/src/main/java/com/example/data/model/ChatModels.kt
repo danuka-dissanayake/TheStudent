@@ -71,8 +71,10 @@ data class ChatMessage(
     val sentAtEpoch: Long,
     val isRead: Boolean = false,
     val isPending: Boolean = false,
-    /** Image or document sent with this message, if any. */
+    /** Image, document or voice note sent with this message, if any. */
     val attachment: ChatAttachment? = null,
+    /** The message this one quotes, if it was sent as a reply. */
+    val replyTo: ChatReply? = null,
     /** True once the decrypted file for [attachment] is on this phone. */
     val attachmentAvailable: Boolean = false
 )
@@ -112,10 +114,20 @@ data class ChatAttachment(
     val name: String,
     val mime: String,
     val size: Long,
-    /** "image" or "file" — decides which bubble the chat renders. */
-    val kind: String
+    /** "image", "file" or "audio" — decides which bubble the chat renders. */
+    val kind: String,
+    /** Length of a voice note in milliseconds (0 for anything else). */
+    val durationMs: Long = 0L
 ) {
     val isImage: Boolean get() = kind == IMAGE
+    val isAudio: Boolean get() = kind == AUDIO
+
+    /** "0:07" for a voice note. */
+    val readableDuration: String
+        get() {
+            val totalSeconds = (durationMs / 1000L).coerceAtLeast(1L)
+            return String.format(Locale.US, "%d:%02d", totalSeconds / 60, totalSeconds % 60)
+        }
 
     /** "1.4 MB" for the bubble subtitle. */
     val readableSize: String
@@ -137,8 +149,24 @@ data class ChatAttachment(
     companion object {
         const val IMAGE = "image"
         const val FILE = "file"
+        const val AUDIO = "audio"
     }
 }
+
+/**
+ * The message a reply quotes.
+ *
+ * Only a short preview travels with the reply — the full original stays in the
+ * device database, so quoting never re-uploads anything.
+ */
+data class ChatReply(
+    /** Relay id of the quoted message (0 when it was still pending/never sent). */
+    val serverId: Long,
+    /** True when the quoted message is mine. */
+    val isMine: Boolean,
+    /** First ~120 characters of the quoted message, or "Photo" / "Voice note". */
+    val preview: String
+)
 
 /** An attachment chosen in the composer but not sent yet. */
 data class ChatAttachmentDraft(
@@ -147,9 +175,12 @@ data class ChatAttachmentDraft(
     val name: String,
     val mime: String,
     val size: Long,
-    val kind: String
+    val kind: String,
+    /** Voice note length, 0 for photos and documents. */
+    val durationMs: Long = 0L
 ) {
     val isImage: Boolean get() = kind == ChatAttachment.IMAGE
+    val isAudio: Boolean get() = kind == ChatAttachment.AUDIO
 }
 
 /**
@@ -164,31 +195,55 @@ data class ChatAttachmentDraft(
  */
 object ChatEnvelope {
 
-    private const val MARKER = "{\"v\":1,"
+    private val MARKER = Regex("""^\{"v":\d+,""")
 
-    fun looksLikeEnvelope(plainText: String): Boolean = plainText.startsWith(MARKER)
+    fun looksLikeEnvelope(plainText: String): Boolean = MARKER.containsMatchIn(plainText)
 
-    /** Build the plaintext that will be encrypted. */
-    fun encode(text: String, attachment: ChatAttachment?): String {
-        if (attachment == null) return text
-        val json = JSONObject()
-            .put("v", 1)
-            .put("t", text)
-            .put(
+    /**
+     * Build the plaintext that will be encrypted.
+     *
+     * A plain text message stays a plain string (so older builds keep working);
+     * anything carrying a file, a voice note or a quote becomes a small JSON
+     * envelope, which is itself encrypted before upload.
+     */
+    fun encode(
+        text: String,
+        attachment: ChatAttachment?,
+        reply: ChatReply? = null
+    ): String {
+        if (attachment == null && reply == null) return text
+
+        val json = JSONObject().put("v", 2).put("t", text)
+
+        attachment?.let { a ->
+            json.put(
                 "a",
                 JSONObject()
-                    .put("i", attachment.id)
-                    .put("n", attachment.name)
-                    .put("m", attachment.mime)
-                    .put("s", attachment.size)
-                    .put("k", attachment.kind)
+                    .put("i", a.id)
+                    .put("n", a.name)
+                    .put("m", a.mime)
+                    .put("s", a.size)
+                    .put("k", a.kind)
+                    .put("d", a.durationMs)
             )
+        }
+
+        reply?.let { r ->
+            json.put(
+                "r",
+                JSONObject()
+                    .put("i", r.serverId)
+                    .put("m", r.isMine)
+                    .put("t", r.preview)
+            )
+        }
+
         return json.toString()
     }
 
-    /** Split a decrypted body into the caption and its attachment. */
-    fun decode(plainText: String): Pair<String, ChatAttachment?> {
-        if (!looksLikeEnvelope(plainText)) return plainText to null
+    /** Split a decrypted body into caption, attachment and quoted message. */
+    fun decode(plainText: String): DecodedBody {
+        if (!looksLikeEnvelope(plainText)) return DecodedBody(plainText, null, null)
         return try {
             val json = JSONObject(plainText)
             val attachment = json.optJSONObject("a")?.let { a ->
@@ -198,12 +253,29 @@ object ChatEnvelope {
                     name = a.optString("n").ifBlank { "attachment" },
                     mime = a.optString("m").ifBlank { "application/octet-stream" },
                     size = a.optLong("s", 0L),
-                    kind = a.optString("k").ifBlank { ChatAttachment.FILE }
+                    kind = a.optString("k").ifBlank { ChatAttachment.FILE },
+                    durationMs = a.optLong("d", 0L)
                 )
             }
-            json.optString("t") to attachment
+            val reply = json.optJSONObject("r")?.let { r ->
+                val preview = r.optString("t").take(160)
+                if (preview.isBlank()) null
+                else ChatReply(
+                    serverId = r.optLong("i", 0L),
+                    isMine = r.optBoolean("m", false),
+                    preview = preview
+                )
+            }
+            DecodedBody(json.optString("t"), attachment, reply)
         } catch (e: Exception) {
-            plainText to null
+            DecodedBody(plainText, null, null)
         }
     }
 }
+
+/** One decrypted message body: caption, optional file, optional quote. */
+data class DecodedBody(
+    val text: String,
+    val attachment: ChatAttachment?,
+    val reply: ChatReply?
+)

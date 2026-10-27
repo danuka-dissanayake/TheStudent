@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserProfileEntity::class,
         ChatMessageEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -86,6 +86,21 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v4 -> v5: replies and voice-note length.
+         *
+         * All four columns are additive with defaults, so existing rows stay
+         * valid and old chats simply have no quoted message.
+         */
+        private val MIGRATION_4_5 = object : Migration(4, 5) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentDurationMs INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN replyToServerId INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN replyToIsMine INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN replyToPreview TEXT")
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -94,10 +109,10 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     "the_student_database"
                 )
                     // v2 adds the profile-setup columns; v3 the chat history;
-                    // v4 attachments.
+                    // v4 attachments; v5 replies and voice notes.
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
                     // Last resort only: if the file on the device cannot be
                     // migrated for any reason (interrupted update, a build from
                     // another branch), recreate it instead of throwing during the

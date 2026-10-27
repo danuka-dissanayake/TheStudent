@@ -1,6 +1,6 @@
 -- ═══════════════════════════════════════════════════════════════════════════
 --  TheStudent — chat schema (relay only, never an archive)
---  Backend: backend/api/chat.php  (v2.0.0)
+--  Backend: backend/api/chat.php  (v2.2.0)
 --
 --  Privacy model
 --  -------------

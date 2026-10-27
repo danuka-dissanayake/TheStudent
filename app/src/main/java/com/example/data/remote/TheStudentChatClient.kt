@@ -10,8 +10,10 @@ import com.example.data.model.ChatPeer
 import com.example.data.model.ChatThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.MultipartBody
+import okhttp3.RequestBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -19,6 +21,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.util.concurrent.TimeUnit
+import okio.BufferedSink
 import javax.crypto.SecretKey
 
 /**
@@ -215,15 +218,16 @@ object TheStudentChatClient {
                 val serverId = obj.optLong("server_id", 0L)
                 val key = conversationKey(context, accountKey, sender)
                 val plain = ChatCrypto.decrypt(key, obj.optString("body"))
-                val (text, attachment) = ChatEnvelope.decode(plain)
+                val decoded = ChatEnvelope.decode(plain)
                 messages += ChatMessage(
                     localId = "srv-$serverId",
                     serverId = serverId,
                     senderId = obj.optInt("sender_id", sender.id),
-                    body = text,
+                    body = decoded.text,
                     isMine = false,
                     sentAtEpoch = obj.optLong("sent_epoch", 0L),
-                    attachment = attachment
+                    attachment = decoded.attachment,
+                    replyTo = decoded.reply
                 )
             }
 
@@ -337,7 +341,9 @@ object TheStudentChatClient {
         backendBaseUrl: String,
         token: String,
         peer: ChatPeer,
-        bytes: ByteArray
+        bytes: ByteArray,
+        /** 0f..1f, called from the upload thread as bytes leave the phone. */
+        onProgress: (Float) -> Unit = {}
     ): ChatResult<String> = withContext(Dispatchers.IO) {
         val key = conversationKey(context, accountKey, peer)
             ?: return@withContext ChatResult.Failure(
@@ -353,7 +359,11 @@ object TheStudentChatClient {
                 .addFormDataPart(
                     "file",
                     "blob.bin",
-                    blob.toRequestBody("application/octet-stream".toMediaType())
+                    ProgressRequestBody(
+                        bytes = blob,
+                        contentType = "application/octet-stream".toMediaType(),
+                        onProgress = onProgress
+                    )
                 )
                 .build()
 
@@ -401,7 +411,9 @@ object TheStudentChatClient {
         backendBaseUrl: String,
         token: String,
         peer: ChatPeer,
-        attachmentId: String
+        attachmentId: String,
+        /** 0f..1f as the encrypted blob arrives. */
+        onProgress: (Float) -> Unit = {}
     ): ChatResult<ByteArray> = withContext(Dispatchers.IO) {
         val key = conversationKey(context, accountKey, peer) ?: return@withContext ChatResult.Failure(
             "Secure chat is still starting on this device."
@@ -429,8 +441,25 @@ object TheStudentChatClient {
                 if (!contentType.contains("octet-stream", ignoreCase = true)) {
                     return@use ChatResult.Failure("The server returned an unexpected file.")
                 }
-                val blob = response.body?.bytes()
+                val body = response.body
                     ?: return@use ChatResult.Failure("That file could not be downloaded.")
+                val expected = body.contentLength()
+                val blob = body.byteStream().use { input ->
+                    val out = java.io.ByteArrayOutputStream()
+                    val buffer = ByteArray(64 * 1024)
+                    var total = 0L
+                    while (true) {
+                        val read = input.read(buffer)
+                        if (read <= 0) break
+                        total += read
+                        out.write(buffer, 0, read)
+                        if (expected > 0L) {
+                            onProgress((total.toFloat() / expected).coerceIn(0f, 1f))
+                        }
+                    }
+                    onProgress(1f)
+                    out.toByteArray()
+                }
                 val plain = ChatCrypto.decryptBytes(key, blob)
                     ?: return@use ChatResult.Failure("That file could not be decrypted on this device.")
                 ChatResult.Success(plain)
@@ -535,5 +564,31 @@ object TheStudentChatClient {
             lastSeenSeconds = lastSeen,
             publicKey = obj.optString("public_key").takeIf { it.isNotBlank() && !obj.isNull("public_key") }
         )
+    }
+}
+
+/**
+ * Multipart body part that reports how much has gone out, so a 25 MB document
+ * can show a real progress bar instead of an indefinite spinner.
+ */
+private class ProgressRequestBody(
+    private val bytes: ByteArray,
+    private val contentType: MediaType?,
+    private val onProgress: (Float) -> Unit
+) : RequestBody() {
+
+    override fun contentType(): MediaType? = contentType
+
+    override fun contentLength(): Long = bytes.size.toLong()
+
+    override fun writeTo(sink: BufferedSink) {
+        val chunkSize = 64 * 1024
+        var written = 0
+        while (written < bytes.size) {
+            val count = minOf(chunkSize, bytes.size - written)
+            sink.write(bytes, written, count)
+            written += count
+            onProgress((written.toFloat() / bytes.size).coerceIn(0f, 1f))
+        }
     }
 }
