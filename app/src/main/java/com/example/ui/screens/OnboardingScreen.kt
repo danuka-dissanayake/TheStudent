@@ -48,8 +48,6 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.animation.core.FastOutSlowInEasing
-import androidx.compose.animation.core.tween
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -75,6 +73,7 @@ import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
 import com.example.data.local.TheStudentPreferences
 import com.example.ui.components.StudentLoadingSpinner
+import com.example.ui.components.TheStudentAppBackground
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.EmeraldDark
@@ -183,11 +182,12 @@ fun OnboardingScreen(
         },
         containerColor = OnboardingBg
     ) { innerPadding ->
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
-                .background(OnboardingBg)
+        // Same emerald-wash background as the profile setup screen. Onboarding
+        // pins its own light palette, so the base colour is passed explicitly
+        // (the wash itself comes from the shared composable).
+        TheStudentAppBackground(
+            baseColor = OnboardingBg,
+            modifier = Modifier.padding(innerPadding)
         ) {
             // Elegant modern geometric arch & starlight background art at footer
             OnboardingModernFooterArt(

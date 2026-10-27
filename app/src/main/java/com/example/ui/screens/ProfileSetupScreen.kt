@@ -96,6 +96,7 @@ import com.example.data.model.ProfileSetupSubmission
 import com.example.data.model.UserProfile
 import com.example.data.remote.AvatarPreparer
 import com.example.ui.components.StudentLoadingSpinner
+import com.example.ui.components.TheStudentAppBackground
 import com.example.ui.theme.EmeraldContainer
 import com.example.ui.theme.EmeraldDark
 import com.example.ui.theme.EmeraldPrimary
@@ -303,22 +304,12 @@ fun ProfileSetupScreen(
     // scrolling - it is deliberately NOT pinned to the screen bottom. The header
     // stays fixed, the form scrolls, and the bottom padding is applied on the
     // scroll content (never on the container) so the button can leave the screen.
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
+    // One shared background for the whole app (see TheStudentAppBackground).
+    TheStudentAppBackground(modifier = modifier) {
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .imePadding()
-                .background(
-                    Brush.verticalGradient(
-                        0f to EmeraldPrimary.copy(alpha = 0.12f),
-                        0.35f to EmeraldPrimary.copy(alpha = 0.02f),
-                        1f to Color.Transparent
-                    )
-                )
         ) {
             // ── brand bar: the real logo artwork, no text drawn by the app ────
             Row(
