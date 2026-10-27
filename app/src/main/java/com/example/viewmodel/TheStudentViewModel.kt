@@ -218,7 +218,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     init {
         viewModelScope.launch(Dispatchers.IO) {
-            repository.initializeDefaultDataIfEmpty()
+            // A database problem (for example a schema surprise after an update)
+            // must never take the whole app down before the first frame.
+            runCatching { repository.initializeDefaultDataIfEmpty() }
+                .onFailure { Log.e("TheStudentViewModel", "Database seed failed", it) }
         }
         loadDynamicPapers()
         verifySessionWithBackend()
@@ -874,10 +877,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun observeChatDatabase() {
         viewModelScope.launch {
-            chatDao.observeSummaries().collect { rows ->
-                chatSummaries = rows
-                rebuildChatThreads()
+            val summaries = runCatching { chatDao.observeSummaries() }.getOrElse { error ->
+                // Chat is a feature; it must not be able to crash the app on launch.
+                Log.e("TheStudentViewModel", "Chat database unavailable", error)
+                return@launch
             }
+            summaries
+                .catch { error ->
+                    Log.e("TheStudentViewModel", "Chat summaries failed", error)
+                }
+                .collect { rows ->
+                    chatSummaries = rows
+                    rebuildChatThreads()
+                }
         }
     }
 

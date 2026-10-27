@@ -75,12 +75,16 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     TheStudentDatabase::class.java,
                     "the_student_database"
                 )
-                    // v2 adds the profile-setup columns; v3 adds the chat history,
-                    // which exists nowhere else — the phone is the only copy. So the
-                    // migrations are explicit and there is deliberately **no**
-                    // destructive fallback: a schema bug must fail loudly in
-                    // development instead of silently deleting a student's chats.
+                    // v2 adds the profile-setup columns; v3 adds the chat history.
+                    // The migrations are explicit so an ordinary update keeps every
+                    // saved paper, streak and message.
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    // Last resort only: if a device reports a version this build
+                    // has no migration path for (an interrupted update, a build
+                    // from another branch), recreate the file instead of throwing
+                    // at launch. That loses the local cache and the local chat
+                    // history, which is still better than an app that cannot start.
+                    .fallbackToDestructiveMigrationFrom(1, 2)
                     .build()
                 INSTANCE = instance
                 instance

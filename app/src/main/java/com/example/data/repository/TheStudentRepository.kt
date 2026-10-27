@@ -1,20 +1,40 @@
 package com.example.data.repository
 
+import android.util.Log
 import com.example.data.local.*
 import com.example.data.model.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.withContext
 
 class TheStudentRepository(private val dao: TheStudentDao) {
 
-    // Saved papers from Room
-    val savedPapers: Flow<List<SavedPaperEntity>> = dao.getAllSavedPapers().flowOn(Dispatchers.IO)
-    val savedCourses: Flow<List<SavedCourseEntity>> = dao.getAllSavedCourses().flowOn(Dispatchers.IO)
-    val recentActivities: Flow<List<LearningActivityEntity>> = dao.getRecentActivities().flowOn(Dispatchers.IO)
-    val userProfileFlow: Flow<UserProfileEntity?> = dao.getUserProfile().flowOn(Dispatchers.IO)
+    // Saved papers from Room.
+    //
+    // Each flow degrades instead of throwing: these are collected straight from
+    // the UI, so an unreadable local database (for example a schema change on a
+    // device that skipped an update) must not crash the app on launch. The error
+    // is logged, the screen shows empty state, and the server-backed content
+    // still loads.
+    val savedPapers: Flow<List<SavedPaperEntity>> =
+        dao.getAllSavedPapers()
+            .flowOn(Dispatchers.IO)
+            .catch { Log.e(TAG, "savedPapers unavailable", it); emit(emptyList()) }
+    val savedCourses: Flow<List<SavedCourseEntity>> =
+        dao.getAllSavedCourses()
+            .flowOn(Dispatchers.IO)
+            .catch { Log.e(TAG, "savedCourses unavailable", it); emit(emptyList()) }
+    val recentActivities: Flow<List<LearningActivityEntity>> =
+        dao.getRecentActivities()
+            .flowOn(Dispatchers.IO)
+            .catch { Log.e(TAG, "recentActivities unavailable", it); emit(emptyList()) }
+    val userProfileFlow: Flow<UserProfileEntity?> =
+        dao.getUserProfile()
+            .flowOn(Dispatchers.IO)
+            .catch { Log.e(TAG, "userProfile unavailable", it); emit(null) }
 
     // Check if saved
     fun isPaperSaved(paperId: String): Flow<Boolean> = dao.isPaperSaved(paperId).flowOn(Dispatchers.IO)
@@ -219,6 +239,8 @@ class TheStudentRepository(private val dao: TheStudentDao) {
     fun generateAiTutorResponse(prompt: String): AiChatMessage = Companion.generateAiTutorResponse(prompt)
 
     companion object {
+        private const val TAG = "TheStudentRepository"
+
         fun generateAiTutorResponse(prompt: String): AiChatMessage {
             val lower = prompt.lowercase()
             val content: String
