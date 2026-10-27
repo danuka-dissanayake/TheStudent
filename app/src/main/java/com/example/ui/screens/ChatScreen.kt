@@ -777,6 +777,13 @@ private fun ChatConversationScreen(
     // message, so the student never watches it fly down the screen.
     var conversationSettled by remember(peer.id) { mutableStateOf(false) }
 
+    /**
+     * How many rows the list held the last time the reader was parked at the
+     * bottom. A count (not an index) so it still means "the reader was here"
+     * after rows are inserted — see the follow effect below.
+     */
+    var rowsWhenLastAtBottom by remember(peer.id) { mutableStateOf(-1) }
+
     LaunchedEffect(rows.size, state.isLoadingMessages, peer.id) {
         if (conversationSettled) return@LaunchedEffect
 
@@ -797,6 +804,7 @@ private fun ChatConversationScreen(
         listState.scrollToItem(rows.lastIndex)
         withFrameNanos { }
         withFrameNanos { }
+        rowsWhenLastAtBottom = rows.size
         conversationSettled = true
     }
 
@@ -806,13 +814,43 @@ private fun ChatConversationScreen(
         if (!conversationSettled) conversationSettled = true
     }
 
-    // Follow the conversation as new messages arrive — but only when the reader
-    // is already near the bottom, so history browsing and search are not yanked.
+    // ── staying at the bottom ────────────────────────────────────────────────
+    // The follow decision used to come from
+    // `layoutInfo.visibleItemsInfo.lastOrNull()`, which is exactly the wrong
+    // moment to look: when a message is inserted the effect can run before that
+    // row has been laid out, so "am I at the bottom?" read stale indices and the
+    // list simply never moved.
+    //
+    // `canScrollForward == false` means nothing is below the viewport, i.e. the
+    // reader is at the newest message. rememberUpdatedState (not a write during
+    // composition) keeps this single collector reading the current row count.
+    val rowCount by rememberUpdatedState(rows.size)
+
+    LaunchedEffect(listState, peer.id) {
+        snapshotFlow { listState.canScrollForward }
+            .collect { canScrollForward ->
+                // canScrollForward == false means there is nothing below the
+                // viewport: the reader is at the newest message.
+                if (!canScrollForward) rowsWhenLastAtBottom = rowCount
+            }
+    }
+
+    // Follow the conversation. My own message always scrolls (sending must never
+    // leave your own bubble off screen); an incoming one scrolls while the
+    // reader is at the bottom, so scrolling back through history or an active
+    // search is never yanked away.
     LaunchedEffect(rows.size, searchActive, conversationSettled) {
-        if (rows.isEmpty() || searchActive || !conversationSettled) return@LaunchedEffect
-        val lastVisible = listState.layoutInfo.visibleItemsInfo.lastOrNull()?.index ?: rows.lastIndex
-        if (lastVisible >= rows.size - 3) {
+        if (rows.isEmpty() || !conversationSettled) return@LaunchedEffect
+        val newestIsMine = (rows.lastOrNull() as? ChatRow.Msg)?.message?.isMine == true
+        val wasAtBottom = rowsWhenLastAtBottom >= 0 &&
+            rowsWhenLastAtBottom >= rows.size - 1
+        if (searchActive && !newestIsMine) return@LaunchedEffect
+        if (newestIsMine || wasAtBottom) {
+            // Let the new row be laid out first: scrolling in the same frame as
+            // the insertion is what made the list appear not to move at all.
+            withFrameNanos { }
             listState.animateScrollToItem(rows.lastIndex)
+            rowsWhenLastAtBottom = rows.size
         }
     }
 
