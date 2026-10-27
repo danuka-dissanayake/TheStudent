@@ -1,6 +1,12 @@
 package com.example.ui.screens
 
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
+import android.widget.Toast
 import androidx.activity.compose.BackHandler
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -32,6 +38,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -39,6 +46,10 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
+import androidx.core.content.FileProvider
+import com.example.data.local.ChatAttachmentStore
+import com.example.data.model.ChatAttachment
+import com.example.data.model.ChatAttachmentDraft
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatThread
@@ -48,6 +59,7 @@ import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.example.viewmodel.ChatUiState
 import com.example.viewmodel.TheStudentViewModel
+import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Calendar
 import java.util.Date
@@ -122,6 +134,8 @@ fun ChatScreen(
             onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
             onClearChat = { viewModel.clearActiveChat() },
             onDismissError = { viewModel.dismissChatError() },
+            onPickAttachment = { uri -> viewModel.stageChatAttachment(uri) },
+            onClearAttachment = { viewModel.clearStagedChatAttachment() },
             modifier = modifier
         )
         return
@@ -595,18 +609,33 @@ private fun ChatConversationScreen(
     onAcknowledgeSafety: () -> Unit,
     onClearChat: () -> Unit,
     onDismissError: () -> Unit,
+    onPickAttachment: (Uri) -> Unit,
+    onClearAttachment: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
     var input by remember { mutableStateOf("") }
     var showMenu by remember { mutableStateOf(false) }
     var showClearDialog by remember { mutableStateOf(false) }
+    var showAttachMenu by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
 
+    // Gallery and document pickers. Neither needs a runtime permission: the
+    // system picker hands back a one-off readable Uri.
+    val imagePicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.GetContent()
+    ) { uri -> uri?.let(onPickAttachment) }
+    val documentPicker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri -> uri?.let(onPickAttachment) }
+
+    // Day separators are computed once per message list, not per recomposition.
+    val rows = remember(state.messages) { buildChatRows(state.messages) }
+
     // Follow the conversation as new messages arrive.
-    LaunchedEffect(state.messages.size) {
-        if (state.messages.isNotEmpty()) {
-            listState.animateScrollToItem(state.messages.lastIndex)
+    LaunchedEffect(rows.size) {
+        if (rows.isNotEmpty()) {
+            listState.animateScrollToItem(rows.lastIndex)
         }
     }
 
@@ -781,8 +810,19 @@ private fun ChatConversationScreen(
                                 contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(state.messages, key = { it.localId }) { message ->
-                                    ChatBubble(message = message)
+                                items(
+                                    items = rows,
+                                    key = { row ->
+                                        when (row) {
+                                            is ChatRow.Day -> "day-${row.key}"
+                                            is ChatRow.Msg -> row.message.localId
+                                        }
+                                    }
+                                ) { row ->
+                                    when (row) {
+                                        is ChatRow.Day -> DayDivider(row.label)
+                                        is ChatRow.Msg -> ChatBubble(message = row.message)
+                                    }
                                 }
 
                                 if (peer.isTyping) {
@@ -854,12 +894,71 @@ private fun ChatConversationScreen(
                 }
 
                 // ── composer ─────────────────────────────────────────────────
+
+                // Picked file, previewed small above the input until it is sent.
+                state.pendingAttachment?.let { draft ->
+                    AttachmentDraftCard(
+                        draft = draft,
+                        onRemove = onClearAttachment,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 12.dp, end = 12.dp, top = 6.dp)
+                    )
+                }
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
                     verticalAlignment = Alignment.Bottom
                 ) {
+                    Box {
+                        Surface(
+                            onClick = { showAttachMenu = true },
+                            enabled = peer.canReceiveEncrypted && !state.isSending,
+                            shape = CircleShape,
+                            color = Color.White,
+                            border = BorderStroke(1.dp, ChatHairline),
+                            modifier = Modifier
+                                .size(50.dp)
+                                .testTag("chat_attach_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.AttachFile,
+                                    contentDescription = "Attach a photo or document",
+                                    tint = if (peer.canReceiveEncrypted) EmeraldDark else ChatFaint,
+                                    modifier = Modifier.size(21.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showAttachMenu,
+                            onDismissRequest = { showAttachMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Photo", fontFamily = MaisonNeueFontFamily, fontSize = 14.sp) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Image, contentDescription = null, tint = EmeraldDark)
+                                },
+                                onClick = {
+                                    showAttachMenu = false
+                                    imagePicker.launch("image/*")
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Document", fontFamily = MaisonNeueFontFamily, fontSize = 14.sp) },
+                                leadingIcon = {
+                                    Icon(Icons.Default.Description, contentDescription = null, tint = EmeraldDark)
+                                },
+                                onClick = {
+                                    showAttachMenu = false
+                                    documentPicker.launch(CHAT_DOCUMENT_TYPES)
+                                }
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
                     OutlinedTextField(
                         value = input,
                         onValueChange = {
@@ -888,21 +987,19 @@ private fun ChatConversationScreen(
                             .testTag("chat_input_field")
                     )
                     Spacer(Modifier.width(8.dp))
+                    val canSend = (input.isNotBlank() || state.pendingAttachment != null) &&
+                        !state.isSending && peer.canReceiveEncrypted
                     Surface(
                         onClick = {
                             val text = input.trim()
-                            if (text.isNotEmpty()) {
+                            if (canSend) {
                                 onSend(text)
                                 input = ""
                             }
                         },
-                        enabled = input.isNotBlank() && !state.isSending && peer.canReceiveEncrypted,
+                        enabled = canSend,
                         shape = CircleShape,
-                        color = if (input.isNotBlank() && peer.canReceiveEncrypted) {
-                            EmeraldPrimary
-                        } else {
-                            Color(0xFFCBD5E1)
-                        },
+                        color = if (canSend) EmeraldPrimary else Color(0xFFCBD5E1),
                         modifier = Modifier
                             .size(50.dp)
                             .testTag("chat_send_button")
@@ -983,6 +1080,320 @@ private fun ChatConversationScreen(
 //  Pieces
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** File types offered by the document picker. */
+private val CHAT_DOCUMENT_TYPES = arrayOf(
+    "application/pdf",
+    "application/msword",
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "application/vnd.ms-powerpoint",
+    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+    "application/vnd.ms-excel",
+    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    "text/plain",
+    "application/zip"
+)
+
+/** One row of the conversation list: a message, or a day separator. */
+private sealed interface ChatRow {
+    data class Day(val label: String, val key: String) : ChatRow
+    data class Msg(val message: ChatMessage) : ChatRow
+}
+
+private fun startOfDayMillis(epochSeconds: Long): Long {
+    val calendar = Calendar.getInstance().apply {
+        timeInMillis = epochSeconds * 1000L
+        set(Calendar.HOUR_OF_DAY, 0)
+        set(Calendar.MINUTE, 0)
+        set(Calendar.SECOND, 0)
+        set(Calendar.MILLISECOND, 0)
+    }
+    return calendar.timeInMillis
+}
+
+/** "Today" / "Yesterday" / "12 Oct" / "12 Oct 2024". */
+private fun chatDayLabel(dayMillis: Long): String {
+    val now = System.currentTimeMillis()
+    val today = startOfDayMillis(now / 1000L)
+    val yesterday = startOfDayMillis((now / 1000L) - 86_400L)
+    return when (dayMillis) {
+        today -> "Today"
+        yesterday -> "Yesterday"
+        else -> {
+            val sameYear = Calendar.getInstance().apply { timeInMillis = today }
+                .get(Calendar.YEAR) ==
+                Calendar.getInstance().apply { timeInMillis = dayMillis }.get(Calendar.YEAR)
+            SimpleDateFormat(if (sameYear) "d MMMM" else "d MMMM yyyy", Locale.US)
+                .format(Date(dayMillis))
+        }
+    }
+}
+
+/** Insert a separator whenever the calendar day changes. */
+private fun buildChatRows(messages: List<ChatMessage>): List<ChatRow> {
+    val rows = ArrayList<ChatRow>(messages.size + 6)
+    var currentDay: Long? = null
+    for (message in messages) {
+        val day = startOfDayMillis(message.sentAtEpoch)
+        if (day != currentDay) {
+            rows.add(ChatRow.Day(chatDayLabel(day), day.toString()))
+            currentDay = day
+        }
+        rows.add(ChatRow.Msg(message))
+    }
+    return rows
+}
+
+/** Centred "Today" chip between message groups. */
+@Composable
+private fun DayDivider(label: String) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 4.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Surface(
+            shape = RoundedCornerShape(50),
+            color = Color.White.copy(alpha = 0.92f),
+            border = BorderStroke(1.dp, ChatHairline)
+        ) {
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ChatMuted,
+                modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
+            )
+        }
+    }
+}
+
+/** Small preview of the file picked in the composer, with a remove button. */
+@Composable
+private fun AttachmentDraftCard(
+    draft: ChatAttachmentDraft,
+    onRemove: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = modifier
+    ) {
+        Row(
+            modifier = Modifier.padding(8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(46.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(Color(0xFFF1F5F9)),
+                contentAlignment = Alignment.Center
+            ) {
+                if (draft.isImage) {
+                    AsyncImage(
+                        model = File(draft.path),
+                        contentDescription = draft.name,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize()
+                    )
+                } else {
+                    Icon(
+                        Icons.Default.Description,
+                        contentDescription = null,
+                        tint = EmeraldDark,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = draft.name,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ChatInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = readableBytes(draft.size) + "  ·  ready to send",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    color = ChatMuted
+                )
+            }
+            Surface(
+                onClick = onRemove,
+                shape = CircleShape,
+                color = Color(0xFFF1F5F9),
+                modifier = Modifier.size(28.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        Icons.Default.Close,
+                        contentDescription = "Remove attachment",
+                        tint = ChatMuted,
+                        modifier = Modifier.size(15.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The file inside a bubble: a rounded photo, or a document card with its name
+ * and size. Tapping opens it with whatever app can handle that type.
+ */
+@Composable
+private fun ChatAttachmentContent(message: ChatMessage, attachment: ChatAttachment) {
+    val context = LocalContext.current
+    val path = if (message.attachmentAvailable) {
+        ChatAttachmentStore.pathFor(context, attachment.id)
+    } else {
+        null
+    }
+    val file = path?.let { File(it) }?.takeIf { it.exists() }
+
+    if (attachment.isImage) {
+        Box(
+            modifier = Modifier
+                .size(width = 216.dp, height = 162.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (message.isMine) Color.White.copy(alpha = 0.18f) else Color(0xFFEEF2F6))
+                .then(
+                    if (file != null) {
+                        Modifier.clickable {
+                            openChatAttachment(context, file, attachment.mime, attachment.name)
+                        }
+                    } else {
+                        Modifier
+                    }
+                ),
+            contentAlignment = Alignment.Center
+        ) {
+            if (file != null) {
+                AsyncImage(
+                    model = file,
+                    contentDescription = attachment.name,
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier.fillMaxSize()
+                )
+            } else {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Icon(
+                        Icons.Default.Image,
+                        contentDescription = null,
+                        tint = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(Modifier.height(4.dp))
+                    Text(
+                        text = if (message.isPending) "Sending photo…" else "Fetching photo…",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        color = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
+                    )
+                }
+            }
+        }
+    } else {
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .widthIn(max = 232.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(if (message.isMine) Color.White.copy(alpha = 0.16f) else Color(0xFFF1F5F9))
+                .then(
+                    if (file != null) {
+                        Modifier.clickable {
+                            openChatAttachment(context, file, attachment.mime, attachment.name)
+                        }
+                    } else {
+                        Modifier
+                    }
+                )
+                .padding(horizontal = 10.dp, vertical = 9.dp)
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(9.dp))
+                    .background(if (message.isMine) Color.White.copy(alpha = 0.22f) else Color.White),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.Default.InsertDriveFile,
+                    contentDescription = null,
+                    tint = if (message.isMine) Color.White else EmeraldDark,
+                    modifier = Modifier.size(19.dp)
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Column(modifier = Modifier.weight(1f, fill = false)) {
+                Text(
+                    text = attachment.name,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (message.isMine) Color.White else ChatInk,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = when {
+                        file != null -> attachment.extensionLabel +
+                            (attachment.readableSize.takeIf { it.isNotBlank() }?.let { "  ·  $it" } ?: "")
+                        message.isPending -> "Sending…"
+                        else -> "Fetching…"
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    color = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
+                )
+            }
+        }
+    }
+}
+
+/** Open a decrypted attachment with the system viewer. */
+private fun openChatAttachment(context: Context, file: File, mime: String, displayName: String) {
+    try {
+        val uri = FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            file
+        )
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            setDataAndType(uri, mime.ifBlank { "application/octet-stream" })
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        val chooser = Intent.createChooser(intent, displayName).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(chooser)
+    } catch (e: Exception) {
+        Toast.makeText(context, "No app on this phone can open that file.", Toast.LENGTH_SHORT).show()
+    }
+}
+
+/** "1.4 MB" for the composer preview. */
+private fun readableBytes(size: Long): String = when {
+    size <= 0L -> ""
+    size < 1024L -> "$size B"
+    size < 1024L * 1024L -> String.format(Locale.US, "%.0f KB", size / 1024.0)
+    else -> String.format(Locale.US, "%.1f MB", size / (1024.0 * 1024.0))
+}
+
+
 /** Circular avatar: the uploaded profile picture when there is one, initials otherwise. */
 @Composable
 private fun ChatAvatar(
@@ -1060,13 +1471,19 @@ private fun ChatBubble(message: ChatMessage) {
             modifier = Modifier.widthIn(max = 300.dp)
         ) {
             Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
-                Text(
-                    text = message.body,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
-                    lineHeight = 20.sp,
-                    color = if (isMine) Color.White else ChatInk
-                )
+                message.attachment?.let { attachment ->
+                    ChatAttachmentContent(message = message, attachment = attachment)
+                    if (message.body.isNotBlank()) Spacer(Modifier.height(8.dp))
+                }
+                if (message.body.isNotBlank()) {
+                    Text(
+                        text = message.body,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 14.sp,
+                        lineHeight = 20.sp,
+                        color = if (isMine) Color.White else ChatInk
+                    )
+                }
                 Spacer(Modifier.height(4.dp))
                 Row(
                     modifier = Modifier.align(Alignment.End),

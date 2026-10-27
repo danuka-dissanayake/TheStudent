@@ -19,9 +19,11 @@ messages, real presence.
 | --- | --- | --- |
 | Chat tab | Every active, e-mail-verified student — **full name only** (privacy), plus their uploaded profile picture when they have one, else an initials avatar | `GET api/chat.php?action=threads` |
 | Online row | Students active in the last 10 seconds (2 s heartbeats), with a live count ("12 online") | same response, `online_count` |
-| Thread row | Last message preview, "typing…", unread badge, time stamp | **device database** |
+| Thread row | Last message preview ("📷 Photo", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp | **device database** |
+| Day separators | The conversation is grouped as **Today**, **Yesterday**, then "12 October" / "12 October 2024" | message timestamps |
 | Conversation | History, own bubbles on the right, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
+| Attachments | Paperclip in the composer opens **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP). The pick is previewed small above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open the file with any viewer installed on the phone. Max 5 MB. | `upload_attachment` + `attachment` |
 | Safety notice | Bottom banner: *never share phone numbers, home address, school, bank details or passwords* — shown **once per account** until acknowledged | `users.chat_safety_ack_at` |
 | Typing | Three-dot bubble (rounded, one squared corner): each dot lifts 7 px and brightens at the 30 % mark of a 1.2 s loop, staggered 160 ms left→right | `chat_typing` |
 
@@ -33,6 +35,7 @@ the constants at the bottom of `TheStudentViewModel`):
 | Presence heartbeat | **2 s** | the server treats 10 s of silence as offline, so a student flips to "last seen …" within ~10 s and back to online within ~2 s |
 | Relay inbox (new messages + read receipts) | 2 s | delivery only — nothing is kept on the server |
 | Chat list / presence / online count | 3 s | names, avatars, online dots |
+| Attachment fetch | with the inbox | a failed blob is retried after 60 s, not every poll |
 
 Nothing is faked or randomised client-side.
 
@@ -86,6 +89,41 @@ Consequences you should know:
 
 ---
 
+## 1c. Attachments (photos & documents)
+
+A file is treated exactly like a message body: **encrypted on the phone, relayed
+once, then deleted from the server**.
+
+1. The student picks a photo or document. The app copies it into its own cache
+   (so a revoked `content://` Uri cannot break the send) and shows a small
+   preview above the input bar — thumbnail for images, icon + name + size for
+   documents, with a ✕ to remove it and a caption field still available.
+2. On send the bytes are sealed with **the same ECDH conversation key** used for
+   text (AES-256-GCM, random 12-byte IV) and POSTed to `upload_attachment`. The
+   server stores an opaque `.bin` blob and answers with an attachment id.
+3. The message itself is a normal `e2ee:v1:…` body: the *plaintext* is a tiny
+   JSON envelope carrying the caption and the file's metadata (id, name, mime,
+   size, image/document). The relay cannot tell that the message even has a file.
+4. The bubble appears immediately: the sender already has the file locally, so
+   the photo/files card renders from `filesDir`. The recipient stores the message
+   first and downloads the blob on the next poll, decrypting it before it ever
+   touches the disk.
+5. Tapping a bubble opens the file with `FILE_VIEW` through a `FileProvider` —
+   no permission is requested and nothing is exported.
+
+Why this stays private: the blob is ciphertext on the server, the relay deletes
+it on delivery (or after 7 days), the file name, type and caption are inside the
+encrypted envelope, and the decrypted copy lives only in the app's private
+storage. The local attachment cache is capped at 120 MB (oldest dropped first)
+and is cleared on sign-out.
+
+Limits: 5 MB per file in the app, 6 MB server-side, 12 uploads per rolling
+minute. Some shared hosts cap PHP uploads at 2 MB (`upload_max_filesize` /
+`post_max_size` in the PHP settings) — the app then shows the server's message
+instead of failing silently, and the limit has to be raised in the hosting panel.
+
+---
+
 ## 2. Deploy the database
 
 You do **not** need SSH. Either path works:
@@ -104,6 +142,7 @@ Tables created:
 | Table | Purpose |
 | --- | --- |
 | `chat_relay` | encrypted envelopes waiting to be **collected**, then deleted (`kind = 'msg'`), plus read receipts (`kind = 'read'`). 7-day TTL as a safety net. |
+| `chat_attachments` | id, sender, recipient, size — the encrypted blob lives in `backend/uploads/chat/<id>.bin` and is deleted on delivery |
 | `chat_typing` | per-pair typing flag with a 6 s lifetime |
 | `users.last_seen_at` | presence heartbeat (2 s pings) |
 | `users.chat_safety_ack_at` | one-time safety notice acknowledgement |
@@ -134,6 +173,8 @@ never accepted in a query string. Successful responses use
 | POST | `read` | `{peer_id, up_to_server_id}` | – (queued as a `read` envelope for the sender) |
 | POST | `ack_safety` | – | `safety_acknowledged: true` |
 | POST | `heartbeat` | – | `online_count`, `server_epoch` |
+| POST | `upload_attachment` | multipart: `peer_id`, `file` (already-encrypted bytes) | `attachment_id`, `bytes` |
+| GET | `attachment` | `id` | raw `application/octet-stream`; **deleted once the recipient has it** |
 | POST | `set_key` | `{public_key, allow_replace?}` | `public_key` (409 when a different key is already published and `allow_replace` is absent) |
 | GET | `version` | – | deploy fingerprint (`2.0.0`) |
 
@@ -144,6 +185,9 @@ Rules enforced server-side:
 * Sending to a student with no published key returns 409.
 * 30 messages per rolling minute per student (HTTP 429 + `Retry-After`).
 * You cannot message yourself, an inactive account or an unverified account.
+* Attachments: 6 MB per blob server-side (the app stops at 5 MB), 12 uploads per
+  rolling minute, only the sender or recipient may fetch one, and the recipient's
+  fetch deletes both the file and its row.
 * Inbox is capped at 200 envelopes per fetch; expired rows (older than 7 days)
   and stale typing flags are purged at the start of every request.
 * Every query is parameterised; ids are validated as integers.
@@ -162,6 +206,7 @@ both endpoints is what stops the count flickering between 1 and 0.
 | --- | --- |
 | `data/model/ChatModels.kt` | `ChatPeer`, `ChatMessage`, `ChatThread`, `ChatDirectory` |
 | `data/local/TheStudentEntities.kt` | `ChatMessageEntity` (history, device only), `ChatSummaryRow` (thread previews) |
+| `data/local/ChatAttachmentStore.kt` | decrypted attachment files in `filesDir/chat_attachments`, 120 MB cap, wiped on sign-out |
 | `data/local/TheStudentDao.kt` | `observeConversation`, `observeSummaries`, upserts, read/pending flags, per-thread and full wipes |
 | `data/local/TheStudentDatabase.kt` | Room **version 3** — `MIGRATION_2_3` creates `chat_messages` + indices |
 | `data/remote/TheStudentChatClient.kt` | OkHttp client for every action above (never throws; returns `ChatResult`) |
@@ -226,4 +271,7 @@ CHAT_TYPING_THROTTLE_MS = 3_000
 | Composer disabled in a conversation | That student has not opened chat on an updated build, so they have no public key yet | They must open the chat tab once |
 | History disappeared after reinstalling | The history lived only in the old install's database; there is no backup by design | Expected. Chat works again after the key is rotated automatically |
 | "Secure chat could not start: this account already has a different encryption key" | The server published a key this phone cannot reproduce, *and* the local database still has messages | Sign out and in on this phone to clear the local history, then reopen chat to rotate the key |
+| Photo or document stuck on "Fetching…" | The blob was already delivered to another install, expired after 7 days, or the send never finished | The caption and file card still show; ask the sender to resend the file |
+| "That file is larger than this server accepts (2M)" | PHP `upload_max_filesize` / `post_max_size` on the host | Raise both to 8M in the hosting panel (DirectAdmin → PHP settings) |
+| Unread badge missing while on the chat list | Fixed in 2.1.0: a read receipt used to mark *incoming* messages as read | Update the app — no server change needed for this one |
 | Messages show "🔒 can't be decrypted on this device" | A message was encrypted to a key this phone no longer holds | Expected after a key rotation; new messages decrypt normally |

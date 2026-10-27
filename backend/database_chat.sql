@@ -54,6 +54,21 @@ CREATE TABLE IF NOT EXISTS `chat_typing` (
     KEY `idx_chat_typing_updated_at` (`updated_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ── 4. Attachment blobs (images / documents), encrypted on the sender's phone ─
+--     The file itself lives in backend/uploads/chat/<id>.bin and is AES-256-GCM
+--     ciphertext: neither this table nor the folder can be read by the operator.
+--     A blob is deleted as soon as the recipient downloads it.
+CREATE TABLE IF NOT EXISTS `chat_attachments` (
+    `id`           VARCHAR(64)     NOT NULL,
+    `sender_id`    INT UNSIGNED    NOT NULL,
+    `recipient_id` INT UNSIGNED    NOT NULL,
+    `bytes`        BIGINT UNSIGNED NOT NULL DEFAULT 0,
+    `created_at`   DATETIME        NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    KEY `idx_chat_att_recipient` (`recipient_id`, `created_at`),
+    KEY `idx_chat_att_created` (`created_at`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  Housekeeping: chat.php purges expired relay rows and stale typing flags at
 --  the start of every request, so no cron job is required. The queries below
@@ -63,10 +78,15 @@ CREATE TABLE IF NOT EXISTS `chat_typing` (
 --      DELETE FROM `chat_relay`  WHERE `created_at` < NOW() - INTERVAL 7 DAY;
 --      DELETE FROM `chat_typing` WHERE `updated_at` < NOW() - INTERVAL 1 HOUR;
 --
+--  Attachment blobs follow the same rule and chat.php removes the files too:
+--
+--      DELETE FROM `chat_attachments` WHERE `created_at` < NOW() - INTERVAL 7 DAY;
+--
 --  Legacy cleanup (only if you upgraded from an older chat.php version — the
 --  current API never reads or writes these tables):
 --
 --      DROP TABLE IF EXISTS `chat_messages`;
+--      DROP TABLE IF EXISTS `chat_attachments`;
 --      DROP TABLE IF EXISTS `chat_key_backup`;
 --      DROP TABLE IF EXISTS `chat_clears`;
 --      DROP TABLE IF EXISTS `chat_history_backup`;

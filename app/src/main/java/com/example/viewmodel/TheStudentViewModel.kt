@@ -2,12 +2,15 @@ package com.example.viewmodel
 
 import android.app.Application
 import android.content.Context
+import android.net.Uri
+import android.provider.OpenableColumns
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
 import com.example.data.local.ChatCrypto
+import com.example.data.local.ChatAttachmentStore
 import com.example.data.local.ChatMessageEntity
 import com.example.data.local.ChatSummaryRow
 import com.example.data.local.LearningActivityEntity
@@ -20,6 +23,7 @@ import com.example.ui.components.TheStudentNavTab
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
+import java.io.File
 import java.util.UUID
 
 import com.example.data.remote.TheStudentAiStudyResponse
@@ -38,7 +42,6 @@ import com.example.data.remote.PastPapersRemoteRepository
 import com.example.data.remote.DefaultPastPapersSeed
 import com.example.ui.components.AssistantVoiceState
 import android.content.Intent
-import android.net.Uri
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -165,7 +168,11 @@ data class ChatUiState(
     val activePeer: ChatPeer? = null,
     val messages: List<ChatMessage> = emptyList(),
     /** True once this device's encryption key is what the server published. */
-    val isEncryptionReady: Boolean = false
+    val isEncryptionReady: Boolean = false,
+    /** Image or document picked in the composer, not sent yet. */
+    val pendingAttachment: ChatAttachmentDraft? = null,
+    /** True while a picked file is being encrypted and uploaded. */
+    val isUploadingAttachment: Boolean = false
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
     val totalUnread: Int get() = threads.sumOf { it.unreadCount }
@@ -651,9 +658,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val summaryByPeer = chatSummaries.associateBy { it.peerId }
         val threads = chatPeers.map { peer ->
             val summary = summaryByPeer[peer.id]
+            // Attachment messages preview as "📷 Photo" / "📎 notes.pdf", and a
+            // caption (if any) still wins when there is text to show too.
+            val preview = when {
+                summary == null -> null
+                summary.lastAttachmentKind == ChatAttachment.IMAGE -> "📷 Photo"
+                summary.lastAttachmentKind != null ->
+                    "📎 " + (summary.lastAttachmentName ?: "Attachment")
+                else -> summary.lastBody
+            }
             ChatThread(
                 peer = peer,
-                lastMessage = summary?.lastBody,
+                lastMessage = preview,
                 lastMessageIsMine = summary?.lastIsMine ?: false,
                 lastMessageEpoch = summary?.lastEpoch ?: 0L,
                 unreadCount = summary?.unreadCount ?: 0
@@ -689,6 +705,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val peerId = message.senderId
             val isForOpenChat = activePeerId == peerId
             if (isForOpenChat) newForActivePeer = true
+            val attachment = message.attachment
             chatDao.upsertChatMessage(
                 ChatMessageEntity(
                     localId = message.localId,
@@ -698,14 +715,23 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     isMine = false,
                     body = message.body,
                     sentAtEpoch = message.sentAtEpoch,
-                    isRead = isForOpenChat
+                    isRead = isForOpenChat,
+                    attachmentId = attachment?.id,
+                    attachmentName = attachment?.name,
+                    attachmentMime = attachment?.mime,
+                    attachmentSize = attachment?.size ?: 0L,
+                    attachmentKind = attachment?.kind,
+                    attachmentLocal = attachment != null &&
+                        ChatAttachmentStore.exists(appContext, attachment.id)
                 )
             )
         }
 
-        // Read receipts tell me which of my messages the peer has seen.
+        // Read receipts tell me which of my messages the peer has seen. The ids
+        // inside a receipt are ids of MY messages, so only those rows change —
+        // marking incoming rows here used to clear unread badges by accident.
         inbox.receipts.forEach { (peerId, upTo) ->
-            chatDao.markPeerMessagesRead(peerId, upTo)
+            chatDao.markMyMessagesRead(peerId, upTo)
         }
 
         if (newForActivePeer) {
@@ -714,6 +740,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 TheStudentChatClient.sendReadReceipt(baseUrl, token, activePeerId ?: 0, upTo)
             }
         }
+
+        // Anything that arrived with a file gets its bytes pulled next.
+        downloadPendingAttachments(baseUrl, token)
     }
 
     // ── Conversation ─────────────────────────────────────────────────────────
@@ -746,6 +775,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         viewModelScope.launch {
+            chatSession()?.let { (baseUrl, token) -> downloadPendingAttachments(baseUrl, token) }
             // Opening a chat marks everything already received as read and tells
             // the other side.
             chatDao.markConversationRead(peer.id)
@@ -766,7 +796,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         isMine = isMine,
         sentAtEpoch = sentAtEpoch,
         isRead = isRead,
-        isPending = isPending
+        isPending = isPending,
+        attachment = attachmentId?.let { id ->
+            ChatAttachment(
+                id = id,
+                name = attachmentName ?: "attachment",
+                mime = attachmentMime ?: "application/octet-stream",
+                size = attachmentSize,
+                kind = attachmentKind ?: ChatAttachment.FILE
+            )
+        },
+        attachmentAvailable = attachmentLocal
     )
 
     fun closeChat() {
@@ -775,7 +815,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatActivePeerId = null
         chatTypingJob?.cancel()
         chatTypingJob = null
-        _chatState.update { it.copy(activePeer = null, messages = emptyList()) }
+        // A file picked but never sent must not survive the conversation.
+        _chatState.value.pendingAttachment?.let { draft ->
+            runCatching { File(draft.path).delete() }
+        }
+        _chatState.update {
+            it.copy(
+                activePeer = null,
+                messages = emptyList(),
+                pendingAttachment = null,
+                isUploadingAttachment = false
+            )
+        }
         _uiState.update { it.copy(isChatConversationOpen = false) }
     }
 
@@ -786,7 +837,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun sendChatMessage(text: String) {
         val body = text.trim()
         val peer = _chatState.value.activePeer ?: return
-        if (body.isEmpty() || _chatState.value.isSending) return
+        val draft = _chatState.value.pendingAttachment
+        if ((body.isEmpty() && draft == null) || _chatState.value.isSending) return
         if (!_chatState.value.isEncryptionReady) {
             _chatState.update {
                 it.copy(errorMessage = "Secure chat is still starting on this device. Please try again.")
@@ -801,6 +853,58 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         _chatState.update { it.copy(isSending = true, errorMessage = null) }
         viewModelScope.launch {
+            // 1. A picked file is encrypted first and dropped on the relay; the
+            //    message that follows only carries its metadata.
+            var attachment: ChatAttachment? = null
+            if (draft != null) {
+                _chatState.update { it.copy(isUploadingAttachment = true) }
+                val bytes = withContext(Dispatchers.IO) {
+                    runCatching { File(draft.path).readBytes() }.getOrNull()
+                }
+                if (bytes == null) {
+                    _chatState.update {
+                        it.copy(
+                            isSending = false,
+                            isUploadingAttachment = false,
+                            errorMessage = "That file could not be read any more. Please pick it again."
+                        )
+                    }
+                    return@launch
+                }
+                val uploaded = TheStudentChatClient.uploadAttachment(
+                    context = appContext,
+                    accountKey = chatAccountKey,
+                    backendBaseUrl = baseUrl,
+                    token = token,
+                    peer = peer,
+                    bytes = bytes
+                )
+                val attachmentId = uploaded.dataOrNull()
+                if (attachmentId == null) {
+                    // Keep the draft so "send" can simply be tapped again.
+                    _chatState.update {
+                        it.copy(
+                            isSending = false,
+                            isUploadingAttachment = false,
+                            errorMessage = uploaded.failureMessage
+                                ?: "The file could not be sent. Please try again."
+                        )
+                    }
+                    return@launch
+                }
+                ChatAttachmentStore.save(appContext, attachmentId, bytes)
+                attachment = ChatAttachment(
+                    id = attachmentId,
+                    name = draft.name,
+                    mime = draft.mime,
+                    size = draft.size.takeIf { it > 0L } ?: bytes.size.toLong(),
+                    kind = draft.kind
+                )
+                File(draft.path).delete()
+                _chatState.update { it.copy(pendingAttachment = null, isUploadingAttachment = false) }
+            }
+
+            // 2. Show the bubble immediately, before the relay confirms it.
             chatDao.upsertChatMessage(
                 ChatMessageEntity(
                     localId = localId,
@@ -810,7 +914,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     body = body,
                     sentAtEpoch = sentAt,
                     isRead = false,
-                    isPending = true
+                    isPending = true,
+                    attachmentId = attachment?.id,
+                    attachmentName = attachment?.name,
+                    attachmentMime = attachment?.mime,
+                    attachmentSize = attachment?.size ?: 0L,
+                    attachmentKind = attachment?.kind,
+                    attachmentLocal = attachment != null
                 )
             )
 
@@ -820,7 +930,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 backendBaseUrl = baseUrl,
                 token = token,
                 peer = peer,
-                plaintext = body
+                // Encrypt caption + attachment metadata as one envelope.
+                plaintext = ChatEnvelope.encode(body, attachment)
             )
             val serverId = result.dataOrNull()
             if (serverId != null) {
@@ -893,6 +1004,127 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    // ── Attachments ──────────────────────────────────────────────────────────
+
+    /**
+     * Copy a file the student picked (gallery or document picker) into the app's
+     * cache. Copying now means a content Uri that is revoked later can never
+     * break a send, and the composer can already show a thumbnail.
+     */
+    fun stageChatAttachment(uri: Uri) {
+        viewModelScope.launch {
+            val staged = withContext(Dispatchers.IO) {
+                runCatching { copyPickedAttachment(uri) }.getOrNull()
+            }
+            if (staged == null) {
+                _chatState.update {
+                    it.copy(
+                        errorMessage = "That file could not be read, or it is larger than " +
+                            "${CHAT_MAX_ATTACHMENT_BYTES / (1024 * 1024)} MB."
+                    )
+                }
+                return@launch
+            }
+            _chatState.update { it.copy(pendingAttachment = staged, errorMessage = null) }
+        }
+    }
+
+    /** Remove the attachment from the composer without sending anything. */
+    fun clearStagedChatAttachment() {
+        val draft = _chatState.value.pendingAttachment ?: return
+        runCatching { File(draft.path).delete() }
+        _chatState.update { it.copy(pendingAttachment = null) }
+    }
+
+    private fun copyPickedAttachment(uri: Uri): ChatAttachmentDraft? {
+        val resolver = appContext.contentResolver
+        val mime = resolver.getType(uri) ?: "application/octet-stream"
+
+        var displayName = "attachment"
+        runCatching {
+            resolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)
+                ?.use { cursor ->
+                    if (cursor.moveToFirst()) {
+                        val index = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                        if (index >= 0) {
+                            cursor.getString(index)?.takeIf { it.isNotBlank() }?.let { displayName = it }
+                        }
+                    }
+                }
+        }
+
+        val bytes = resolver.openInputStream(uri)?.use { input ->
+            val out = java.io.ByteArrayOutputStream()
+            val buffer = ByteArray(64 * 1024)
+            var total = 0L
+            while (true) {
+                val read = input.read(buffer)
+                if (read <= 0) break
+                total += read
+                if (total > CHAT_MAX_ATTACHMENT_BYTES) return@use null
+                out.write(buffer, 0, read)
+            }
+            out.toByteArray()
+        } ?: return null
+
+        if (bytes.isEmpty()) return null
+
+        val target = File(appContext.cacheDir, "chat_pick_" + UUID.randomUUID().toString())
+        target.writeBytes(bytes)
+
+        return ChatAttachmentDraft(
+            path = target.absolutePath,
+            name = displayName.take(120),
+            mime = mime,
+            size = bytes.size.toLong(),
+            // Only real image types are rendered inline; everything else (PDF,
+            // DOCX, ZIP, …) becomes a document card.
+            kind = if (mime.startsWith("image/")) ChatAttachment.IMAGE else ChatAttachment.FILE
+        )
+    }
+
+    /**
+     * Pull the encrypted blobs for messages whose file is not on this device yet.
+     *
+     * The relay deletes a blob once it has been downloaded, so a failure here is
+     * retried a minute later rather than every 2 s poll (which would just hammer
+     * a server that no longer has the file).
+     */
+    private suspend fun downloadPendingAttachments(baseUrl: String, token: String) {
+        val pending = runCatching { chatDao.pendingAttachments() }.getOrNull() ?: return
+        if (pending.isEmpty()) return
+
+        val now = System.currentTimeMillis()
+        for (row in pending) {
+            val attachmentId = row.attachmentId ?: continue
+            val retryAt = attachmentRetryAt[attachmentId] ?: 0L
+            if (now < retryAt) continue
+
+            val peer = chatPeers.firstOrNull { it.id == row.peerId } ?: continue
+            val result = TheStudentChatClient.downloadAttachment(
+                context = appContext,
+                accountKey = chatAccountKey,
+                backendBaseUrl = baseUrl,
+                token = token,
+                peer = peer,
+                attachmentId = attachmentId
+            )
+            val bytes = result.dataOrNull()
+            if (bytes == null) {
+                attachmentRetryAt[attachmentId] = now + CHAT_ATTACHMENT_RETRY_MS
+                continue
+            }
+            if (ChatAttachmentStore.save(appContext, attachmentId, bytes) != null) {
+                chatDao.setAttachmentAvailable(row.localId, true)
+                attachmentRetryAt.remove(attachmentId)
+            }
+        }
+        ChatAttachmentStore.trim(appContext)
+    }
+
+    /** Blobs that recently failed to download, and when to try again. */
+    private val attachmentRetryAt = HashMap<String, Long>()
+
     fun dismissChatError() {
         _chatState.update { it.copy(errorMessage = null) }
     }
@@ -905,6 +1137,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         /** Relay fetch: new messages + read receipts. */
         const val CHAT_INBOX_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
+        /** Files larger than this are refused before they are read into memory. */
+        const val CHAT_MAX_ATTACHMENT_BYTES = 5L * 1024L * 1024L
+        /** How long to wait before retrying a blob the relay no longer has. */
+        const val CHAT_ATTACHMENT_RETRY_MS = 60_000L
     }
 
     fun uploadNewPaper(paper: PastPaper) {
@@ -1305,6 +1541,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             // Chat history is device storage: a different student signing in on
             // this phone must not be able to read the previous one's messages.
             runCatching { chatDao.clearAllChatMessages() }
+            runCatching { ChatAttachmentStore.clearAll(appContext) }
             chatSummaries = emptyList()
             chatPeers = emptyList()
             _chatState.value = ChatUiState()

@@ -23,6 +23,10 @@
  *   POST ack_safety   First-visit chat safety notice acknowledgement.
  *   POST heartbeat    Presence ping (every ~2 s from the app).
  *   POST set_key      {public_key}  publish the E2EE identity public key.
+ *   POST upload_attachment  multipart {peer_id, file}  Encrypted file blob
+ *                     (already AES-GCM sealed by the sender's phone).
+ *   GET  attachment   ?id=…       Stream one blob to its sender or recipient;
+ *                     the recipient's fetch deletes it.
  *   GET  version      Deploy fingerprint.
  *
  * Security properties
@@ -52,7 +56,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.0.0';
+const TS_CHAT_API_VERSION          = '2.1.0';
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -60,6 +64,9 @@ const TS_CHAT_MAX_MESSAGES_PER_MIN = 30;    // per student
 const TS_CHAT_MAX_BODY_BYTES       = 16384;
 const TS_CHAT_INBOX_LIMIT          = 200;   // rows handed out per fetch
 const TS_CHAT_RELAY_TTL_DAYS       = 7;     // undelivered messages expire
+const TS_CHAT_MAX_ATTACHMENT_BYTES = 6291456;   // 6 MB encrypted blob
+const TS_CHAT_ATTACHMENT_DIR       = 'uploads/chat/';  // encrypted blobs only
+const TS_CHAT_MAX_UPLOADS_PER_MIN  = 12;    // per student
 
 // ---------------------------------------------------------------------------
 // Bootstrap
@@ -260,6 +267,31 @@ function ts_chat_online_peer_count(PDO $pdo, int $excludeUserId): int
 }
 
 /**
+ * Folder that holds encrypted attachment blobs.
+ *
+ * `uploads/` already ships an .htaccess that stops PHP from executing anything
+ * in it; this adds a deny-all rule for the subfolder as well, so a blob can
+ * only ever leave through the authenticated `attachment` action. The files are
+ * AES-GCM ciphertext anyway — the web server could serve them and nobody could
+ * read them without the conversation key.
+ */
+function ts_chat_attachment_dir(): string
+{
+    $dir = dirname(__DIR__) . '/' . TS_CHAT_ATTACHMENT_DIR;
+    if (!is_dir($dir)) {
+        @mkdir($dir, 0755, true);
+    }
+    $htaccess = $dir . '.htaccess';
+    if (is_dir($dir) && !file_exists($htaccess)) {
+        @file_put_contents(
+            $htaccess,
+            "Require all denied\n<IfModule !mod_authz_core.c>\n    Deny from all\n</IfModule>\n"
+        );
+    }
+    return $dir;
+}
+
+/**
  * Create the relay schema when it is missing. Safe to run on every request.
  */
 function ts_chat_ensure_schema(PDO $pdo): void
@@ -300,6 +332,25 @@ function ts_chat_ensure_schema(PDO $pdo): void
         error_log('[TheStudent] chat schema creation failed: ' . $e->getMessage());
     }
 
+    // Encrypted attachment blobs (never readable by the server).
+    try {
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `chat_attachments` (
+                `id` VARCHAR(64) NOT NULL PRIMARY KEY,
+                `sender_id` INT UNSIGNED NOT NULL,
+                `recipient_id` INT UNSIGNED NOT NULL,
+                `bytes` BIGINT UNSIGNED NOT NULL DEFAULT 0,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                INDEX `idx_chat_att_recipient` (`recipient_id`, `created_at`),
+                INDEX `idx_chat_att_created` (`created_at`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+    } catch (Throwable $e) {
+        error_log('[TheStudent] chat attachment table creation failed: ' . $e->getMessage());
+    }
+
+    ts_chat_attachment_dir();
+
     // Columns live on `users` so presence / keys survive a relay table rebuild.
     ts_ensure_column($pdo, 'users', 'last_seen_at', 'DATETIME NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'chat_safety_ack_at', 'DATETIME NULL DEFAULT NULL');
@@ -314,6 +365,8 @@ if ($action === 'version') {
         'api_version'       => TS_CHAT_API_VERSION,
         'php_version'       => PHP_VERSION,
         'storage'           => 'relay-only (history lives on the device)',
+        'attachments'       => 'encrypted blobs, ' . (TS_CHAT_MAX_ATTACHMENT_BYTES / 1048576) .
+                               ' MB max, deleted on delivery or after ' . TS_CHAT_RELAY_TTL_DAYS . ' days',
         'chat_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ]);
 }
@@ -339,6 +392,21 @@ try {
     )->execute();
     $pdo->prepare(
         'DELETE FROM chat_typing WHERE updated_at < (NOW() - INTERVAL 1 DAY)'
+    )->execute();
+
+    // Attachment blobs follow the same 7-day rule as the relay, and the files
+    // are removed with their rows so the folder can never grow.
+    $expired = $pdo->prepare(
+        'SELECT id FROM chat_attachments WHERE created_at < (NOW() - INTERVAL ' .
+            TS_CHAT_RELAY_TTL_DAYS . ' DAY)'
+    );
+    $expired->execute();
+    foreach ($expired->fetchAll() as $oldRow) {
+        @unlink(ts_chat_attachment_dir() . $oldRow['id'] . '.bin');
+    }
+    $pdo->prepare(
+        'DELETE FROM chat_attachments WHERE created_at < (NOW() - INTERVAL ' .
+            TS_CHAT_RELAY_TTL_DAYS . ' DAY)'
     )->execute();
 } catch (Throwable $e) {
     error_log('[TheStudent] chat relay cleanup skipped: ' . $e->getMessage());
@@ -537,6 +605,166 @@ switch ($action) {
             'server_epoch' => $now,
         ]);
         break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Attachment upload (opaque AES-GCM blob produced on the sender's phone)
+    // -----------------------------------------------------------------------
+    case 'upload_attachment': {
+        ts_chat_require_post('upload_attachment');
+
+        // peer_id can arrive either as a form field (multipart) or in the query.
+        $body   = array_merge($_GET, $_POST);
+        $peerId = ts_chat_peer_id($body);
+
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'You cannot send a file to yourself.', [], 422);
+        }
+
+        $peerStmt = $pdo->prepare(
+            'SELECT id, chat_public_key FROM users
+             WHERE id = :id AND is_active = 1 AND is_email_verified = 1 LIMIT 1'
+        );
+        $peerStmt->execute(['id' => $peerId]);
+        $peer = $peerStmt->fetch();
+        if (!$peer) {
+            ts_chat_json('error', 'That student is no longer available.', [], 404);
+        }
+        if (empty($peer['chat_public_key'])) {
+            ts_chat_json(
+                'error',
+                'That student has not set up secure chat yet, so files cannot be sent.',
+                [],
+                409
+            );
+        }
+
+        if (!isset($_FILES['file'])) {
+            ts_chat_json('error', 'No file was received.', [], 422);
+        }
+        $file = $_FILES['file'];
+        $uploadError = (int) ($file['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            if ($uploadError === UPLOAD_ERR_INI_SIZE || $uploadError === UPLOAD_ERR_FORM_SIZE) {
+                ts_chat_json(
+                    'error',
+                    'That file is larger than this server accepts (' .
+                        ini_get('upload_max_filesize') . '). Please send a smaller one.',
+                    [],
+                    413
+                );
+            }
+            ts_chat_json('error', 'The upload did not complete. Please try again.', [], 500);
+        }
+
+        $size = (int) ($file['size'] ?? 0);
+        if ($size <= 0) {
+            ts_chat_json('error', 'That file is empty.', [], 422);
+        }
+        if ($size > TS_CHAT_MAX_ATTACHMENT_BYTES) {
+            ts_chat_json(
+                'error',
+                'That file is too large (max ' .
+                    round(TS_CHAT_MAX_ATTACHMENT_BYTES / 1048576) . ' MB).',
+                [],
+                413
+            );
+        }
+
+        // Anti-abuse: a rolling cap on how many blobs one student can push.
+        try {
+            $countStmt = $pdo->prepare(
+                'SELECT COUNT(*) FROM chat_attachments
+                 WHERE sender_id = :me AND created_at > (NOW() - INTERVAL 60 SECOND)'
+            );
+            $countStmt->execute(['me' => $meId]);
+            if ((int) $countStmt->fetchColumn() >= TS_CHAT_MAX_UPLOADS_PER_MIN) {
+                header('Retry-After: 30');
+                ts_chat_json('error', 'You are sending files too quickly. Please slow down.', [], 429);
+            }
+        } catch (Throwable $e) {
+            error_log('[TheStudent] attachment rate check failed: ' . $e->getMessage());
+        }
+
+        $id   = bin2hex(random_bytes(16));
+        $dir  = ts_chat_attachment_dir();
+        $path = $dir . $id . '.bin';
+        if (!is_dir($dir) || !@move_uploaded_file($file['tmp_name'], $path)) {
+            error_log('[TheStudent] attachment move failed for user ' . $meId);
+            ts_chat_json('error', 'The file could not be stored. Please try again.', [], 500);
+        }
+        @chmod($path, 0640);
+
+        try {
+            $pdo->prepare(
+                'INSERT INTO chat_attachments (id, sender_id, recipient_id, bytes)
+                 VALUES (:id, :me, :peer, :bytes)'
+            )->execute(['id' => $id, 'me' => $meId, 'peer' => $peerId, 'bytes' => $size]);
+        } catch (Throwable $e) {
+            @unlink($path);
+            error_log('[TheStudent] attachment row insert failed: ' . $e->getMessage());
+            ts_chat_json('error', 'The file could not be stored. Please try again.', [], 500);
+        }
+
+        ts_chat_json('success', 'File queued.', [
+            'attachment_id' => $id,
+            'bytes'         => $size,
+            'server_epoch'  => $now,
+        ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Attachment download (sender or recipient only; delivered once)
+    // -----------------------------------------------------------------------
+    case 'attachment': {
+        $id = isset($_GET['id']) ? trim((string) $_GET['id']) : '';
+        if (!preg_match('/^[A-Fa-f0-9]{8,64}$/', $id)) {
+            ts_chat_json('error', 'That file reference is not valid.', [], 422);
+        }
+
+        $stmt = $pdo->prepare('SELECT * FROM chat_attachments WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $id]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            ts_chat_json('error', 'That file is no longer available.', [], 404);
+        }
+
+        $senderId    = (int) $row['sender_id'];
+        $recipientId = (int) $row['recipient_id'];
+        if ($meId !== $senderId && $meId !== $recipientId) {
+            // Same answer as "not found": never confirm that a blob exists.
+            ts_chat_json('error', 'That file is no longer available.', [], 404);
+        }
+
+        $path = ts_chat_attachment_dir() . $id . '.bin';
+        if (!is_file($path)) {
+            $pdo->prepare('DELETE FROM chat_attachments WHERE id = :id')->execute(['id' => $id]);
+            ts_chat_json('error', 'That file is no longer available.', [], 404);
+        }
+
+        $bytes = (int) @filesize($path);
+        if (!headers_sent()) {
+            header('Content-Type: application/octet-stream');
+            header('Content-Length: ' . $bytes);
+            header('Content-Disposition: attachment; filename="' . $id . '.bin"');
+            header('Cache-Control: no-store');
+            header('X-Content-Type-Options: nosniff');
+        }
+        readfile($path);
+
+        // The recipient getting the file is the delivery: drop both the blob and
+        // the row, exactly like a relayed message. The sender keeps the copy
+        // that is already in their own device database.
+        if ($meId === $recipientId) {
+            @unlink($path);
+            try {
+                $pdo->prepare('DELETE FROM chat_attachments WHERE id = :id')->execute(['id' => $id]);
+            } catch (Throwable $e) {
+                error_log('[TheStudent] attachment row delete failed: ' . $e->getMessage());
+            }
+        }
+        exit();
     }
 
     // -----------------------------------------------------------------------

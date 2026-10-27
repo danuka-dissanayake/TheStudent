@@ -73,7 +73,11 @@ interface TheStudentDao {
                  ORDER BY c.sentAtEpoch DESC, c.serverId DESC LIMIT 1) AS lastIsMine,
                (SELECT sentAtEpoch FROM chat_messages d WHERE d.peerId = a.peerId
                  ORDER BY d.sentAtEpoch DESC, d.serverId DESC LIMIT 1) AS lastEpoch,
-               SUM(CASE WHEN a.isMine = 0 AND a.isRead = 0 THEN 1 ELSE 0 END) AS unreadCount
+               SUM(CASE WHEN a.isMine = 0 AND a.isRead = 0 THEN 1 ELSE 0 END) AS unreadCount,
+               (SELECT attachmentKind FROM chat_messages e WHERE e.peerId = a.peerId
+                 ORDER BY e.sentAtEpoch DESC, e.serverId DESC LIMIT 1) AS lastAttachmentKind,
+               (SELECT attachmentName FROM chat_messages f WHERE f.peerId = a.peerId
+                 ORDER BY f.sentAtEpoch DESC, f.serverId DESC LIMIT 1) AS lastAttachmentName
         FROM chat_messages a
         GROUP BY a.peerId"""
     )
@@ -91,12 +95,17 @@ interface TheStudentDao {
     @Query("UPDATE chat_messages SET isPending = 0 WHERE localId = :localId")
     suspend fun markChatMessageFailed(localId: String)
 
-    /** Read receipts: everything from this peer up to [upToServerId] is read. */
+    /**
+     * Read receipt from [peerId]: they have read MY messages up to
+     * [upToServerId]. The ids in a receipt are ids of messages **I** sent, so
+     * only `isMine = 1` rows may be touched — filtering on the incoming rows
+     * here would clear unread badges for messages that were never opened.
+     */
     @Query(
         "UPDATE chat_messages SET isRead = 1 " +
-            "WHERE peerId = :peerId AND isMine = 0 AND serverId > 0 AND serverId <= :upToServerId"
+            "WHERE peerId = :peerId AND isMine = 1 AND serverId > 0 AND serverId <= :upToServerId"
     )
-    suspend fun markPeerMessagesRead(peerId: Int, upToServerId: Long)
+    suspend fun markMyMessagesRead(peerId: Int, upToServerId: Long)
 
     @Query("SELECT MAX(serverId) FROM chat_messages WHERE peerId = :peerId AND isMine = 0")
     suspend fun newestServerIdFromPeer(peerId: Int): Long?
@@ -115,4 +124,17 @@ interface TheStudentDao {
 
     @Query("SELECT COUNT(*) FROM chat_messages")
     suspend fun countChatMessages(): Int
+
+    // ── Attachments ─────────────────────────────────────────────────────────
+
+    /** Rows whose file has not been downloaded and decrypted yet. */
+    @Query(
+        "SELECT * FROM chat_messages " +
+            "WHERE attachmentId IS NOT NULL AND attachmentLocal = 0 " +
+            "ORDER BY sentAtEpoch DESC LIMIT 12"
+    )
+    suspend fun pendingAttachments(): List<ChatMessageEntity>
+
+    @Query("UPDATE chat_messages SET attachmentLocal = :available WHERE localId = :localId")
+    suspend fun setAttachmentAvailable(localId: String, available: Boolean)
 }

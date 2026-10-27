@@ -219,6 +219,48 @@ object ChatCrypto {
 
     fun isEncrypted(payload: String): Boolean = payload.startsWith(PREFIX)
 
+    // -----------------------------------------------------------------------
+    // File bodies (images / documents)
+    // -----------------------------------------------------------------------
+    //
+    // An attachment is encrypted with the *same* ECDH conversation key as the
+    // text, so the relay only ever stores an opaque blob: it cannot tell a
+    // photo from a PDF, let alone read either one. Layout matches the string
+    // form: 12-byte IV || AES-256-GCM ciphertext+tag.
+
+    /** Encrypt raw file bytes for one conversation. */
+    fun encryptBytes(key: SecretKey?, data: ByteArray): ByteArray? {
+        if (key == null) return null
+        return try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, key)
+            val iv = cipher.iv
+            val cipherText = cipher.doFinal(data)
+            val packed = ByteArray(iv.size + cipherText.size)
+            System.arraycopy(iv, 0, packed, 0, iv.size)
+            System.arraycopy(cipherText, 0, packed, iv.size, cipherText.size)
+            packed
+        } catch (e: Exception) {
+            Log.e(TAG, "Attachment encryption failed: ${e.message}")
+            null
+        }
+    }
+
+    /** Decrypt a file blob produced by [encryptBytes]. Null when it cannot be read. */
+    fun decryptBytes(key: SecretKey?, packed: ByteArray): ByteArray? {
+        if (key == null || packed.size <= IV_LENGTH) return null
+        return try {
+            val iv = packed.copyOfRange(0, IV_LENGTH)
+            val cipherText = packed.copyOfRange(IV_LENGTH, packed.size)
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(TAG_BITS, iv))
+            cipher.doFinal(cipherText)
+        } catch (e: Exception) {
+            Log.e(TAG, "Attachment decryption failed: ${e.message}")
+            null
+        }
+    }
+
     /**
      * Drop every derived conversation key from memory. Called on sign-out so a
      * different account on the same phone cannot reuse them.

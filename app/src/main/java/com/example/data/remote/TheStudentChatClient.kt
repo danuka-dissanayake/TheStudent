@@ -4,12 +4,14 @@ import android.content.Context
 import android.util.Log
 import com.example.data.local.ChatCrypto
 import com.example.data.model.ChatDirectory
+import com.example.data.model.ChatEnvelope
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -204,13 +206,16 @@ object TheStudentChatClient {
                 val sender = parsePeer(obj.optJSONObject("sender") ?: JSONObject())
                 val serverId = obj.optLong("server_id", 0L)
                 val key = conversationKey(context, accountKey, sender)
+                val plain = ChatCrypto.decrypt(key, obj.optString("body"))
+                val (text, attachment) = ChatEnvelope.decode(plain)
                 messages += ChatMessage(
                     localId = "srv-$serverId",
                     serverId = serverId,
                     senderId = obj.optInt("sender_id", sender.id),
-                    body = ChatCrypto.decrypt(key, obj.optString("body")),
+                    body = text,
                     isMine = false,
-                    sentAtEpoch = obj.optLong("sent_epoch", 0L)
+                    sentAtEpoch = obj.optLong("sent_epoch", 0L),
+                    attachment = attachment
                 )
             }
 
@@ -276,6 +281,129 @@ object TheStudentChatClient {
     // -----------------------------------------------------------------------
     // Plumbing
     // -----------------------------------------------------------------------
+
+    // -----------------------------------------------------------------------
+    // Attachments
+    // -----------------------------------------------------------------------
+
+    /**
+     * Encrypt a file with the conversation key and drop it on the relay.
+     *
+     * The server only ever stores the AES-GCM blob: it cannot read the file,
+     * cannot tell a photo from a PDF, and deletes it as soon as the recipient
+     * downloads it (or after 7 days).
+     */
+    suspend fun uploadAttachment(
+        context: Context,
+        accountKey: String,
+        backendBaseUrl: String,
+        token: String,
+        peer: ChatPeer,
+        bytes: ByteArray
+    ): ChatResult<String> = withContext(Dispatchers.IO) {
+        val key = conversationKey(context, accountKey, peer)
+            ?: return@withContext ChatResult.Failure(
+                "${peer.name} hasn't opened secure chat yet, so files cannot be sent to them."
+            )
+        val blob = ChatCrypto.encryptBytes(key, bytes)
+            ?: return@withContext ChatResult.Failure("That file could not be encrypted.")
+
+        try {
+            val body = MultipartBody.Builder()
+                .setType(MultipartBody.FORM)
+                .addFormDataPart("peer_id", peer.id.toString())
+                .addFormDataPart(
+                    "file",
+                    "blob.bin",
+                    blob.toRequestBody("application/octet-stream".toMediaType())
+                )
+                .build()
+
+            val url = endpoint(backendBaseUrl, "upload_attachment") + "&peer_id=" + peer.id
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .post(body)
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val raw = response.body?.string().orEmpty()
+                val json = runCatching { JSONObject(raw) }.getOrNull()
+                    ?: return@use ChatResult.Failure(
+                        "The server rejected the upload (HTTP ${response.code}). " +
+                            "Check that api/chat.php is the latest version.",
+                        response.code
+                    )
+                if (!response.isSuccessful || json.optString("status") != "success") {
+                    return@use ChatResult.Failure(
+                        json.optString("message").ifBlank { "The file could not be uploaded." },
+                        response.code
+                    )
+                }
+                val id = json.optString("attachment_id")
+                if (id.isBlank()) {
+                    ChatResult.Failure("The server did not return an attachment id.", response.code)
+                } else {
+                    ChatResult.Success(id)
+                }
+            }
+        } catch (e: IOException) {
+            Log.w(TAG, "attachment upload failed: ${e.message}")
+            ChatResult.Failure("No connection. The file was not sent.")
+        } catch (e: Exception) {
+            Log.e(TAG, "attachment upload crashed: ${e.message}", e)
+            ChatResult.Failure("The file could not be uploaded.")
+        }
+    }
+
+    /** Fetch and decrypt one attachment blob from the relay. */
+    suspend fun downloadAttachment(
+        context: Context,
+        accountKey: String,
+        backendBaseUrl: String,
+        token: String,
+        peer: ChatPeer,
+        attachmentId: String
+    ): ChatResult<ByteArray> = withContext(Dispatchers.IO) {
+        val key = conversationKey(context, accountKey, peer) ?: return@withContext ChatResult.Failure(
+            "Secure chat is still starting on this device."
+        )
+
+        try {
+            val url = endpoint(backendBaseUrl, "attachment") + "&id=" + attachmentId
+            val request = Request.Builder()
+                .url(url)
+                .addHeader("Authorization", "Bearer $token")
+                .get()
+                .build()
+
+            httpClient.newCall(request).execute().use { response ->
+                val contentType = response.header("Content-Type").orEmpty()
+                if (!response.isSuccessful) {
+                    val raw = response.body?.string().orEmpty()
+                    val message = runCatching { JSONObject(raw).optString("message") }.getOrNull()
+                    return@use ChatResult.Failure(
+                        message?.takeIf { it.isNotBlank() }
+                            ?: "That file is no longer available on the server.",
+                        response.code
+                    )
+                }
+                if (!contentType.contains("octet-stream", ignoreCase = true)) {
+                    return@use ChatResult.Failure("The server returned an unexpected file.")
+                }
+                val blob = response.body?.bytes()
+                    ?: return@use ChatResult.Failure("That file could not be downloaded.")
+                val plain = ChatCrypto.decryptBytes(key, blob)
+                    ?: return@use ChatResult.Failure("That file could not be decrypted on this device.")
+                ChatResult.Success(plain)
+            }
+        } catch (e: IOException) {
+            ChatResult.Failure("No connection. The file will download when you are back online.")
+        } catch (e: Exception) {
+            Log.e(TAG, "attachment download crashed: ${e.message}", e)
+            ChatResult.Failure("That file could not be downloaded.")
+        }
+    }
 
     private fun conversationKey(context: Context, accountKey: String, peer: ChatPeer): SecretKey? {
         val peerKey = peer.publicKey

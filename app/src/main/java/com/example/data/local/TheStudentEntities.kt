@@ -90,7 +90,20 @@ data class ChatMessageEntity(
     val sentAtEpoch: Long,
     val isRead: Boolean = false,
     /** True until the server confirmed it is queued for delivery. */
-    val isPending: Boolean = false
+    val isPending: Boolean = false,
+
+    // ── Attachment (optional) ───────────────────────────────────────────────
+    // The file itself never lives in the database: [body] keeps the caption and
+    // the decrypted bytes sit in filesDir (see ChatAttachmentStore).
+    /** Relay id of the encrypted blob, or null for a plain text message. */
+    val attachmentId: String? = null,
+    val attachmentName: String? = null,
+    val attachmentMime: String? = null,
+    val attachmentSize: Long = 0L,
+    /** "image" or "file" — picks the bubble layout. */
+    val attachmentKind: String? = null,
+    /** True once the decrypted file is available on this device. */
+    val attachmentLocal: Boolean = false
 )
 
 /** Per-conversation projection used to build the chat list. */
@@ -99,5 +112,8 @@ data class ChatSummaryRow(
     val lastBody: String?,
     val lastIsMine: Boolean,
     val lastEpoch: Long,
-    val unreadCount: Int
+    val unreadCount: Int,
+    /** "image" / "file" when the newest message carries an attachment. */
+    val lastAttachmentKind: String? = null,
+    val lastAttachmentName: String? = null
 )

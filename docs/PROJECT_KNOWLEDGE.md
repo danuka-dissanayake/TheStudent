@@ -83,8 +83,8 @@ plus a local Room table that owns the actual history.
   envelopes sit in `chat_relay` only until the recipient's `inbox` fetch, which
   deletes exactly the rows it handed out; anything older than 7 days is purged
   on the next request. There is no message, clear or key-backup table.
-* **History lives on the device**: `chat_messages` (Room **v3**,
-  `MIGRATION_2_3`, entity `ChatMessageEntity`) stores decrypted bubbles with
+* **History lives on the device**: `chat_messages` (Room **v4**,
+  `MIGRATION_2_3` + `MIGRATION_3_4`, entity `ChatMessageEntity`) stores decrypted bubbles with
   `localId` PK (`srv-<id>` for delivered rows, a UUID for outgoing pending
   ones), and `ChatSummaryRow` drives the thread previews. `endSession()`
   wipes the table on sign-out. A reinstall loses the history by design — there
@@ -95,6 +95,15 @@ plus a local Room table that owns the actual history.
 * End-to-end encryption: `data/local/ChatCrypto.kt` (EC P-256 ECDH + AES-256-GCM,
   Keystore-sealed private key). The server rejects anything that is not
   `e2ee:v1:…`.
+* **Attachments** (photos + documents, ≤5 MB): the file is encrypted with the
+  same ECDH conversation key, uploaded as an opaque blob to
+  `upload_attachment`, and deleted from the server when the recipient downloads
+  it. Bubbles carry only an encrypted JSON envelope with the caption and file
+  metadata; decrypted bytes live in `filesDir/chat_attachments` through
+  `ChatAttachmentStore` (120 MB cap, wiped on sign-out) and open through a
+  `FileProvider`.
+* Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
+  incoming rows there is what used to clear unread badges on the chat list.
 * Only full names and avatars are ever exposed about another student.
 
 ## 4. State layer — `TheStudentViewModel` (1660 lines)

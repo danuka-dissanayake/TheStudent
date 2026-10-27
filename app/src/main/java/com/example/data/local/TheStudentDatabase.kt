@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserProfileEntity::class,
         ChatMessageEntity::class
     ],
-    version = 3,
+    version = 4,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -68,6 +68,24 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v3 -> v4: attachments.
+         *
+         * Only metadata columns are added — the decrypted file itself lives in
+         * filesDir, never in the database. Nullable columns need no default;
+         * the two NOT NULL ones get one so existing rows stay valid.
+         */
+        private val MIGRATION_3_4 = object : Migration(3, 4) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentId TEXT")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentName TEXT")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentMime TEXT")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentSize INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentKind TEXT")
+                db.execSQL("ALTER TABLE chat_messages ADD COLUMN attachmentLocal INTEGER NOT NULL DEFAULT 0")
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -75,10 +93,11 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     TheStudentDatabase::class.java,
                     "the_student_database"
                 )
-                    // v2 adds the profile-setup columns; v3 adds the chat history.
+                    // v2 adds the profile-setup columns; v3 the chat history;
+                    // v4 attachments.
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4)
                     // Last resort only: if the file on the device cannot be
                     // migrated for any reason (interrupted update, a build from
                     // another branch), recreate it instead of throwing during the
