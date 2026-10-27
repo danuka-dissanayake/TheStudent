@@ -22,6 +22,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
@@ -63,6 +64,7 @@ import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -296,29 +298,94 @@ fun ProfileSetupScreen(
         )
     }
 
-    Box(
+    // Layout contract
+    // --------------
+    // Scaffold owns the bottom action bar. The form is its `content`, so the
+    // button is measured first and the scrollable area receives exactly the
+    // remaining height via `innerPadding`. Nothing can ever render underneath
+    // the button, and the button can never be pushed down by long content.
+    Scaffold(
         modifier = modifier
             .fillMaxSize()
-            .background(MaterialTheme.colorScheme.background)
-    ) {
-        // Ambient emerald glow behind the header.
-        Box(
+            .imePadding(),          // keep the bar above the keyboard
+        containerColor = MaterialTheme.colorScheme.background,
+        // System insets are applied explicitly (status bar on the header,
+        // navigation bar inside the bottom bar), so Scaffold must not add them.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        bottomBar = {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 3.dp,
+                shadowElevation = 16.dp
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .navigationBarsPadding()
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
+                ) {
+                    if (submitted && !isFormValid && !isSaving) {
+                        Text(
+                            text = "Please fix the highlighted fields above.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RedError,
+                            modifier = Modifier.padding(bottom = 8.dp)
+                        )
+                    }
+                    Button(
+                        onClick = { submit() },
+                        enabled = !isSaving && !isProcessingPhoto,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(52.dp)
+                            .testTag("profile_finish_button"),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = ButtonDefaults.buttonColors(
+                            containerColor = EmeraldPrimary,
+                            contentColor = Color.White,
+                            disabledContainerColor = EmeraldPrimary.copy(alpha = 0.45f)
+                        )
+                    ) {
+                        if (isSaving) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(20.dp),
+                                color = Color.White,
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(12.dp))
+                            Text("Saving your profile…", fontWeight = FontWeight.SemiBold)
+                        } else if (isProcessingPhoto) {
+                            Text("Preparing photo…", fontWeight = FontWeight.SemiBold)
+                        } else {
+                            Text("Finish setup", fontWeight = FontWeight.Bold, fontSize = 16.sp)
+                        }
+                    }
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape),
+                        color = EmeraldPrimary,
+                        trackColor = EmeraldPrimary.copy(alpha = 0.15f)
+                    )
+                }
+            }
+        }
+    ) { innerPadding ->
+        Column(
             modifier = Modifier
-                .fillMaxWidth()
-                .height(240.dp)
+                .fillMaxSize()
+                .padding(innerPadding)
                 .background(
                     Brush.verticalGradient(
-                        listOf(
-                            EmeraldPrimary.copy(alpha = 0.14f),
-                            EmeraldPrimary.copy(alpha = 0.03f),
-                            Color.Transparent
-                        )
+                        0f to EmeraldPrimary.copy(alpha = 0.12f),
+                        0.35f to EmeraldPrimary.copy(alpha = 0.02f),
+                        1f to Color.Transparent
                     )
                 )
-        )
-
-        Column(modifier = Modifier.fillMaxSize()) {
-
+        ) {
             // ── brand bar: the real logo artwork, no text drawn by the app ────
             Row(
                 modifier = Modifier
@@ -349,13 +416,13 @@ fun ProfileSetupScreen(
                 }
             }
 
-            // ── scrollable form ──────────────────────────────────────────────
+            // ── scrollable form (fills the space above the pinned button) ────
             Column(
                 modifier = Modifier
                     .weight(1f)
+                    .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp)
-                    .imePadding(),
+                    .padding(horizontal = 16.dp),
                 verticalArrangement = Arrangement.spacedBy(SectionGap)
             ) {
                 // avatar + heading
@@ -615,69 +682,9 @@ fun ProfileSetupScreen(
                     }
                 }
 
-                // Breathing room so the last card clears the sticky action bar.
-                Spacer(Modifier.height(20.dp))
-            }
-
-            // ── sticky action bar ────────────────────────────────────────────
-            Surface(
-                color = MaterialTheme.colorScheme.surface,
-                tonalElevation = 3.dp,
-                shadowElevation = 12.dp
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .navigationBarsPadding()
-                        .padding(horizontal = 16.dp, vertical = 12.dp)
-                ) {
-                    if (submitted && !isFormValid && !isSaving) {
-                        Text(
-                            text = "Please fix the highlighted fields above.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = RedError,
-                            modifier = Modifier.padding(bottom = 8.dp)
-                        )
-                    }
-                    Button(
-                        onClick = { submit() },
-                        enabled = !isSaving && !isProcessingPhoto,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(52.dp)
-                            .testTag("profile_finish_button"),
-                        shape = RoundedCornerShape(16.dp),
-                        colors = ButtonDefaults.buttonColors(
-                            containerColor = EmeraldPrimary,
-                            contentColor = Color.White,
-                            disabledContainerColor = EmeraldPrimary.copy(alpha = 0.45f)
-                        )
-                    ) {
-                        if (isSaving) {
-                            CircularProgressIndicator(
-                                modifier = Modifier.size(20.dp),
-                                color = Color.White,
-                                strokeWidth = 2.dp
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Text("Saving your profile…", fontWeight = FontWeight.SemiBold)
-                        } else if (isProcessingPhoto) {
-                            Text("Preparing photo…", fontWeight = FontWeight.SemiBold)
-                        } else {
-                            Text("Finish setup", fontWeight = FontWeight.Bold, fontSize = 16.sp)
-                        }
-                    }
-                    Spacer(Modifier.height(10.dp))
-                    LinearProgressIndicator(
-                        progress = { progress },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(5.dp)
-                            .clip(CircleShape),
-                        color = EmeraldPrimary,
-                        trackColor = EmeraldPrimary.copy(alpha = 0.15f)
-                    )
-                }
+                // Only breathing room: the bottom bar is outside this scroll
+                // container, so no reserved space is needed for it.
+                Spacer(Modifier.height(16.dp))
             }
         }
     }
