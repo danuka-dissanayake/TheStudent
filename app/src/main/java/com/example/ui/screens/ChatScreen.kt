@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -57,6 +58,7 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
@@ -102,6 +104,18 @@ private val ChatError = Color(0xFFDC2626)
 
 /** Outgoing bubble: pure black, the text and ticks carry the contrast. */
 private val ChatBubbleOutgoing = Color(0xFF000000)
+
+/** Markdown palette for a bubble: white-ish inside the black bubble, ink on white. */
+private fun chatMarkdownColors(isMine: Boolean) = ChatMarkdownColors(
+    text = if (isMine) Color.White else ChatInk,
+    muted = if (isMine) Color.White.copy(alpha = 0.72f) else ChatMuted,
+    codeBackground = if (isMine) Color.White.copy(alpha = 0.16f) else Color(0xFFEFF3F8),
+    codeText = if (isMine) Color(0xFFDFF7E6) else Color(0xFF0F172A),
+    link = if (isMine) Color(0xFF9BE7B8) else Color(0xFF047857),
+    // Greener than the brand emerald so it reads as a search hit on both bubbles.
+    highlightBackground = Color(0xFF34D399),
+    highlightText = Color(0xFF06281A)
+)
 
 /** Soft elevation-less card used by the attachment sheet. */
 private val ChatSheetCard = Color(0xFFF6F8FA)
@@ -668,6 +682,7 @@ private fun ChatConversationScreen(
     var emojiRowOpen by remember { mutableStateOf(false) }
     val listState = rememberLazyListState()
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val onLongPressMessage: (ChatMessage) -> Unit = { selectedMessage = it }
 
     // Voice notes need the microphone. Everything else in chat needs nothing.
@@ -690,18 +705,50 @@ private fun ChatConversationScreen(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri -> uri?.let(onPickAttachment) }
 
-    // Search filters what the list shows; day separators are then computed once
-    // per visible list, not per recomposition.
-    val visibleMessages = remember(state.messages, searchQuery) {
-        val query = searchQuery.trim()
-        if (query.isEmpty()) {
-            state.messages
+    // Search never hides messages: it jumps between hits, like WhatsApp, so the
+    // conversation around each match stays visible.
+    val rows = remember(state.messages) { buildChatRows(state.messages) }
+    val searchActive = searchOpen && searchQuery.isNotBlank()
+    val searchTerm = searchQuery.trim()
+
+    // Row indices (including day separators) of every matching message.
+    val matchRowIndices = remember(rows, searchTerm) {
+        if (searchTerm.isEmpty()) {
+            emptyList()
         } else {
-            state.messages.filter { it.body.contains(query, ignoreCase = true) }
+            rows.mapIndexedNotNull { index, row ->
+                if (row is ChatRow.Msg && row.message.body.contains(searchTerm, ignoreCase = true)) {
+                    index
+                } else {
+                    null
+                }
+            }
         }
     }
-    val rows = remember(visibleMessages) { buildChatRows(visibleMessages) }
-    val searchActive = searchOpen && searchQuery.isNotBlank()
+    val activeMatch = remember(searchTerm) { mutableIntStateOf(0) }
+
+    // Keep the cursor inside the result list as the query changes.
+    LaunchedEffect(matchRowIndices.size, searchTerm) {
+        if (matchRowIndices.isNotEmpty() && activeMatch.intValue > matchRowIndices.lastIndex) {
+            activeMatch.intValue = matchRowIndices.lastIndex
+        }
+    }
+
+    fun jumpToMatch(index: Int) {
+        if (matchRowIndices.isEmpty()) return
+        val wrapped = ((index % matchRowIndices.size) + matchRowIndices.size) % matchRowIndices.size
+        activeMatch.intValue = wrapped
+        scope.launch {
+            listState.animateScrollToItem(matchRowIndices[wrapped])
+        }
+    }
+
+    val currentMatchRow = matchRowIndices.getOrNull(activeMatch.intValue)
+
+    // New query: start at the first hit so the student sees a result immediately.
+    LaunchedEffect(searchTerm) {
+        if (searchTerm.isNotEmpty()) jumpToMatch(0)
+    }
 
     // Follow the conversation as new messages arrive (unless searching).
     LaunchedEffect(rows.size, searchActive) {
@@ -874,15 +921,43 @@ private fun ChatConversationScreen(
                             )
                         },
                         trailingIcon = {
-                            if (searchQuery.isNotEmpty()) {
-                                Icon(
-                                    Icons.Default.Close,
-                                    contentDescription = "Clear search",
-                                    tint = ChatMuted,
-                                    modifier = Modifier
-                                        .size(18.dp)
-                                        .clickable { searchQuery = "" }
-                                )
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                if (searchTerm.isNotEmpty()) {
+                                    Text(
+                                        text = if (matchRowIndices.isEmpty()) {
+                                            "0/0"
+                                        } else {
+                                            "${activeMatch.intValue + 1}/${matchRowIndices.size}"
+                                        },
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = if (matchRowIndices.isEmpty()) ChatFaint else EmeraldDark
+                                    )
+                                    Spacer(Modifier.width(2.dp))
+                                    SearchNavButton(
+                                        icon = Icons.Default.KeyboardArrowUp,
+                                        description = "Previous match",
+                                        enabled = matchRowIndices.isNotEmpty(),
+                                        onClick = { jumpToMatch(activeMatch.intValue - 1) }
+                                    )
+                                    SearchNavButton(
+                                        icon = Icons.Default.KeyboardArrowDown,
+                                        description = "Next match",
+                                        enabled = matchRowIndices.isNotEmpty(),
+                                        onClick = { jumpToMatch(activeMatch.intValue + 1) }
+                                    )
+                                }
+                                if (searchQuery.isNotEmpty()) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = ChatMuted,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clickable { searchQuery = "" }
+                                    )
+                                }
                             }
                         },
                         shape = RoundedCornerShape(14.dp),
@@ -900,10 +975,10 @@ private fun ChatConversationScreen(
 
                 if (searchActive) {
                     Text(
-                        text = when (visibleMessages.size) {
-                            0 -> "No messages match \"${searchQuery.trim()}\""
+                        text = when (matchRowIndices.size) {
+                            0 -> "No message in this chat contains \"$searchTerm\""
                             1 -> "1 matching message"
-                            else -> "${visibleMessages.size} matching messages"
+                            else -> "${matchRowIndices.size} matching messages · use ↑ ↓ to jump"
                         },
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 11.sp,
@@ -919,7 +994,7 @@ private fun ChatConversationScreen(
                             ChatLoadingState()
                         }
 
-                        visibleMessages.isEmpty() -> {
+                        state.messages.isEmpty() -> {
                             Box(
                                 modifier = Modifier
                                     .fillMaxSize()
@@ -990,15 +1065,15 @@ private fun ChatConversationScreen(
                                 contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                items(
+                                itemsIndexed(
                                     items = rows,
-                                    key = { row ->
+                                    key = { _, row ->
                                         when (row) {
                                             is ChatRow.Day -> "day-${row.key}"
                                             is ChatRow.Msg -> row.message.localId
                                         }
                                     }
-                                ) { row ->
+                                ) { currentIndex, row ->
                                     when (row) {
                                         is ChatRow.Day -> DayDivider(row.label)
                                         is ChatRow.Msg -> ChatBubble(
@@ -1007,7 +1082,9 @@ private fun ChatConversationScreen(
                                                 state.attachmentDownloadProgress[attachment.id]
                                             },
                                             onLongPress = onLongPressMessage,
-                                            onSwipeReply = { message -> onReply(message) }
+                                            onSwipeReply = { message -> onReply(message) },
+                                            highlight = searchTerm.takeIf { searchActive },
+                                            isCurrentMatch = currentMatchRow == currentIndex
                                         )
                                     }
                                 }
@@ -1528,6 +1605,34 @@ private fun AttachmentOptionRow(
                 contentDescription = null,
                 tint = ChatFaint,
                 modifier = Modifier.size(18.dp)
+            )
+        }
+    }
+}
+
+/** Tiny circular button for the search field's ↑ / ↓ navigation. */
+@Composable
+private fun SearchNavButton(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    description: String,
+    enabled: Boolean,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        enabled = enabled,
+        shape = CircleShape,
+        color = if (enabled) Color(0xFFE9F9EF) else Color(0xFFF1F5F9),
+        modifier = Modifier
+            .size(26.dp)
+            .padding(horizontal = 0.dp)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Icon(
+                icon,
+                contentDescription = description,
+                tint = if (enabled) EmeraldDark else ChatFaint,
+                modifier = Modifier.size(16.dp)
             )
         }
     }
@@ -2493,19 +2598,21 @@ private fun ChatBubble(
     message: ChatMessage,
     downloadProgress: Int? = null,
     onLongPress: (ChatMessage) -> Unit = {},
-    onSwipeReply: (ChatMessage) -> Unit = {}
+    onSwipeReply: (ChatMessage) -> Unit = {},
+    highlight: String? = null,
+    isCurrentMatch: Boolean = false
 ) {
     val isMine = message.isMine
     val haptics = LocalHapticFeedback.current
 
     // ── swipe to reply ──────────────────────────────────────────────────────
-    // My bubbles are dragged leftwards, the other student's rightwards, so the
-    // gesture always pulls "into" the empty side of the row. Only horizontal
-    // drags are claimed, so vertical scrolling of the list still works.
+    // Always left → right, whichever side the bubble sits on: dragging right is
+    // the gesture people expect for "reply". Only horizontal drags are claimed,
+    // so vertical scrolling of the list still works.
     val density = LocalDensity.current
     val maxSwipe = with(density) { 76.dp.toPx() }
     val triggerAt = with(density) { 52.dp.toPx() }
-    val direction = if (isMine) -1f else 1f
+    val direction = 1f
     val swipe = remember(message.localId) { Animatable(0f) }
     val scope = rememberCoroutineScope()
     var replyTriggered by remember(message.localId) { mutableStateOf(false) }
@@ -2517,7 +2624,7 @@ private fun ChatBubble(
         if (progress > 0.02f) {
             Box(
                 modifier = Modifier
-                    .align(if (isMine) Alignment.CenterEnd else Alignment.CenterStart)
+                    .align(Alignment.CenterStart)
                     .padding(horizontal = 18.dp)
                     .size(34.dp)
                     .graphicsLayer {
@@ -2550,7 +2657,12 @@ private fun ChatBubble(
                 bottomEnd = if (isMine) 5.dp else 18.dp
             ),
             color = if (isMine) ChatBubbleOutgoing else Color.White,
-            border = if (isMine) null else BorderStroke(1.dp, ChatHairline),
+            border = when {
+                // The bubble the ↑ / ↓ arrows landed on gets a green ring.
+                isCurrentMatch -> BorderStroke(2.dp, EmeraldPrimary)
+                isMine -> null
+                else -> BorderStroke(1.dp, ChatHairline)
+            },
             modifier = Modifier
                 .widthIn(max = 300.dp)
                 .offset { IntOffset((direction * swipe.value).roundToInt(), 0) }
@@ -2611,10 +2723,20 @@ private fun ChatBubble(
                     if (message.body.isNotBlank()) Spacer(Modifier.height(6.dp))
                 }
                 if (message.body.isNotBlank()) {
-                    // Emoji-only messages are shown big, like every other chat app.
+                    // Emoji-only messages are shown big, like every other chat app;
+                    // everything else goes through the small Markdown renderer.
                     val emojiOnly = message.attachment == null && isEmojiOnlyMessage(message.body)
+                    val body = if (emojiOnly) {
+                        AnnotatedString(message.body)
+                    } else {
+                        ChatMarkdown.render(
+                            source = message.body,
+                            colors = chatMarkdownColors(isMine),
+                            highlight = highlight
+                        )
+                    }
                     Text(
-                        text = message.body,
+                        text = body,
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = if (emojiOnly) 34.sp else 14.sp,
                         lineHeight = if (emojiOnly) 40.sp else 20.sp,

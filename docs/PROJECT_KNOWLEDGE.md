@@ -105,9 +105,11 @@ plus a local Room table that owns the actual history.
   metadata; decrypted bytes live in `filesDir/chat_attachments` through
   `ChatAttachmentStore` (120 MB cap, wiped on sign-out) and open through a
   `FileProvider`.
-* **Replies** quote a message through the encrypted envelope (`r`), and
-  in-conversation search filters the local table — nothing extra leaves the
-  phone. Voice notes are AAC recordings sent as `kind = audio`.
+* Bubbles render **Markdown** through `ui/screens/ChatMarkdown.kt` (bold, italic,
+  strike, code, headings, lists, quotes, links) as a single `AnnotatedString`.
+* **Replies** (left→right swipe) quote a message through the encrypted envelope (`r`), and
+  in-conversation search jumps between green-highlighted hits in the local
+  table — nothing extra leaves the phone. Voice notes are AAC recordings sent as `kind = audio`.
 * **Delete for everyone**: long-press → the row is removed locally (and its cached
   file), then `delete_message` queues a `delete` envelope the peer applies to its
   own copy on the next inbox poll.

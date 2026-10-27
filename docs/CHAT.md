@@ -21,13 +21,13 @@ messages, real presence.
 | Online row | Students active in the last 10 seconds (2 s heartbeats), with a live count ("12 online") | same response, `online_count` |
 | Thread row | Last message preview ("📷 Photo", "📎 notes.pdf" or the text), "typing…", unread badge, time stamp | **device database** |
 | Day separators | The conversation is grouped as **Today**, **Yesterday**, then "12 October" / "12 October 2024" | message timestamps |
-| Conversation | History, own bubbles on the right in **black**, tighter padding, emoji-only messages rendered large, replies quoted, voice notes playable, upload/download progress on files, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
+| Conversation | History, own bubbles on the right in **black**, tighter padding, **Markdown** formatting, emoji-only messages rendered large, replies quoted, voice notes playable, upload/download progress on files, read ticks, "typing…" bubble, "Online" / "last seen 5 min ago" | **device database** + `threads` presence |
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
 | Attachments | Paperclip opens a styled sheet: **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP), each with its icon tile and description. The pick is previewed above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open it. Max **25 MB**. | `upload_attachment` + `attachment` |
 | Message actions | Long-press a bubble: **Reply**, **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
-| Reply | **Swipe a bubble sideways** (mine leftwards, theirs rightwards) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble | encrypted envelope `r` |
+| Reply | **Swipe a bubble from left to right** (both sides) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble | encrypted envelope `r` |
 | Loading | Opening a chat shows a two-dot orbit loader (45° tilt, green + orange on perpendicular planes, 0.4 s apart) for at least ~0.4 s instead of a skeleton flash | – |
-| Search | Magnifier in the conversation header filters the chat live and shows "3 matching messages"; an empty result gets its own state | local database |
+| Search | Magnifier in the conversation header. Nothing is hidden: every hit is highlighted in **green**, the ↑ / ↓ buttons jump between them (with a `2/7` counter), the bubble you land on gets a green ring, and typing a new query jumps to the first hit | local database |
 | Emoji | Smiley button in the input toggles a scrollable strip of 50 common emoji; taps append to the text | – |
 | Voice notes | Mic button (empty composer, no attachment) records AAC/M4A; a live timer with a pulsing dot, cancel or send; the bubble plays it back with a progress line | `upload_attachment` (kind `audio`) |
 | Safety notice | Bottom banner: *never share phone numbers, home address, school, bank details or passwords* — shown **once per account** until acknowledged | `users.chat_safety_ack_at` |
@@ -92,6 +92,32 @@ Consequences you should know:
 * If the local database is *not* empty and the server key has changed, the app
   refuses to rotate and shows an error instead of silently breaking old
   messages.
+
+---
+
+## 1b-2. Markdown in messages
+
+Message bodies are rendered through `ui/screens/ChatMarkdown.kt`, a small
+dependency-free renderer that produces one `AnnotatedString` (so a bubble is
+still a single `Text` and the emoji-sizing and search highlight keep working):
+
+| Syntax | Result |
+| --- | --- |
+| `**bold**`, `__bold__` | bold |
+| `*italic*`, `_italic_` | italic |
+| `~~strike~~` | struck through |
+| ``` `code` ``` | monospace chip with a tinted background |
+| ```` ``` ```` fenced block | monospace lines on a tinted background (fences hidden) |
+| `# H1` … `### H3` | bold 17 / 15.5 / 14.5 sp headings |
+| `- item`, `* item` | bullet |
+| `1. item` | numbered line |
+| `> quote` | italic with a `▍` marker |
+| `[label](url)` | underlined link colour (tap behaviour unchanged) |
+
+Colours adapt to the bubble: white text, translucent code chips and a mint link
+colour inside the black outgoing bubble; ink text, grey chips and emerald links
+on the white incoming bubble. Lines starting with a marker followed by a space
+are treated as lists, so a lone asterisk never swallows the rest of a message.
 
 ---
 
