@@ -6,6 +6,7 @@ import com.example.data.local.ChatMessageEntity
 import com.example.data.local.TheStudentDatabase
 import com.example.data.local.TheStudentPreferences
 import com.example.data.model.ChatMessage
+import com.example.data.model.ChatPeer
 import com.example.data.remote.PastPapersRemoteRepository
 import com.example.data.remote.TheStudentChatClient
 
@@ -96,21 +97,22 @@ object ChatInboxSync {
     }
 
     /**
-     * Peer id -> display name, for notification titles.
+     * Peer id -> the peer itself, for notification titles and avatars.
      *
-     * Read from the relay's directory rather than stored locally: names change
-     * rarely, and a push that arrives after a restart has no directory cached.
+     * Read from the relay's directory rather than stored locally: names and
+     * profile pictures change rarely, and a push that arrives after a restart
+     * has no directory cached.
      */
-    suspend fun peerNames(context: Context): Map<Int, String> {
+    suspend fun peers(context: Context): Map<Int, ChatPeer> {
         val session = session(context) ?: return emptyMap()
         return try {
             val directory = TheStudentChatClient.loadDirectory(
                 backendBaseUrl = session.baseUrl,
                 token = session.token
             ).dataOrNull() ?: return emptyMap()
-            directory.threads.associate { it.peer.id to it.peer.name }
+            directory.threads.associate { it.peer.id to it.peer }
         } catch (error: Throwable) {
-            Log.w(TAG, "Could not load peer names for notifications", error)
+            Log.w(TAG, "Could not load peers for notifications", error)
             emptyMap()
         }
     }

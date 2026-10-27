@@ -6,6 +6,13 @@ import com.example.data.local.ChatMessageEntity
 import com.example.data.local.TheStudentDao
 import com.example.data.model.ChatAttachment
 
+/** Who a notification is about: the name for the title, the photo for the icon. */
+data class NotificationPeer(
+    val id: Int,
+    val name: String,
+    val avatarUrl: String? = null
+)
+
 /**
  * Keeps the notification shade in step with the messages stored on this device.
  *
@@ -13,7 +20,7 @@ import com.example.data.model.ChatAttachment
  * two very different callers:
  *
  *  * the view model, after every relay poll and on foreground/background
- *    transitions;
+ *    transitions — including while the app is open on any other screen;
  *  * the FCM service, when a push wakes the app with the screen off.
  *
  * Being stateless about *why* it was called is what makes that possible: the
@@ -44,17 +51,13 @@ object ChatNotifier {
     /**
      * Reconcile the shade with the unread rows.
      *
-     * @param names peer id -> display name, for the notification title.
-     * @param activePeerId the conversation currently on screen, if any.
-     * @param quiet true when the student is looking at the chat list, where the
-     *   badges already show everything: a banner on top of that is just noise.
+     * @param peers resolves a peer id to its name and photo; null falls back to
+     *   "Student".
      */
     suspend fun reconcile(
         context: Context,
         dao: TheStudentDao,
-        names: (Int) -> String?,
-        activePeerId: Int?,
-        quiet: Boolean
+        peers: (Int) -> NotificationPeer?
     ) {
         try {
             if (!ChatNotifications.canPost(context)) {
@@ -66,14 +69,10 @@ object ChatNotifier {
             val unread = dao.unreadMessages()
             val byPeer = unread.groupBy { it.peerId }
 
-            if (quiet) {
-                (notifiedPeers + byPeer.keys).forEach { peerId ->
-                    ChatNotifications.clearForPeer(context, peerId)
-                }
-                ChatNotifications.clearSummary(context)
-                reset()
-                return
-            }
+            // Only the conversation that is actually on screen is suppressed.
+            // Everywhere else — home, papers, the chat list, the background —
+            // the notification still arrives while the app is open.
+            val activePeerId = ChatNotifications.uiActivePeerId
 
             var totalUnread = 0
             val summaryLines = mutableListOf<String>()
@@ -85,7 +84,8 @@ object ChatNotifier {
                 .sortedByDescending { (_, rows) -> rows.lastOrNull()?.sentAtEpoch ?: 0L }
                 .forEach { (peerId, rows) ->
                     totalUnread += rows.size
-                    val peerName = names(peerId) ?: "Student"
+                    val peer = peers(peerId)
+                    val peerName = peer?.name ?: "Student"
                     val messages = rows.map { row ->
                         ChatNotifications.Message(
                             text = row.notificationText(),
@@ -108,7 +108,8 @@ object ChatNotifier {
                                 peerId = peerId,
                                 peerName = peerName,
                                 messages = messages,
-                                unreadCount = rows.size
+                                unreadCount = rows.size,
+                                avatar = ChatNotificationAvatars.photo(peer?.avatarUrl)
                             )
                             signatures[peerId] = signature
                         }
@@ -123,7 +124,9 @@ object ChatNotifier {
             }
             notifiedPeers = showing
 
-            if (showing.isEmpty()) {
+            // One conversation gets no summary: a single chat should look like a
+            // single, ordinary notification, not "1 new message" above itself.
+            if (showing.size <= 1) {
                 ChatNotifications.clearSummary(context)
                 summarySignature = null
             } else {

@@ -1,6 +1,7 @@
 package com.example.notifications
 
 import android.Manifest
+import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
@@ -10,34 +11,41 @@ import android.content.pm.PackageManager
 import android.media.AudioAttributes
 import android.media.RingtoneManager
 import android.os.Build
+import android.util.Log
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
+import androidx.core.graphics.drawable.IconCompat
 import com.example.MainActivity
 import com.example.R
 
 /**
  * Device notifications for incoming chat messages.
  *
- * Design goals (WhatsApp-like, without any push service):
+ * The look mirrors what students expect from a messaging app:
  *
- *  * **One notification per conversation.** New messages from the same student
- *    land in the same notification instead of stacking up; the message history
- *    inside it is rebuilt from the unread rows in the device database, so it
- *    survives the process being recreated.
- *  * **All of them grouped.** The individual conversations are children of a
- *    single summary notification ("2 chats · 5 new messages"), which is what the
- *    shade collapses to.
+ *  * **One notification per conversation**, built with `MessagingStyle`: it
+ *    arrives **collapsed** (student's name + the newest line) and expands, on the
+ *    usual drag, into the recent messages of that conversation.
+ *  * **The student's photo is the large icon**, falling back to a coloured
+ *    initial so a student without a picture still looks deliberate.
+ *  * **All conversations grouped** under one summary, so five active chats do
+ *    not fill the shade. With a single conversation no summary is posted at all,
+ *    which is why one chat looks like a plain, clean notification.
  *  * **Tap goes straight to the conversation.** The [PendingIntent] carries the
  *    peer id; [MainActivity] hands it to the view model, which switches to the
  *    chat tab and opens that thread.
- *  * **Never noisy about what you are reading.** The view model only asks for a
- *    notification when the message is not already on screen.
+ *  * **Quiet about what is on screen.** Only the conversation currently open is
+ *    suppressed — everywhere else in the app the notification still arrives.
  *
  * Everything here is best-effort: a notification must never be able to break
  * sending, receiving or the app itself.
  */
 object ChatNotifications {
+
+    private const val TAG = "ChatNotifications"
 
     /** Channel shown in system settings. Users can mute just chat here. */
     const val CHANNEL_MESSAGES = "chat_messages"
@@ -55,13 +63,12 @@ object ChatNotifications {
     const val EXTRA_PEER_ID = "com.thestudent.sl.extra.PEER_ID"
 
     /**
-     * True while any activity of this app is on screen. Set from
-     * MainActivity.onStart / onStop. Used to decide whether a message needs a
-     * notification at all: if the student is looking at the chat list, the
-     * unread badge is enough.
+     * The conversation currently on screen, set by the view model when a chat is
+     * opened or closed. Only this one conversation skips notifications: every
+     * other screen (home, papers, even the chat list) still gets them.
      */
     @Volatile
-    var isAppVisible: Boolean = false
+    var uiActivePeerId: Int? = null
 
     /** One line of a conversation, already decrypted and human readable. */
     data class Message(
@@ -72,6 +79,8 @@ object ChatNotifications {
     )
 
     private fun idForPeer(peerId: Int): Int = PER_PEER_ID_BASE + peerId
+
+    private fun shortcutIdForPeer(peerId: Int): String = "chat_peer_$peerId"
 
     /** Create the channel once; calling it repeatedly is safe. */
     fun ensureChannel(context: Context) {
@@ -122,14 +131,17 @@ object ChatNotifications {
      * Post (or refresh) the notification for one conversation.
      *
      * [messages] is the tail of the conversation, oldest first; [unreadCount] is
-     * how many of them are still unread, shown as the badge number.
+     * how many of them are still unread, shown as the badge number. [avatar] is
+     * the peer's photo, already cropped for the large icon (null falls back to a
+     * coloured initial).
      */
     fun showForPeer(
         context: Context,
         peerId: Int,
         peerName: String,
         messages: List<Message>,
-        unreadCount: Int
+        unreadCount: Int,
+        avatar: android.graphics.Bitmap? = null
     ) {
         if (messages.isEmpty()) {
             clearForPeer(context, peerId)
@@ -144,13 +156,27 @@ object ChatNotifications {
             return
         }
 
+        val largeIcon = avatar ?: ChatNotificationAvatars.initials(peerName, peerId)
+
         // androidx Person, not android.app.Person: the framework class only
         // exists from API 28 and this app supports 24.
-        val me = androidx.core.app.Person.Builder().setName("You").build()
-        val them = androidx.core.app.Person.Builder().setName(peerName).build()
+        val me = androidx.core.app.Person.Builder()
+            .setName("You")
+            .setKey("me")
+            .build()
+        val them = androidx.core.app.Person.Builder()
+            .setName(peerName)
+            .setKey("peer_$peerId")
+            .setIcon(
+                largeIcon?.let {
+                    runCatching { IconCompat.createWithBitmap(it) }.getOrNull()
+                }
+            )
+            .build()
 
         val style = NotificationCompat.MessagingStyle(me)
             .setConversationTitle(peerName)
+            .setGroupConversation(true)
 
         messages.takeLast(MAX_MESSAGES_IN_NOTIFICATION).forEach { message ->
             style.addMessage(
@@ -161,11 +187,15 @@ object ChatNotifications {
         }
 
         val last = messages.last()
-        val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
+        val builder = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_chat_notification)
             .setColor(ACCENT)
+            .setColorized(false)
+            // Collapsed view: name + newest message. Dragging expands it into the
+            // MessagingStyle history above.
             .setContentTitle(peerName)
             .setContentText(last.text)
+            .setLargeIcon(largeIcon)
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
@@ -180,14 +210,21 @@ object ChatNotifications {
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
             .setContentIntent(conversationIntent(context, peerId))
             .setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .build()
 
-        post(context, idForPeer(peerId), notification)
+        // Lets launchers treat the thread as a conversation (and offer it as a
+        // bubble where supported). Purely cosmetic, so failures are ignored.
+        runCatching {
+            builder.setShortcutId(shortcutIdForPeer(peerId))
+            publishConversationShortcut(context, peerId, peerName, largeIcon, them)
+        }
+
+        post(context, idForPeer(peerId), builder.build())
     }
 
     /**
-     * The single grouped notification the shade collapses to. [lines] are
-     * "Name: message" previews, newest conversation first.
+     * The single grouped notification the shade collapses to, used only when
+     * more than one conversation is unread. [lines] are "Name: message" previews,
+     * newest conversation first.
      */
     fun showSummary(
         context: Context,
@@ -211,20 +248,16 @@ object ChatNotifications {
         val notification = NotificationCompat.Builder(context, CHANNEL_MESSAGES)
             .setSmallIcon(R.drawable.ic_chat_notification)
             .setColor(ACCENT)
-            .setContentTitle(
-                if (conversationCount == 1) "1 new message" else "$messageCount new messages"
-            )
-            .setContentText(
-                if (conversationCount == 1) lines.first() else "From $conversationCount students"
-            )
+            .setContentTitle("$messageCount new messages")
+            .setContentText("From $conversationCount students")
             .setStyle(style)
             .setCategory(NotificationCompat.CATEGORY_MESSAGE)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setNumber(messageCount)
             .setAutoCancel(true)
+            .setOnlyAlertOnce(true)
             .setGroup(GROUP_CHAT)
             .setGroupSummary(true)
-            .setOnlyAlertOnce(true)
             .setGroupAlertBehavior(NotificationCompat.GROUP_ALERT_CHILDREN)
             .setContentIntent(inboxIntent(context))
             .build()
@@ -243,6 +276,33 @@ object ChatNotifications {
     /** Remove every chat notification (sign-out, or "clear all"). */
     fun clearAll(context: Context) {
         runCatching { NotificationManagerCompat.from(context).cancelAll() }
+    }
+
+    // ── conversation shortcut ─────────────────────────────────────────────────
+
+    private fun publishConversationShortcut(
+        context: Context,
+        peerId: Int,
+        peerName: String,
+        avatar: android.graphics.Bitmap?,
+        person: androidx.core.app.Person
+    ) {
+        val icon = avatar?.let { runCatching { IconCompat.createWithBitmap(it) }.getOrNull() }
+            ?: IconCompat.createWithResource(context, R.drawable.ic_chat_notification)
+        val shortcut = ShortcutInfoCompat.Builder(context, shortcutIdForPeer(peerId))
+            .setShortLabel(peerName)
+            .setLongLabel(peerName)
+            .setIcon(icon)
+            .setPerson(person)
+            .setLongLived(true)
+            .setIntent(
+                Intent(context, MainActivity::class.java).apply {
+                    action = "com.thestudent.sl.OPEN_CHAT_$peerId"
+                    putExtra(EXTRA_PEER_ID, peerId)
+                }
+            )
+            .build()
+        ShortcutManagerCompat.pushDynamicShortcut(context, shortcut)
     }
 
     // ── intents ───────────────────────────────────────────────────────────────
@@ -286,9 +346,10 @@ object ChatNotifications {
     private const val MAX_MESSAGES_IN_NOTIFICATION = 8
     private const val MAX_SUMMARY_LINES = 5
 
-    private fun post(context: Context, id: Int, notification: android.app.Notification) {
+    private fun post(context: Context, id: Int, notification: Notification) {
         // SecurityException can be thrown if the grant was revoked between the
         // check and the post; a notification is never worth a crash.
         runCatching { NotificationManagerCompat.from(context).notify(id, notification) }
+            .onFailure { Log.w(TAG, "Could not post notification $id", it) }
     }
 }

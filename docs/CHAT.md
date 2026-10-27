@@ -189,23 +189,29 @@ instead of failing silently, and the limit has to be raised in the hosting panel
 
 ## 1d. Device notifications
 
-A new message raises a real Android notification (`notifications/ChatNotifications.kt`).
+A new message raises a real Android notification (`notifications/ChatNotifications.kt`,
+avatars in `notifications/ChatNotificationAvatars.kt`, reconciliation in
+`notifications/ChatNotifier.kt`).
 
 | Behaviour | Detail |
 | --- | --- |
 | Channel | `chat_messages`, **High** importance, sound + vibration + lights, so it can pop as a heads-up banner. Users can mute chat alone in system settings. |
-| One per conversation | The notification is a `MessagingStyle` bubble list titled with the student's name. Messages arriving from the same student are **appended to that notification**, not stacked as new ones. |
-| Grouped | Every conversation notification is a child of one summary (`InboxStyle`, "3 new messages · From 2 students"). Children only alert once — the summary is the one that rings. |
+| One per conversation | The notification is a `MessagingStyle` thread titled with the student's name. Messages arriving from the same student are **appended to that notification**, not stacked as new ones. |
+| Collapsed by default | It arrives as a single row — name, newest line, time — and expands, on the usual drag, into the recent messages of that conversation. Nothing auto-expands. |
+| Avatar | The large icon is the student's **profile photo**, centre-cropped to a circle (`ChatNotificationAvatars`, 192 px, cached in memory). A student without a photo gets a coloured circle with their initial, so the icon is never blank. The photo is also attached to the notification's `Person` and its conversation shortcut. |
+| Grouped | With **two or more** unread conversations, each is a child of one summary (`InboxStyle`, "5 new messages · From 2 students"). With a single conversation no summary is posted at all, so one chat looks like one ordinary notification. |
 | Tap | Opens `MainActivity` (`singleTop`) with the peer id; the view model switches to the chat tab and opens that conversation. Tapping the summary opens the chat list. |
 | Clearing | The notification disappears the moment you open that conversation, and as soon as the rows are marked read. Signing out cancels everything. |
-| Not shown when | You are on the chat list (the badges already say it) or that conversation is on screen. Notifications are also suppressed entirely if the permission is off. |
+| Arrives while the app is open | Yes. The app being in the foreground suppresses nothing; only the conversation **currently on screen** is skipped (`ChatNotifications.uiActivePeerId`), so a message can never pop over the chat you are already reading. On any other screen — home, papers, even the chat list — the notification still arrives, within ~3 s (foreground poll) or instantly with FCM. |
+| Not shown when | That exact conversation is open, or the notification permission is off. |
 
-**When do they arrive?** The relay is polled, so delivery follows the polling
-window:
+**When do they arrive?** With FCM configured a push arrives immediately. Without
+a push key the relay is polled, so delivery follows the polling window:
 
-* chat tab open — 2 s loop, and no notification for the open conversation;
-* anywhere else in the app, or the app in the background — the extra
-  `CHAT_BACKGROUND_POLL_MS` (10 s) loop keeps fetching and notifying;
+* the open conversation — 2 s loop, and never notified (it is on screen);
+* **any other screen while the app is open** — the `CHAT_FOREGROUND_POLL_MS`
+  (3 s) loop keeps fetching and notifying;
+* app in the background — `CHAT_BACKGROUND_POLL_MS` (10 s);
 * app **not running** — the server sends an FCM data message, which starts the
   app's `ChatMessagingService`, fetches and decrypts the message and posts the
   notification. The payload carries no text (only "a chat message is waiting"),

@@ -49,21 +49,27 @@ class ChatMessagingService : FirebaseMessagingService() {
                 // notification shows real text and the conversation is already up
                 // to date when it is opened.
                 val received = ChatInboxSync.fetchAndStore(applicationContext)
-                val names = if (received.isEmpty()) {
-                    emptyMap()
-                } else {
-                    ChatInboxSync.peerNames(applicationContext)
-                }
+                // Nothing new (another device already fetched it, or the app's own
+                // poll won the race): the view model reconciles its own shade, so
+                // leave it alone rather than re-post with a placeholder name.
+                if (received.isEmpty()) return@launch
+                val peers = ChatInboxSync.peers(applicationContext)
 
                 val dao = TheStudentDatabase.getDatabase(applicationContext).theStudentDao()
                 ChatNotifier.reconcile(
                     context = applicationContext,
                     dao = dao,
-                    names = { peerId -> names[peerId] },
-                    // This process has no conversation on screen; if the app is
-                    // open the view model reconciles again on its own poll.
-                    activePeerId = null,
-                    quiet = ChatNotifications.isAppVisible
+                    // ChatNotifier itself skips the conversation that is on
+                    // screen, so a push never disturbs an open chat.
+                    peers = { peerId ->
+                        peers[peerId]?.let { peer ->
+                            NotificationPeer(
+                                id = peer.id,
+                                name = peer.name,
+                                avatarUrl = peer.avatarUrl
+                            )
+                        }
+                    }
                 )
             }.onFailure { error ->
                 Log.w(TAG, "Could not handle chat push", error)

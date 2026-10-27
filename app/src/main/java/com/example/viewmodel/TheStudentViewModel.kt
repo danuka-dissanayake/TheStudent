@@ -24,6 +24,7 @@ import com.example.data.repository.TheStudentRepository
 import com.example.data.repository.SampleEducationalData
 import com.example.notifications.ChatNotifications
 import com.example.notifications.ChatNotifier
+import com.example.notifications.NotificationPeer
 import com.google.firebase.messaging.FirebaseMessaging
 import com.example.ui.components.TheStudentNavTab
 import kotlinx.coroutines.flow.*
@@ -490,6 +491,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatTypingJob: Job? = null
     private var chatBackgroundJob: Job? = null
     private var chatIsDirectoryVisible = false
+    /** True between MainActivity.onStart and onStop. */
+    private var appInForeground = false
 
     /** Peer directory from the last successful `threads` call. */
     private var chatPeers: List<ChatPeer> = emptyList()
@@ -789,6 +792,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun openChat(peer: ChatPeer) {
         chatActivePeerId = peer.id
         // The message is on screen from here on: its notification is noise.
+        ChatNotifications.uiActivePeerId = peer.id
         ChatNotifications.clearForPeer(appContext, peer.id)
         _chatState.update {
             it.copy(
@@ -872,6 +876,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatMessagesJob?.cancel()
         chatMessagesJob = null
         chatActivePeerId = null
+        ChatNotifications.uiActivePeerId = null
         chatTypingJob?.cancel()
         chatTypingJob = null
         // A file picked (or a recording in progress) must not survive the chat.
@@ -1156,6 +1161,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * app moves between foreground and background. The heavy lifting lives in
      * [ChatNotifier], which the FCM service uses too, so a pushed message and a
      * polled one produce exactly the same notification.
+     *
+     * The app being open no longer suppresses anything: only the conversation on
+     * screen does (see [ChatNotifications.uiActivePeerId]).
      */
     private suspend fun refreshChatNotifications() {
         // Names come from the peer directory. If the app is polling from the
@@ -1167,10 +1175,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         ChatNotifier.reconcile(
             context = appContext,
             dao = chatDao,
-            names = { peerId -> chatPeers.firstOrNull { it.id == peerId }?.name },
-            activePeerId = chatActivePeerId,
-            // Looking at the chat list already shows the badges.
-            quiet = ChatNotifications.isAppVisible && chatIsDirectoryVisible
+            peers = { peerId ->
+                chatPeers.firstOrNull { it.id == peerId }?.let { peer ->
+                    NotificationPeer(id = peer.id, name = peer.name, avatarUrl = peer.avatarUrl)
+                }
+            }
         )
     }
 
@@ -1197,7 +1206,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             ChatNotifications.ensureChannel(appContext)
             syncPushToken()
             while (true) {
-                delay(CHAT_BACKGROUND_POLL_MS)
+                // While the student is in the app, poll quickly: a message that
+                // lands on another tab should notify (and badge) straight away.
+                // In the background the slower interval saves battery.
+                delay(if (appInForeground) CHAT_FOREGROUND_POLL_MS else CHAT_BACKGROUND_POLL_MS)
                 if (chatIsDirectoryVisible) continue // the chat tab polls faster
                 if (preferences.sessionToken.isNullOrBlank()) continue
                 runCatching { fetchChatInbox() }
@@ -1259,13 +1271,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Called from MainActivity.onStart. */
     fun onAppForegrounded() {
-        ChatNotifications.isAppVisible = true
+        appInForeground = true
+        // Catch up on anything that arrived while the app was in the background.
+        viewModelScope.launch { runCatching { fetchChatInbox() } }
         refreshChatNotificationsNow()
     }
 
     /** Called from MainActivity.onStop: unread messages deserve a notification. */
     fun onAppBackgrounded() {
-        ChatNotifications.isAppVisible = false
+        appInForeground = false
         refreshChatNotificationsNow()
     }
 
@@ -1515,6 +1529,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
          * Slower than the tab's loop on purpose: battery and API load.
          */
         const val CHAT_BACKGROUND_POLL_MS = 10_000L
+        /** Same loop while the app is on screen: notifications feel instant. */
+        const val CHAT_FOREGROUND_POLL_MS = 3_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
         /** Shortest time the conversation loading animation stays on screen. */
         const val CHAT_LOADER_MIN_MS = 420L

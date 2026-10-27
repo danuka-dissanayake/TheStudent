@@ -120,10 +120,15 @@ plus a local Room table that owns the actual history.
   not read. A second "my messages they have not opened" counter was tried and
   removed at the user's request — the single/double tick inside the conversation
   already carries that information.
-* Device notifications live in `notifications/ChatNotifications.kt` (channel
-  `chat_messages`, MessagingStyle per conversation, one grouped summary, tap →
-  `MainActivity` + peer id). They are driven by the relay poll, so they arrive
-  while the app process is alive only; there is no FCM. See `docs/CHAT.md` §1d.
+* Device notifications live in the `notifications/` package: `ChatNotifications`
+  (channel `chat_messages`, collapsed-by-default MessagingStyle per conversation,
+  grouped summary only when 2+ chats are unread, tap → `MainActivity` + peer id),
+  `ChatNotificationAvatars` (circular profile photo as large icon, coloured
+  initial as fallback) and `ChatNotifier` (reconciliation from the unread rows,
+  shared by the view model and the FCM service). Delivery is FCM data messages
+  (`ChatMessagingService`) with a foreground/background poll as fallback; the app
+  being open suppresses nothing except the conversation on screen. See
+  `docs/CHAT.md` §1d.
 * A reply quote stores `isMine` **relative to the author of the carrying
   message**, so the renderer must mirror it on the other device
   (`if (bubble.isMine) reply.isMine else !reply.isMine`); otherwise every quote
