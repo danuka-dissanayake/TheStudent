@@ -12,6 +12,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -21,9 +22,11 @@ import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -44,18 +47,25 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 import coil.compose.AsyncImage
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -905,7 +915,7 @@ private fun ChatConversationScreen(
                 Box(modifier = Modifier.weight(1f)) {
                     when {
                         state.isLoadingMessages && state.messages.isEmpty() -> {
-                            ChatMessageSkeleton()
+                            ChatLoadingState()
                         }
 
                         visibleMessages.isEmpty() -> {
@@ -995,7 +1005,8 @@ private fun ChatConversationScreen(
                                             downloadProgress = row.message.attachment?.let { attachment ->
                                                 state.attachmentDownloadProgress[attachment.id]
                                             },
-                                            onLongPress = onLongPressMessage
+                                            onLongPress = onLongPressMessage,
+                                            onSwipeReply = { message -> onReply(message) }
                                         )
                                     }
                                 }
@@ -2480,14 +2491,56 @@ private fun ChatAvatar(
 private fun ChatBubble(
     message: ChatMessage,
     downloadProgress: Int? = null,
-    onLongPress: (ChatMessage) -> Unit = {}
+    onLongPress: (ChatMessage) -> Unit = {},
+    onSwipeReply: (ChatMessage) -> Unit = {}
 ) {
     val isMine = message.isMine
     val haptics = LocalHapticFeedback.current
-    Box(
-        modifier = Modifier.fillMaxWidth(),
-        contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
-    ) {
+
+    // ── swipe to reply ──────────────────────────────────────────────────────
+    // My bubbles are dragged leftwards, the other student's rightwards, so the
+    // gesture always pulls "into" the empty side of the row. Only horizontal
+    // drags are claimed, so vertical scrolling of the list still works.
+    val density = LocalDensity.current
+    val maxSwipe = with(density) { 76.dp.toPx() }
+    val triggerAt = with(density) { 52.dp.toPx() }
+    val direction = if (isMine) -1f else 1f
+    val swipe = remember(message.localId) { Animatable(0f) }
+    val scope = rememberCoroutineScope()
+    var replyTriggered by remember(message.localId) { mutableStateOf(false) }
+
+    val progress = (swipe.value / triggerAt).coerceIn(0f, 1f)
+
+    Box(modifier = Modifier.fillMaxWidth()) {
+        // Reply hint revealed behind the bubble as it is pulled.
+        if (progress > 0.02f) {
+            Box(
+                modifier = Modifier
+                    .align(if (isMine) Alignment.CenterEnd else Alignment.CenterStart)
+                    .padding(horizontal = 18.dp)
+                    .size(34.dp)
+                    .graphicsLayer {
+                        alpha = progress
+                        scaleX = 0.7f + 0.3f * progress
+                        scaleY = 0.7f + 0.3f * progress
+                    }
+                    .clip(CircleShape)
+                    .background(EmeraldPrimary),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    Icons.AutoMirrored.Filled.Reply,
+                    contentDescription = null,
+                    tint = Color.White,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
+        }
+
+        Box(
+            modifier = Modifier.fillMaxWidth(),
+            contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
+        ) {
         Surface(
             shape = RoundedCornerShape(
                 topStart = 18.dp,
@@ -2499,6 +2552,37 @@ private fun ChatBubble(
             border = if (isMine) null else BorderStroke(1.dp, ChatHairline),
             modifier = Modifier
                 .widthIn(max = 300.dp)
+                .offset { IntOffset((direction * swipe.value).roundToInt(), 0) }
+                .pointerInput(message.localId) {
+                    detectHorizontalDragGestures(
+                        onDragEnd = {
+                            scope.launch {
+                                if (replyTriggered) {
+                                    onSwipeReply(message)
+                                }
+                                replyTriggered = false
+                                swipe.animateTo(0f, tween(180))
+                            }
+                        },
+                        onDragCancel = {
+                            replyTriggered = false
+                            scope.launch { swipe.animateTo(0f, tween(180)) }
+                        }
+                    ) { _, dragAmount ->
+                        scope.launch {
+                            val next = (swipe.value - dragAmount * direction).coerceIn(0f, maxSwipe)
+                            swipe.snapTo(next)
+                            if (next >= triggerAt) {
+                                if (!replyTriggered) {
+                                    replyTriggered = true
+                                    haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                                }
+                            } else if (replyTriggered) {
+                                replyTriggered = false
+                            }
+                        }
+                    }
+                }
                 .combinedClickable(
                     onClick = {},
                     onLongClick = {
@@ -2571,6 +2655,7 @@ private fun ChatBubble(
                     }
                 }
             }
+        }
         }
     }
 }
@@ -2732,28 +2817,73 @@ private fun ChatDirectorySkeleton() {
     }
 }
 
+/**
+ * Loading state shown while a conversation is opening.
+ *
+ * Compose port of the CSS "orbit" loader: the whole element is rotated 45°, and
+ * two dots circle inside it on two different planes — one squashed vertically
+ * (CSS `rotateX(70deg)`, green #91FF00), one squashed horizontally
+ * (CSS `rotateY(70deg)`, red #FF3D00) with a 0.4 s delay.
+ */
 @Composable
-private fun ChatMessageSkeleton() {
+private fun ChatLoadingState(modifier: Modifier = Modifier) {
     Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .padding(horizontal = 16.dp, vertical = 14.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+        modifier = modifier.fillMaxSize(),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center
     ) {
-        repeat(4) { index ->
-            val isMine = index % 2 == 1
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(if (isMine) 0.55f else 0.68f)
-                        .height(if (index % 2 == 0) 46.dp else 64.dp)
-                        .clip(RoundedCornerShape(18.dp))
-                        .background(if (isMine) Color(0xFFD9F2E6) else Color(0xFFE9EEF5))
+        OrbitLoader()
+        Spacer(Modifier.height(18.dp))
+        Text(
+            text = "Loading your conversation…",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.sp,
+            color = ChatMuted
+        )
+    }
+}
+
+@Composable
+private fun OrbitLoader(size: androidx.compose.ui.unit.Dp = 48.dp) {
+    val transition = rememberInfiniteTransition(label = "orbit_loader")
+    val angle by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1_000, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "orbit_angle"
+    )
+
+    Canvas(
+        modifier = Modifier
+            .size(size)
+            // The CSS wrapper tilts the whole loader by 45 degrees.
+            .graphicsLayer { rotationZ = 45f }
+    ) {
+        val radius = this.size.minDimension * 0.34f
+        val dotRadius = this.size.minDimension * 0.062f
+        // cos/sin of 70deg on the third axis, i.e. how flat each orbit looks.
+        val squash = 0.342f
+
+        fun drawDot(degrees: Float, color: Color, squashX: Boolean) {
+            val radians = Math.toRadians(degrees.toDouble())
+            val x = (kotlin.math.cos(radians) * radius).toFloat()
+            val y = (kotlin.math.sin(radians) * radius).toFloat()
+            drawCircle(
+                color = color,
+                radius = dotRadius,
+                center = Offset(
+                    x = center.x + if (squashX) x * squash else x,
+                    y = center.y + if (squashX) y else y * squash
                 )
-            }
+            )
         }
+
+        // ::before — vertical squash, starts immediately.
+        drawDot(degrees = angle, color = Color(0xFF91FF00), squashX = false)
+        // ::after — horizontal squash, 0.4 s behind.
+        drawDot(degrees = angle + 144f, color = Color(0xFFFF3D00), squashX = true)
     }
 }

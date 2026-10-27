@@ -25,7 +25,8 @@ messages, real presence.
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
 | Attachments | Paperclip opens a styled sheet: **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP), each with its icon tile and description. The pick is previewed above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open it. Max **25 MB**. | `upload_attachment` + `attachment` |
 | Message actions | Long-press a bubble: **Reply**, **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
-| Reply | Swipe-free quoting: pick Reply, the quoted message shows above the composer, and the bubble renders it as a small quoted block | encrypted envelope `r` |
+| Reply | **Swipe a bubble sideways** (mine leftwards, theirs rightwards) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble | encrypted envelope `r` |
+| Loading | Opening a chat shows a two-dot orbit loader (45° tilt, green + orange on perpendicular planes, 0.4 s apart) for at least ~0.4 s instead of a skeleton flash | – |
 | Search | Magnifier in the conversation header filters the chat live and shows "3 matching messages"; an empty result gets its own state | local database |
 | Emoji | Smiley button in the input toggles a scrollable strip of 50 common emoji; taps append to the text | – |
 | Voice notes | Mic button (empty composer, no attachment) records AAC/M4A; a live timer with a pulsing dot, cancel or send; the bubble plays it back with a progress line | `upload_attachment` (kind `audio`) |

@@ -785,8 +785,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatMessagesJob?.cancel()
         chatMessagesJob = viewModelScope.launch {
             // Room is the source of truth: the list re-renders itself whenever a
-            // message is added, sent, delivered or marked read.
+            // message is added, sent, delivered or marked read. The very first
+            // emission is held back for a moment so the loading animation is
+            // actually seen instead of flashing for one frame.
+            val openedAt = System.currentTimeMillis()
+            var firstEmission = true
             chatDao.observeConversation(peer.id).collect { rows ->
+                if (firstEmission) {
+                    firstEmission = false
+                    val elapsed = System.currentTimeMillis() - openedAt
+                    if (elapsed < CHAT_LOADER_MIN_MS) delay(CHAT_LOADER_MIN_MS - elapsed)
+                }
                 _chatState.update {
                     it.copy(
                         isLoadingMessages = false,
@@ -1325,6 +1334,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         /** Relay fetch: new messages + read receipts. */
         const val CHAT_INBOX_POLL_MS = 2_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
+        /** Shortest time the conversation loading animation stays on screen. */
+        const val CHAT_LOADER_MIN_MS = 420L
         /** Uploaded bytes per file. Photos are re-encoded well below this. */
         const val CHAT_MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
         /** How long to wait before retrying a blob the relay no longer has. */
