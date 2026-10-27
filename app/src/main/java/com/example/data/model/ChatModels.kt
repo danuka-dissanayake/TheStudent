@@ -163,7 +163,11 @@ data class ChatAttachment(
 data class ChatReply(
     /** Relay id of the quoted message (0 when it was still pending/never sent). */
     val serverId: Long,
-    /** True when the quoted message is mine. */
+    /**
+     * True when the quoted message was written by **the author of the message
+     * carrying this quote** — not by the reader. On the other device the sides
+     * are mirrored, so the renderer flips it before showing "You" or a name.
+     */
     val isMine: Boolean,
     /** First ~120 characters of the quoted message, or "Photo" / "Voice note". */
     val preview: String

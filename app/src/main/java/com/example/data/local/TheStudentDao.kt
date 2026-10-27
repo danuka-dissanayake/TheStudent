@@ -113,6 +113,17 @@ interface TheStudentDao {
     @Query("SELECT COUNT(*) FROM chat_messages WHERE isMine = 0 AND isRead = 0")
     fun observeTotalUnread(): Flow<Int>
 
+    /**
+     * Everything still unread, oldest first, for building device notifications.
+     * Reading the rows (rather than keeping a list in memory) means a
+     * notification can be rebuilt correctly after the process was recreated.
+     */
+    @Query(
+        "SELECT * FROM chat_messages WHERE isMine = 0 AND isRead = 0 " +
+            "ORDER BY sentAtEpoch ASC, serverId ASC"
+    )
+    suspend fun unreadMessages(): List<ChatMessageEntity>
+
     @Query("UPDATE chat_messages SET isRead = 1 WHERE peerId = :peerId AND isMine = 0")
     suspend fun markConversationRead(peerId: Int)
 

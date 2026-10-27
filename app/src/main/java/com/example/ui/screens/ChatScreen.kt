@@ -1140,6 +1140,7 @@ private fun ChatConversationScreen(
                                         is ChatRow.Day -> DayDivider(row.label)
                                         is ChatRow.Msg -> ChatBubble(
                                             message = row.message,
+                                            peerName = peer.name,
                                             downloadProgress = row.message.attachment?.let { attachment ->
                                                 state.attachmentDownloadProgress[attachment.id]
                                             },
@@ -1778,7 +1779,17 @@ private fun ReplyComposerBar(
 
 /** Quoted block rendered at the top of a bubble. */
 @Composable
-private fun ReplyQuoteBlock(reply: ChatReply, isMine: Boolean) {
+private fun ReplyQuoteBlock(reply: ChatReply, isMine: Boolean, peerName: String = "") {
+    // `reply.isMine` was recorded by whoever wrote THIS bubble, so it means
+    // "the quoted message is mine" only on their device. On the other device the
+    // sides are mirrored: a quote of the sender's own message belongs to the peer.
+    // Fixing that is what stopped every quote reading "You" on both phones.
+    val quotedIsMine = if (isMine) reply.isMine else !reply.isMine
+    val quotedName = if (quotedIsMine) {
+        "You"
+    } else {
+        peerName.substringBefore(' ').ifBlank { "Them" }
+    }
     val accent = if (isMine) Color.White.copy(alpha = 0.55f) else EmeraldPrimary
     val background = if (isMine) Color.White.copy(alpha = 0.12f) else Color(0xFFF1F5F9)
     Row(
@@ -1798,7 +1809,7 @@ private fun ReplyQuoteBlock(reply: ChatReply, isMine: Boolean) {
         Spacer(Modifier.width(7.dp))
         Column {
             Text(
-                text = if (reply.isMine) "You" else "Them",
+                text = quotedName,
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 9.5.sp,
                 fontWeight = FontWeight.Bold,
@@ -2687,6 +2698,8 @@ private fun ChatAvatar(
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
+    /** Used only to name the person in a reply quote. */
+    peerName: String = "",
     downloadProgress: Int? = null,
     onLongPress: (ChatMessage) -> Unit = {},
     onSwipeReply: (ChatMessage) -> Unit = {},
@@ -2805,7 +2818,7 @@ private fun ChatBubble(
                 )
             ) {
                 message.replyTo?.let { reply ->
-                    ReplyQuoteBlock(reply = reply, isMine = isMine)
+                    ReplyQuoteBlock(reply = reply, isMine = isMine, peerName = peerName)
                     Spacer(Modifier.height(6.dp))
                 }
                 message.attachment?.let { attachment ->

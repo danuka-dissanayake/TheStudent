@@ -120,6 +120,14 @@ plus a local Room table that owns the actual history.
   not read. A second "my messages they have not opened" counter was tried and
   removed at the user's request — the single/double tick inside the conversation
   already carries that information.
+* Device notifications live in `notifications/ChatNotifications.kt` (channel
+  `chat_messages`, MessagingStyle per conversation, one grouped summary, tap →
+  `MainActivity` + peer id). They are driven by the relay poll, so they arrive
+  while the app process is alive only; there is no FCM. See `docs/CHAT.md` §1d.
+* A reply quote stores `isMine` **relative to the author of the carrying
+  message**, so the renderer must mirror it on the other device
+  (`if (bubble.isMine) reply.isMine else !reply.isMine`); otherwise every quote
+  reads "You" on both phones.
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
 * **Never touch a property from the ViewModel `init` block without suspending

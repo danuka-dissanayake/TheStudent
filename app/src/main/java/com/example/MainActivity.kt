@@ -1,10 +1,15 @@
 package com.example
 
+import android.Manifest
+import android.content.Intent
+import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
@@ -23,21 +28,36 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
+import androidx.core.app.ActivityCompat
+import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.AppScreenFlow
+import com.example.notifications.ChatNotifications
 import com.example.viewmodel.TheStudentViewModel
+import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
+
+    private val viewModel: TheStudentViewModel by viewModels()
+
+    /**
+     * Peer id carried by a tapped chat notification. Held in a flow rather than
+     * opening the chat directly so both cases work: a cold start (the intent
+     * arrives before the directory is loaded) and a warm app (onNewIntent).
+     */
+    private val pendingChatPeer = MutableStateFlow<Int?>(null)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
+        ChatNotifications.ensureChannel(this)
+        askForNotificationPermission()
+        readChatIntent(intent)
         setContent {
-            val viewModel: TheStudentViewModel = viewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val savedPapers by viewModel.savedPapers.collectAsStateWithLifecycle()
             val savedCourses by viewModel.savedCourses.collectAsStateWithLifecycle()
@@ -66,6 +86,14 @@ class MainActivity : ComponentActivity() {
                     viewModel.closeChat()
                 } else {
                     viewModel.setTab(TheStudentNavTab.HOME)
+                }
+            }
+
+            val chatPeerFromNotification by pendingChatPeer.collectAsStateWithLifecycle()
+            LaunchedEffect(chatPeerFromNotification) {
+                chatPeerFromNotification?.let { peerId ->
+                    viewModel.openChatFromNotification(peerId)
+                    pendingChatPeer.value = null
                 }
             }
 
@@ -535,6 +563,57 @@ class MainActivity : ComponentActivity() {
         }
     }
     
+    // ── notifications & deep links ────────────────────────────────────────────
+
+    override fun onStart() {
+        super.onStart()
+        // While the app is on screen the chat list itself shows the unread
+        // badges, so the view model clears whatever the shade was holding.
+        viewModel.onAppForegrounded()
+    }
+
+    override fun onStop() {
+        // Going to the background: anything still unread becomes a notification.
+        viewModel.onAppBackgrounded()
+        super.onStop()
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        readChatIntent(intent)
+    }
+
+    /** A notification was tapped: remember which conversation to open. */
+    private fun readChatIntent(intent: Intent?) {
+        val peerId = intent?.getIntExtra(ChatNotifications.EXTRA_PEER_ID, 0) ?: 0
+        if (peerId > 0) pendingChatPeer.value = peerId
+    }
+
+    /**
+     * Android 13+ requires the runtime grant before anything can be posted.
+     * Declining is harmless — chat still works, just silently.
+     */
+    private fun askForNotificationPermission() {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU) return
+        val granted = ContextCompat.checkSelfPermission(
+            this,
+            Manifest.permission.POST_NOTIFICATIONS
+        ) == PackageManager.PERMISSION_GRANTED
+        if (granted) return
+        runCatching {
+            ActivityCompat.requestPermissions(
+                this,
+                arrayOf(Manifest.permission.POST_NOTIFICATIONS),
+                REQUEST_POST_NOTIFICATIONS
+            )
+        }
+    }
+
+    private companion object {
+        const val REQUEST_POST_NOTIFICATIONS = 4_201
+    }
+
     @Composable
     fun Greeting(name: String, modifier: Modifier = Modifier) {
         Text(text = "TheStudent - $name", modifier = modifier)

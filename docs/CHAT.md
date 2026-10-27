@@ -25,7 +25,7 @@ messages, real presence.
 | Encryption note | Grey line *"Messages are end-to-end encrypted"* with a small lock, **directly under the message input bar** | static |
 | Attachments | Paperclip opens a styled sheet: **Photo** (gallery) or **Document** (PDF, DOC/DOCX, PPT/PPTX, XLS/XLSX, TXT, ZIP), each with its icon tile and description. The pick is previewed above the input with its size and a ✕, a caption can be typed, and the bubble then shows a rounded photo or a document card. Tap to open it. Max **25 MB**. | `upload_attachment` + `attachment` |
 | Message actions | Long-press a bubble: **Reply**, **Copy text**, and **Delete for everyone** on your own messages (removes it from the other student's chat too) or **Remove from this chat** on theirs | relay `delete` envelope |
-| Reply | **Swipe a bubble from left to right** (both sides) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble | encrypted envelope `r` |
+| Reply | **Swipe a bubble from left to right** (both sides) or pick Reply from the long-press sheet. An emerald arrow grows behind the bubble and triggers with a haptic tick; the quoted message then shows above the composer and inside the next bubble, labelled with whoever wrote it **on the reading device** ("You" or the student's first name) | encrypted envelope `r` |
 | Loading | Opening a chat shows a two-dot orbit loader (45° tilt, green + orange on perpendicular planes, 0.4 s apart) **until the conversation is parked at the newest message**: the list is built underneath the overlay, jumped (not animated) to the bottom, and only then faded in over 220 ms. A 4 s watchdog releases it if anything stalls | – |
 | Composer focus | Tapping anywhere outside the input bar closes the keyboard, drops the focus border and clears the "typing…" indicator for the other student | – |
 | Search | Magnifier in the conversation header. Nothing is hidden: every hit is highlighted in **green**, the ↑ / ↓ buttons jump between them (with a `2/7` counter), the bubble you land on gets a green ring, and typing a new query jumps to the first hit | local database |
@@ -184,6 +184,35 @@ Limits: **25 MB** per file in the app, 26 MB server-side, 12 uploads per rolling
 minute. Some shared hosts cap PHP uploads at 2 MB (`upload_max_filesize` /
 `post_max_size` in the PHP settings) — the app then shows the server's message
 instead of failing silently, and the limit has to be raised in the hosting panel.
+
+---
+
+## 1d. Device notifications
+
+A new message raises a real Android notification (`notifications/ChatNotifications.kt`).
+
+| Behaviour | Detail |
+| --- | --- |
+| Channel | `chat_messages`, **High** importance, sound + vibration + lights, so it can pop as a heads-up banner. Users can mute chat alone in system settings. |
+| One per conversation | The notification is a `MessagingStyle` bubble list titled with the student's name. Messages arriving from the same student are **appended to that notification**, not stacked as new ones. |
+| Grouped | Every conversation notification is a child of one summary (`InboxStyle`, "3 new messages · From 2 students"). Children only alert once — the summary is the one that rings. |
+| Tap | Opens `MainActivity` (`singleTop`) with the peer id; the view model switches to the chat tab and opens that conversation. Tapping the summary opens the chat list. |
+| Clearing | The notification disappears the moment you open that conversation, and as soon as the rows are marked read. Signing out cancels everything. |
+| Not shown when | You are on the chat list (the badges already say it) or that conversation is on screen. Notifications are also suppressed entirely if the permission is off. |
+
+**When do they arrive?** The relay is polled, so delivery follows the polling
+window:
+
+* chat tab open — 2 s loop, and no notification for the open conversation;
+* anywhere else in the app, or the app in the background — the extra
+  `CHAT_BACKGROUND_POLL_MS` (10 s) loop keeps fetching and notifying;
+* app **not running** — nothing can be delivered until it starts again. There is
+  no push service: the relay has no way to wake a killed app. Real
+  background-when-closed delivery needs FCM (a Firebase project plus a key on the
+  server) and is not part of this implementation.
+
+Android 13+ asks for `POST_NOTIFICATIONS` on first launch; declining is harmless
+— chat still works, just silently.
 
 ---
 
