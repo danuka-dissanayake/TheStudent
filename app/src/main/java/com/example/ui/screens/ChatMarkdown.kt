@@ -26,13 +26,14 @@ data class ChatMarkdownColors(
  * A deliberately small Markdown renderer for chat bubbles.
  *
  * Supports what students actually type in a chat, not a full CommonMark parser:
- * `**bold**` (two asterisks), `_italic_` (two underscores), `~~strike~~`,
- * `` `code` ``, fenced blocks, `# headings`, `-`/`*`/`1.` lists, `>` quotes and
- * `[links](https://…)`.
+ * `*bold*` (or `**bold**`), `_italic_` (or `__italic__`), `~strike~` (or
+ * `~~strike~~`), `` `code` ``, fenced blocks, `# headings`, `-`/`*`/`1.` lists,
+ * `>` quotes and `[links](https://…)`.
  *
- * Deliberately *not* supported: a single `*` for italic (it collides with
- * bullets and with maths like 2 * 3 * 4) and `__bold__` (underscores double as
- * part of identifiers such as student_id).
+ * Markers are one character on each side, because that is what people type on a
+ * phone keyboard; the doubled forms are accepted too so pasted Markdown still
+ * works. A marker followed by a space is never emphasis, which keeps `* item`
+ * bullets and sums like `2 * 3 * 4` intact.
  *
  * Everything is rendered into a single [AnnotatedString], so a message still
  * lays out as one text block (no extra composables per line) and the existing
@@ -184,8 +185,10 @@ object ChatMarkdown {
                 }
             }
 
-            // **bold** — asterisks doubled. A single * is left as typed.
+            // Bold: *one* or **two** asterisks on each side.
+            // Doubles are tried first so **a** is not read as *"*a*"*.
             val bold = matchDelimited(text, index, "**", "**")
+                ?: matchDelimited(text, index, "*", "*")
             if (bold != null) {
                 withSpan(base.copy(fontWeight = FontWeight.Bold)) {
                     appendInline(bold.first, base.copy(fontWeight = FontWeight.Bold), colors, highlight)
@@ -194,8 +197,9 @@ object ChatMarkdown {
                 continue
             }
 
-            // ~~strikethrough~~
+            // Strikethrough: ~one~ or ~~two~~ tildes on each side.
             val strike = matchDelimited(text, index, "~~", "~~")
+                ?: matchDelimited(text, index, "~", "~")
             if (strike != null) {
                 withSpan(base.copy(textDecoration = TextDecoration.LineThrough)) {
                     appendInline(
@@ -209,9 +213,9 @@ object ChatMarkdown {
                 continue
             }
 
-            // _italic_ — underscores only. Guarded so snake_case / file_names
-            // are not half-italicised: the opening _ must not follow a letter or
-            // digit, and the closing one must not precede one.
+            // Italic: _one_ or __two__ underscores. Guarded so snake_case /
+            // file_names are not half-italicised: the opening underscore must not
+            // follow a letter or digit, and the closing one must not precede one.
             val italic = matchUnderscoreItalic(text, index)
             if (italic != null) {
                 withSpan(base.copy(fontStyle = FontStyle.Italic)) {
@@ -255,16 +259,18 @@ object ChatMarkdown {
      */
     private fun matchUnderscoreItalic(text: String, start: Int): Pair<String, Int>? {
         if (start >= text.length || text[start] != '_') return null
-        if (start > 0 && (text[start - 1].isLetterOrDigit())) return null
+        if (start > 0 && text[start - 1].isLetterOrDigit()) return null
 
-        val contentStart = start + 1
+        // Prefer the doubled form when the text offers one.
+        val marker = if (text.startsWith("__", start)) "__" else "_"
+        val contentStart = start + marker.length
         if (contentStart >= text.length) return null
         if (text[contentStart] == ' ' || text[contentStart] == '_') return null
 
         var cursor = contentStart
         while (cursor < text.length) {
-            if (text[cursor] == '_') {
-                val after = cursor + 1
+            if (text.startsWith(marker, cursor)) {
+                val after = cursor + marker.length
                 val closesWord = after < text.length && text[after].isLetterOrDigit()
                 if (!closesWord) {
                     return text.substring(contentStart, cursor) to after

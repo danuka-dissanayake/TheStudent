@@ -104,9 +104,9 @@ still a single `Text` and the emoji-sizing and search highlight keep working):
 
 | Syntax | Result |
 | --- | --- |
-| `**bold**` | bold (two asterisks) |
-| `_italic_` | italic (two underscores, never inside a word) |
-| `~~strike~~` | struck through |
+| `*bold*` or `**bold**` | **bold** |
+| `_italic_` or `__italic__` | *italic* (never inside a word) |
+| `~strike~` or `~~strike~~` | struck through |
 | ``` `code` ``` | monospace chip with a tinted background |
 | ```` ``` ```` fenced block | monospace lines on a tinted background (fences hidden) |
 | `# H1` … `### H3` | bold 17 / 15.5 / 14.5 sp headings |
@@ -115,9 +115,17 @@ still a single `Text` and the emoji-sizing and search highlight keep working):
 | `> quote` | italic with a `▍` marker |
 | `[label](url)` | underlined link colour (tap behaviour unchanged) |
 
-Not supported on purpose: a single `*` for italic (it collides with `*` bullets
-and with maths like `2 * 3 * 4`) and `__bold__` (underscores double as part of
-identifiers such as `student_id`). Both are left exactly as typed.
+Markers are **one character on each side**, because that is what people type on
+a phone keyboard; the doubled forms are accepted as well so pasted Markdown keeps
+working. Two guards keep ordinary text safe:
+
+* a marker followed by a space is never emphasis, so `* item` stays a bullet and
+  `2 * 3 * 4` is left as written;
+* `_` only italicises when it is not glued to a word, so `student_id` and
+  `file_name` survive untouched.
+
+Inside code spans (`` `…` ``) nothing is interpreted, so `*` in code stays literal.
+Emphasis nests: `*bold with _italic_ inside*` renders both.
 
 Colours adapt to the bubble: white text, translucent code chips and a mint link
 colour inside the black outgoing bubble; ink text, grey chips and emerald links
