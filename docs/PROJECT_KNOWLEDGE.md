@@ -189,6 +189,23 @@ Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_b
 
 ---
 
+## 8b. Mandatory profile setup (added with the compliance/production batch)
+
+No account reaches the dashboard until `users.profile_completed_at` is set.
+
+* `POST api/auth.php?action=complete_profile` (multipart or JSON) collects phone,
+  curriculum, institution, stream/degree, profile photo and — for Google-only
+  accounts — a first password.
+* `api/_avatar.php` validates uploads (real image via `getimagesize`, size,
+  dimensions, MIME), re-encodes them to JPEG with GD (kills polyglots/EXIF),
+  stores a random 32-hex name in `uploads/avatars/`, and that folder denies
+  script execution.
+* Android: `AppScreenFlow.PROFILE_SETUP` between AUTH and MAIN,
+  `ui/screens/ProfileSetupScreen.kt`, `data/remote/AvatarPreparer.kt`,
+  `TheStudentAuthClient.completeProfile()`, Room v2 migration for the new
+  profile columns.
+* Full details: `docs/PROFILE_ONBOARDING.md`.
+
 ## 9. Findings worth fixing (ranked)
 
 1. ✅ **FIXED — live secrets were committed to git.** `backend/config.php` now reads credentials from

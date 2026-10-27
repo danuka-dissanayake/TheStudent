@@ -12,6 +12,9 @@
 backend_directadmin/
 backend/uploads/*
 !backend/uploads/.htaccess
+!backend/uploads/avatars/
+!backend/uploads/avatars/.htaccess
+!backend/uploads/avatars/README.txt
 
 # Backend secrets (never commit real credentials)
 backend/config.secrets.php

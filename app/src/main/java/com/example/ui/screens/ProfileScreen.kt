@@ -16,6 +16,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -82,15 +83,29 @@ fun ProfileScreen(
                             Surface(
                                 shape = CircleShape,
                                 color = EmeraldPrimary,
-                                modifier = Modifier.size(60.dp)
+                                modifier = Modifier
+                                    .size(60.dp)
+                                    .testTag("profile_avatar")
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
-                                    Text(
-                                        text = userProfile.name.split(" ").map { it.take(1) }.joinToString(""),
-                                        fontSize = 22.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White
-                                    )
+                                    val avatar = userProfile.avatarUrl
+                                    if (avatar.isNotBlank()) {
+                                        // Uploaded profile photo (or the Google
+                                        // avatar when no upload happened yet).
+                                        coil.compose.AsyncImage(
+                                            model = avatar,
+                                            contentDescription = "Profile photo",
+                                            contentScale = ContentScale.Crop,
+                                            modifier = Modifier.fillMaxSize()
+                                        )
+                                    } else {
+                                        Text(
+                                            text = userProfile.name.split(" ").map { it.take(1) }.joinToString(""),
+                                            fontSize = 22.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
                                 }
                             }
 

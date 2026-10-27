@@ -15,6 +15,8 @@
  *   POST reset_password          {reset_token, new_password}
  *   POST change_password         {current_password, new_password}   [Bearer]
  *   POST google_login            {id_token, target_exam?}
+ *   POST complete_profile        multipart or JSON {full_name, phone, target_exam,
+ *                                institution, stream_or_degree, password?, avatar?}
  *   GET  me                      [Bearer]  (alias: profile)
  *   POST delete_account          {password?}                        [Bearer]
  *   POST logout                  [Bearer]
@@ -49,6 +51,7 @@ ts_install_error_handlers();
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../smtp_mailer.php';
+require_once __DIR__ . '/_avatar.php';   // hardened profile-picture pipeline
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -69,9 +72,18 @@ const TS_PASSWORD_MIN_LENGTH        = 8;
 const TS_PASSWORD_MAX_BYTES         = 72;   // bcrypt hard limit
 const TS_RESET_TOKEN_TTL_MINUTES    = 15;
 const TS_MAX_BODY_BYTES             = 65536;
+const TS_PROFILE_NAME_MIN           = 3;
+const TS_PROFILE_NAME_MAX           = 80;
+const TS_PROFILE_INSTITUTION_MIN    = 2;
+const TS_PROFILE_INSTITUTION_MAX    = 120;
+const TS_PROFILE_STREAM_MIN         = 2;
+const TS_PROFILE_STREAM_MAX         = 150;
+
+/** Curricula the profile screen offers. Anything else is rejected. */
+const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Professional'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.1.0';
+const TS_API_VERSION                = '3.2.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -152,6 +164,14 @@ function requirePost(string $action): void
  */
 function readJsonBody(): array
 {
+    // multipart/form-data (profile photo upload): PHP has already parsed the
+    // fields into $_POST and the file into $_FILES, and php://input is empty.
+    // The JSON size limit does not apply — _avatar.php enforces its own.
+    $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? ''));
+    if (strpos($contentType, 'multipart/form-data') === 0) {
+        return is_array($_POST) ? $_POST : [];
+    }
+
     $length = (int) ($_SERVER['CONTENT_LENGTH'] ?? 0);
     if ($length > TS_MAX_BODY_BYTES) {
         sendJsonResponse('error', 'Request body too large.', [], 413);
@@ -279,6 +299,9 @@ function ensureAuthSchema(PDO $pdo): void
     ts_ensure_column($pdo, 'users', 'auth_provider', "ENUM('email','google') NOT NULL DEFAULT 'email'");
     ts_ensure_column($pdo, 'users', 'target_exam', "VARCHAR(100) NOT NULL DEFAULT 'G.C.E. A/L'");
     ts_ensure_column($pdo, 'users', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+    // Profile completion (added with the mandatory profile-setup screen).
+    ts_ensure_column($pdo, 'users', 'phone', 'VARCHAR(20) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'profile_completed_at', 'DATETIME NULL DEFAULT NULL');
 
     ts_ensure_column($pdo, 'email_verifications', 'attempts', 'TINYINT UNSIGNED NOT NULL DEFAULT 0');
     ts_ensure_column($pdo, 'email_verifications', 'is_used', 'TINYINT(1) NOT NULL DEFAULT 0');
@@ -377,6 +400,124 @@ function validateFullName($value): string
         $name = substr($name, 0, 150);
     }
     return $name;
+}
+
+/**
+ * Strip control characters and tags, collapse whitespace, and enforce a length
+ * range. Prepared statements already stop SQL injection; this keeps the stored
+ * value clean and predictable for the admin panel and the app.
+ */
+function validateProfileText($value, string $label, int $min, int $max): string
+{
+    $text = (string) $value;
+    $text = strip_tags($text);
+    // Drop control characters; the /u flag is dropped on invalid UTF-8 input
+    // (preg_* returns null then), which is exactly the junk we want gone.
+    $text = (string) preg_replace('/[\x00-\x1F\x7F]/', ' ', $text);
+    $collapsed = preg_replace('/\s+/u', ' ', $text);
+    $text = trim($collapsed !== null ? $collapsed : (string) preg_replace('/\s+/', ' ', $text));
+
+    // mbstring is not guaranteed on shared hosting; fall back to byte length.
+    $length = function_exists('mb_strlen') ? mb_strlen($text, 'UTF-8') : strlen($text);
+
+    if ($length < $min) {
+        sendJsonResponse('error', $label . ' must be at least ' . $min . ' characters.', [], 400);
+    }
+    if ($length > $max) {
+        sendJsonResponse('error', $label . ' must be at most ' . $max . ' characters.', [], 400);
+    }
+    if (preg_match('/[<>]/', $text)) {
+        sendJsonResponse('error', $label . ' contains characters that are not allowed.', [], 400);
+    }
+    return $text;
+}
+
+/**
+ * Accept the ways a Sri Lankan number is written and store E.164 (+94XXXXXXXXX).
+ * 0712345678 / 071 234 5678 / +94712345678 / 94712345678 all normalise to
+ * +94712345678. Other countries are accepted only in full international form.
+ */
+function validatePhoneNumber($value): string
+{
+    $raw = trim((string) $value);
+    if ($raw === '') {
+        sendJsonResponse('error', 'Please enter your phone number.', [], 400);
+    }
+
+    $digits = (string) preg_replace('/[^0-9]/', '', $raw);
+    $hadPlus = strncmp($raw, '+', 1) === 0;
+
+    if ($digits === '') {
+        sendJsonResponse('error', 'Please enter a valid phone number.', [], 400);
+    }
+
+    // Local Sri Lankan mobile/landline: 0 + 9 digits.
+    if (!$hadPlus && strlen($digits) === 10 && $digits[0] === '0') {
+        $digits = '94' . substr($digits, 1);
+    }
+
+    if (strlen($digits) === 11 && strncmp($digits, '94', 2) === 0) {
+        // Sri Lankan mobile numbers start with 7 after the country code.
+        if ($digits[2] !== '7' && $digits[2] !== '1' && $digits[2] !== '2'
+            && $digits[2] !== '3' && $digits[2] !== '4' && $digits[2] !== '5'
+            && $digits[2] !== '6' && $digits[2] !== '8' && $digits[2] !== '9') {
+            sendJsonResponse('error', 'Please enter a valid Sri Lankan phone number.', [], 400);
+        }
+        return '+' . $digits;
+    }
+
+    // Any other country: full international form only, 8-15 digits.
+    if ($hadPlus && strlen($digits) >= 8 && strlen($digits) <= 15) {
+        return '+' . $digits;
+    }
+
+    sendJsonResponse('error', 'Enter a valid phone number, for example 071 234 5678.', [], 400);
+}
+
+/** Whitelist the curriculum. */
+function validateTargetExam($value): string
+{
+    $exam = trim((string) $value);
+    if (!in_array($exam, TS_ALLOWED_TARGET_EXAMS, true)) {
+        sendJsonResponse(
+            'error',
+            'Please choose your curriculum: ' . implode(', ', TS_ALLOWED_TARGET_EXAMS) . '.',
+            [],
+            400
+        );
+    }
+    return $exam;
+}
+
+/** Has the student finished the mandatory profile-setup step? */
+function isProfileComplete(array $user): bool
+{
+    return !empty($user['profile_completed_at']);
+}
+
+/** Fields the app should still ask for (drives the setup screen). */
+function missingProfileFields(array $user): array
+{
+    $missing = [];
+    if (trim((string) ($user['full_name'] ?? '')) === '') {
+        $missing[] = 'full_name';
+    }
+    if (trim((string) ($user['phone'] ?? '')) === '') {
+        $missing[] = 'phone';
+    }
+    if (trim((string) ($user['institution'] ?? '')) === '') {
+        $missing[] = 'institution';
+    }
+    if (trim((string) ($user['stream_or_degree'] ?? '')) === '') {
+        $missing[] = 'stream_or_degree';
+    }
+    if (empty($user['profile_picture'])) {
+        $missing[] = 'profile_picture';
+    }
+    if (empty($user['password_hash'])) {
+        $missing[] = 'password';
+    }
+    return $missing;
 }
 
 function hashPassword(string $password): string
@@ -704,6 +845,14 @@ function publicUser(array $user): array
         'name'            => $user['full_name'] ?? 'Student',
         'email'           => $user['email'] ?? '',
         'profile_picture' => $user['profile_picture'] ?? null,
+        // Absolute URL the app can load directly (Google URL or our upload).
+        'avatar_url'      => ts_avatar_public_url($user['profile_picture'] ?? null),
+        'phone'           => $user['phone'] ?? null,
+        'profile_completed' => isProfileComplete($user),
+        'missing_profile_fields' => isProfileComplete($user) ? [] : missingProfileFields($user),
+        // A Google-only account has no password yet: the setup screen asks for
+        // one so the student can also sign in with email.
+        'has_password'    => !empty($user['password_hash']),
         'target_exam'     => $user['target_exam'] ?? 'G.C.E. A/L',
         'institution'     => $user['institution'] ?? null,
         'stream_or_degree' => $user['stream_or_degree'] ?? null,
@@ -958,6 +1107,155 @@ if ($action === 'register') {
         'masked_email'        => maskEmail($email),
         'verification_reason' => 'registration',
         'resend_cooldown'     => TS_OTP_RESEND_COOLDOWN_SEC,
+    ]);
+}
+
+// ===========================================================================
+// 1b. COMPLETE PROFILE (mandatory after sign-up / Google sign-in)
+// ===========================================================================
+/**
+ * The details Google (or a bare e-mail sign-up) cannot give us: phone number,
+ * school/institution, stream, a profile photo and — for Google-only accounts —
+ * a password.
+ *
+ * Accepts JSON (no photo) or multipart/form-data (`avatar` file + fields), so a
+ * single request stores everything and the student never lands in the app with
+ * half a profile.
+ *
+ * Security notes:
+ *  • session required (bearer token), so you can only edit your own profile;
+ *  • every value is validated server-side — the app's checks are only UX;
+ *  • SQL uses prepared statements with named parameters (no string building);
+ *  • the photo goes through api/_avatar.php (type sniffing + GD re-encode);
+ *  • a password is only ever SET here when the account has none.
+ */
+if ($action === 'complete_profile') {
+    requirePost('complete_profile');
+
+    [$user] = requireSession($pdo, false);
+    $userId = (int) $user['id'];
+    $alreadyComplete = isProfileComplete($user);
+    $hadPassword = !empty($user['password_hash']);
+    $previousPicture = $user['profile_picture'] ?? null;
+
+    // ---- text fields -----------------------------------------------------
+    $fullName = validateProfileText(
+        $body['full_name'] ?? '',
+        'Full name',
+        TS_PROFILE_NAME_MIN,
+        TS_PROFILE_NAME_MAX
+    );
+    $phone = validatePhoneNumber($body['phone'] ?? '');
+    $targetExam = validateTargetExam($body['target_exam'] ?? '');
+    $institution = validateProfileText(
+        $body['institution'] ?? '',
+        'School or institution',
+        TS_PROFILE_INSTITUTION_MIN,
+        TS_PROFILE_INSTITUTION_MAX
+    );
+    $stream = validateProfileText(
+        $body['stream_or_degree'] ?? '',
+        'Stream or programme',
+        TS_PROFILE_STREAM_MIN,
+        TS_PROFILE_STREAM_MAX
+    );
+
+    // ---- password (Google-only accounts) ---------------------------------
+    $newPasswordHash = null;
+    if (!$hadPassword) {
+        $plainPassword = (string) ($body['password'] ?? '');
+        if ($plainPassword === '') {
+            sendJsonResponse(
+                'error',
+                'Please choose a password so you can also sign in with your email.',
+                ['missing_profile_fields' => ['password']],
+                400
+            );
+        }
+        validatePassword($plainPassword, 'Password');
+        $newPasswordHash = hashPassword($plainPassword);
+    }
+
+    // ---- profile photo ---------------------------------------------------
+    $avatarPath = null;
+    $avatarFile = $_FILES['avatar'] ?? null;
+    if (is_array($avatarFile) && ($avatarFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+        try {
+            $avatarPath = ts_store_avatar($avatarFile, $userId);
+        } catch (RuntimeException $e) {
+            // Message is written for students, never a stack trace.
+            sendJsonResponse('error', $e->getMessage(), ['field' => 'avatar'], 400);
+        }
+    }
+
+    if ($avatarPath === null && empty($previousPicture)) {
+        sendJsonResponse(
+            'error',
+            'Please add a profile photo to finish setting up your account.',
+            ['field' => 'avatar', 'missing_profile_fields' => ['profile_picture']],
+            400
+        );
+    }
+
+    // ---- persist (single UPDATE, prepared) -------------------------------
+    $sql = 'UPDATE users SET
+                full_name = :full_name,
+                phone = :phone,
+                target_exam = :target_exam,
+                institution = :institution,
+                stream_or_degree = :stream,
+                profile_completed_at = NOW(),
+                updated_at = NOW()';
+    $params = [
+        'full_name'   => $fullName,
+        'phone'       => $phone,
+        'target_exam' => $targetExam,
+        'institution' => $institution,
+        'stream'      => $stream,
+        'id'          => $userId,
+    ];
+
+    if ($avatarPath !== null) {
+        $sql .= ', profile_picture = :avatar';
+        $params['avatar'] = $avatarPath;
+    }
+    if ($newPasswordHash !== null) {
+        $sql .= ', password_hash = :password_hash';
+        $params['password_hash'] = $newPasswordHash;
+    }
+    $sql .= ' WHERE id = :id';
+
+    try {
+        $pdo->prepare($sql)->execute($params);
+    } catch (Throwable $e) {
+        // Roll back a stored file so we never keep an orphaned avatar.
+        if ($avatarPath !== null) {
+            ts_avatar_delete($avatarPath);
+        }
+        $ref = bin2hex(random_bytes(4));
+        error_log('[TheStudent][auth][' . $ref . '] complete_profile failed: ' . $e->getMessage());
+        sendJsonResponse(
+            'error',
+            'We could not save your profile right now. Reference: ' . $ref,
+            ['ref' => $ref],
+            500
+        );
+    }
+
+    // The old photo is only removed once the row actually points at the new one.
+    if ($avatarPath !== null) {
+        ts_avatar_delete($previousPicture);
+    }
+
+    $fresh = $pdo->prepare('SELECT * FROM users WHERE id = :id');
+    $fresh->execute(['id' => $userId]);
+    $updatedUser = $fresh->fetch() ?: $user;
+
+    $message = $alreadyComplete ? 'Profile updated.' : 'Profile complete. Welcome to TheStudent!';
+    sendJsonResponse('success', $message, [
+        'user'       => publicUser($updatedUser),
+        'role'       => $updatedUser['role'] ?? 'student',
+        'expires_at' => null,
     ]);
 }
 
@@ -1625,6 +1923,10 @@ if ($action === 'delete_account') {
         error_log('[TheStudent][auth] account deletion failed: ' . $e->getMessage());
         sendJsonResponse('error', 'We could not delete your account right now. Please try again.', [], 500);
     }
+
+    // Remove the uploaded profile photo too - "your data is deleted" must be
+    // literally true, and orphaned avatars are still personal data.
+    ts_avatar_delete($user['profile_picture'] ?? null);
 
     // No personal data is kept; the id only goes to the server log for auditing.
     error_log('[TheStudent][auth] account deleted: user ' . $userId);

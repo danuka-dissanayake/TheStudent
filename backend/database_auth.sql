@@ -18,6 +18,8 @@ CREATE TABLE IF NOT EXISTS `users` (
   `role` ENUM('student', 'admin') NOT NULL DEFAULT 'student',
   `is_email_verified` TINYINT(1) NOT NULL DEFAULT 0,
   `is_active` TINYINT(1) NOT NULL DEFAULT 1,
+  `phone` VARCHAR(20) NULL DEFAULT NULL,
+  `profile_completed_at` DATETIME NULL DEFAULT NULL,
   `last_login_ip` VARCHAR(45) NULL,
   `last_login_at` DATETIME NULL,
   `suspicious_flag` TINYINT(1) NOT NULL DEFAULT 0,

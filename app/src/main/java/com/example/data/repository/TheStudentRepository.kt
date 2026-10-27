@@ -144,7 +144,11 @@ class TheStudentRepository(private val dao: TheStudentDao) {
                 studyHoursThisWeek = profile.studyHoursThisWeek,
                 totalPapersSolved = profile.totalPapersSolved,
                 points = profile.points,
-                isLoggedIn = profile.isLoggedIn
+                isLoggedIn = profile.isLoggedIn,
+                phone = profile.phone,
+                avatarUrl = profile.avatarUrl,
+                profileCompleted = profile.profileCompleted,
+                hasPassword = profile.hasPassword
             )
         )
     }

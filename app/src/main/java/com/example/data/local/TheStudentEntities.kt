@@ -52,5 +52,11 @@ data class UserProfileEntity(
     val studyHoursThisWeek: Float,
     val totalPapersSolved: Int,
     val points: Int,
-    val isLoggedIn: Boolean
+    val isLoggedIn: Boolean,
+    // Added in schema v2 for the mandatory profile-setup step. Defaults keep the
+    // migration trivial and mean "nothing known yet", not "complete".
+    val phone: String = "",
+    val avatarUrl: String = "",
+    val profileCompleted: Boolean = true,
+    val hasPassword: Boolean = true
 )

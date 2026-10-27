@@ -55,6 +55,12 @@ class MainActivity : ComponentActivity() {
                 coroutineScope.launch { drawerState.close() }
             }
 
+            // The profile step cannot be skipped with the system back gesture;
+            // "Sign out" on the screen is the only way out.
+            BackHandler(enabled = uiState.screenFlow == AppScreenFlow.PROFILE_SETUP) {
+                // consumed on purpose
+            }
+
             BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.activeChatConversation != null)) {
                 if (uiState.activeChatConversation != null) {
                     viewModel.closeChat()
@@ -80,7 +86,9 @@ class MainActivity : ComponentActivity() {
                 LaunchedEffect(uiState.screenFlow) {
                     val from = prevScreenFlow.value
                     val to = uiState.screenFlow
-                    if ((from == AppScreenFlow.AUTH || from == AppScreenFlow.ONBOARDING) &&
+                    if ((from == AppScreenFlow.AUTH ||
+                            from == AppScreenFlow.ONBOARDING ||
+                            from == AppScreenFlow.PROFILE_SETUP) &&
                         to == AppScreenFlow.MAIN
                     ) {
                         showNavShimmer = true
@@ -170,6 +178,20 @@ class MainActivity : ComponentActivity() {
                                     }
                                 )
                             }
+                        }
+                        AppScreenFlow.PROFILE_SETUP -> {
+                            // Mandatory: phone, school, stream, photo (+ password
+                            // for Google-only accounts) before the dashboard.
+                            ProfileSetupScreen(
+                                initialProfile = userProfile,
+                                isSaving = uiState.isSavingProfile,
+                                errorMessage = uiState.profileSetupError,
+                                onSubmit = { submission ->
+                                    viewModel.submitProfileSetup(submission)
+                                },
+                                onDismissError = { viewModel.clearProfileSetupError() },
+                                onSignOut = { viewModel.logout() }
+                            )
                         }
                         AppScreenFlow.MAIN -> {
                             if (!uiState.isAuthenticated && !viewModel.preferences.isLoggedIn) {

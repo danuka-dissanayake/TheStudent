@@ -143,7 +143,37 @@ data class UserProfile(
     val studyHoursThisWeek: Float = 0f,
     val totalPapersSolved: Int = 0,
     val points: Int = 0,
-    val isLoggedIn: Boolean = false
+    val isLoggedIn: Boolean = false,
+    /** E.164 phone number collected on the profile-setup screen. */
+    val phone: String = "",
+    /** Absolute URL of the profile photo (uploaded file or the Google avatar). */
+    val avatarUrl: String = "",
+    /**
+     * False until the mandatory profile-setup step has been submitted.
+     * Defaults to true so cached/guest profiles are never blocked, and only an
+     * explicit `profile_completed: false` from the server opens the gate.
+     */
+    val profileCompleted: Boolean = true,
+    /** False for Google-only accounts: the setup screen must ask for a password. */
+    val hasPassword: Boolean = true,
+    val authProvider: String = "email"
+)
+
+/**
+ * What the profile-setup screen sends to `?action=complete_profile`.
+ *
+ * [avatarJpeg] is already decoded, downscaled and re-encoded by
+ * `AvatarPreparer`, so it is always a small, valid JPEG.
+ */
+@Suppress("ArrayInDataClass")
+data class ProfileSetupSubmission(
+    val fullName: String,
+    val phone: String,
+    val targetExam: String,
+    val institution: String,
+    val streamOrDegree: String,
+    val password: String? = null,
+    val avatarJpeg: ByteArray? = null
 )
 
 data class OnlineStudent(

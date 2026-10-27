@@ -45,6 +45,14 @@ enum class AppScreenFlow {
     SPLASH,
     ONBOARDING,
     AUTH,
+
+    /**
+     * Mandatory profile-setup step, shown after a successful sign-up / sign-in
+     * and on every cold start until the server reports `profile_completed`.
+     * It sits between AUTH and MAIN so there is no path into the dashboard that
+     * skips it.
+     */
+    PROFILE_SETUP,
     MAIN
 }
 
@@ -75,6 +83,11 @@ data class TheStudentUiState(
     val isOtpAuthMode: Boolean = false,
     val pendingAuthProfile: UserProfile? = null,
     val pendingAuthOtp: String? = null,
+
+    // Mandatory profile setup (phone, institution, stream, photo, password)
+    val needsProfileSetup: Boolean = false,
+    val isSavingProfile: Boolean = false,
+    val profileSetupError: String? = null,
 
     // Redesigned AI Tutor (English Voice Assistant with Hugging Face Qwen/Gemma)
     val voiceAssistantState: AssistantVoiceState = AssistantVoiceState.IDLE,
@@ -309,7 +322,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     studyHoursThisWeek = entity.studyHoursThisWeek,
                     totalPapersSolved = entity.totalPapersSolved,
                     points = entity.points,
-                    isLoggedIn = entity.isLoggedIn
+                    isLoggedIn = entity.isLoggedIn,
+                    phone = entity.phone,
+                    avatarUrl = entity.avatarUrl,
+                    profileCompleted = entity.profileCompleted,
+                    hasPassword = entity.hasPassword
                 )
             } else {
                 UserProfile()
@@ -491,7 +508,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     preferences.updateRoleFromServer(validation.role)
                     validation.expiresAt?.let { preferences.sessionExpiresAt = it }
                     _isAdmin.value = preferences.isAdmin
-                    _uiState.update { it.copy(isAuthenticated = true, isSessionVerified = true) }
+                    // A session whose profile was never completed (app killed on
+                    // the setup screen, or an older account) is sent straight back
+                    // to setup on the next launch instead of into the dashboard.
+                    val needsSetup = !validation.profile.profileCompleted
+                    _uiState.update {
+                        it.copy(
+                            isAuthenticated = true,
+                            isSessionVerified = true,
+                            needsProfileSetup = needsSetup
+                        )
+                    }
                 }
 
                 is SessionValidation.Invalid -> {
@@ -534,8 +561,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 Log.w("TheStudentViewModel", "Session check timeout: ${e.message}")
             }
 
-            val isAuth = _uiState.value.isAuthenticated && preferences.isLoggedIn
+            val state = _uiState.value
+            val isAuth = state.isAuthenticated && preferences.isLoggedIn
             val targetFlow = when {
+                isAuth && state.needsProfileSetup -> AppScreenFlow.PROFILE_SETUP
                 isAuth -> AppScreenFlow.MAIN
                 preferences.isOnboarded -> AppScreenFlow.AUTH
                 else -> AppScreenFlow.ONBOARDING
@@ -594,6 +623,29 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun handleAuthSuccess(profile: UserProfile) {
         viewModelScope.launch {
             preferences.isOnboarded = true
+
+            // ── Mandatory profile setup ────────────────────────────────────
+            // Email sign-up knows only name+email, and Google knows only
+            // name+email+picture. Phone, school, stream, photo and a password
+            // are collected here before the student can reach the dashboard.
+            if (!profile.profileCompleted) {
+                preferences.isGuest = false
+                preferences.userName = profile.name
+                preferences.userEmail = profile.email
+                repository.saveUserProfile(profile.copy(isLoggedIn = true))
+                _uiState.update {
+                    it.copy(
+                        isAuthenticated = true,
+                        needsProfileSetup = true,
+                        screenFlow = AppScreenFlow.PROFILE_SETUP,
+                        isOtpAuthMode = false,
+                        pendingAuthProfile = null,
+                        pendingAuthOtp = null
+                    )
+                }
+                return@launch
+            }
+
             // NOTE: do not force isLoggedIn here. TheStudentPreferences.setSession()
             // already stored the session with the user's "remember me" choice, and
             // overriding it would silently keep a session alive that the user asked
@@ -607,6 +659,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             _uiState.update {
                 it.copy(
                     isAuthenticated = true,
+                    needsProfileSetup = false,
                     screenFlow = AppScreenFlow.MAIN,
                     isOtpAuthMode = false,
                     pendingAuthProfile = null,
@@ -617,6 +670,104 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             showSnackbar("Welcome to TheStudent, $firstName!")
             simulateSkeletonRefresh()
         }
+    }
+
+    // ── Mandatory profile setup ───────────────────────────────────────────────
+    /**
+     * Submit the phone / school / stream / photo (+ password for Google-only
+     * accounts) that sign-up could not collect.
+     *
+     * The server re-validates everything; on success the refreshed profile is
+     * cached and the flow moves to MAIN. Only a 401/403 (dead session) sends the
+     * student back to the auth screen — every other failure keeps the form so no
+     * typed data is lost.
+     */
+    fun submitProfileSetup(submission: ProfileSetupSubmission) {
+        if (_uiState.value.isSavingProfile) return
+
+        val token = preferences.sessionToken
+        if (token.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(
+                    profileSetupError = "Your session expired. Please sign in again.",
+                    isSavingProfile = false
+                )
+            }
+            endSession("Your session expired. Please sign in again.", revokeOnServer = false)
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSavingProfile = true, profileSetupError = null) }
+
+            val result = TheStudentAuthClient.completeProfile(
+                backendBaseUrl = serverUrlState.value,
+                token = token,
+                fullName = submission.fullName,
+                phone = submission.phone,
+                targetExam = submission.targetExam,
+                institution = submission.institution,
+                streamOrDegree = submission.streamOrDegree,
+                password = submission.password,
+                avatarJpeg = submission.avatarJpeg
+            )
+
+            when (result) {
+                is AuthApiResult.Success -> {
+                    val profile = result.profile.copy(isLoggedIn = true, profileCompleted = true)
+                    repository.saveUserProfile(profile)
+                    preferences.isLoggedIn = true
+                    preferences.isGuest = false
+                    preferences.userName = profile.name
+                    preferences.userEmail = profile.email
+                    result.expiresAt?.let { preferences.sessionExpiresAt = it }
+                    _uiState.update {
+                        it.copy(
+                            isAuthenticated = true,
+                            needsProfileSetup = false,
+                            isSavingProfile = false,
+                            profileSetupError = null,
+                            screenFlow = AppScreenFlow.MAIN
+                        )
+                    }
+                    val firstName = profile.name.trim().split(" ").firstOrNull().orEmpty()
+                    showSnackbar(
+                        if (firstName.isBlank()) "Your profile is ready!" else "You're all set, $firstName!"
+                    )
+                    simulateSkeletonRefresh()
+                }
+
+                is AuthApiResult.Error -> {
+                    _uiState.update {
+                        it.copy(
+                            isSavingProfile = false,
+                            profileSetupError = result.message
+                        )
+                    }
+                    if (result.invalidatesSession) {
+                        endSession(result.message, revokeOnServer = false)
+                    }
+                }
+
+                is AuthApiResult.RequiresOtp -> _uiState.update {
+                    it.copy(
+                        isSavingProfile = false,
+                        profileSetupError = "Please verify your email address first."
+                    )
+                }
+
+                is AuthApiResult.ResetRequired -> _uiState.update {
+                    it.copy(
+                        isSavingProfile = false,
+                        profileSetupError = "Unexpected response from the server. Please try again."
+                    )
+                }
+            }
+        }
+    }
+
+    fun clearProfileSetupError() {
+        _uiState.update { it.copy(profileSetupError = null) }
     }
 
     fun continueAsGuest() {

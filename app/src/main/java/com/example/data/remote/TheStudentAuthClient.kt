@@ -5,6 +5,7 @@ import com.example.data.model.UserProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
@@ -341,6 +342,57 @@ object TheStudentAuthClient {
         }
     }
 
+    /**
+     * Submit the mandatory profile-setup form.
+     *
+     * Sends `multipart/form-data` so the photo and the text fields are stored in
+     * one atomic request. The server validates everything again (the checks in
+     * the UI are only for instant feedback) and returns the refreshed profile
+     * with `profileCompleted = true`.
+     *
+     * @param avatarJpeg Re-encoded, downscaled JPEG bytes from [AvatarPreparer].
+     * @param password Only for Google-only accounts (the server refuses to set a
+     *   password on an account that already has one).
+     */
+    suspend fun completeProfile(
+        backendBaseUrl: String,
+        token: String,
+        fullName: String,
+        phone: String,
+        targetExam: String,
+        institution: String,
+        streamOrDegree: String,
+        password: String? = null,
+        avatarJpeg: ByteArray? = null
+    ): AuthApiResult = withContext(Dispatchers.IO) {
+        val bodyBuilder = MultipartBody.Builder()
+            .setType(MultipartBody.FORM)
+            .addFormDataPart("full_name", fullName.trim())
+            .addFormDataPart("phone", phone.trim())
+            .addFormDataPart("target_exam", targetExam.trim())
+            .addFormDataPart("institution", institution.trim())
+            .addFormDataPart("stream_or_degree", streamOrDegree.trim())
+
+        if (!password.isNullOrEmpty()) {
+            bodyBuilder.addFormDataPart("password", password)
+        }
+        if (avatarJpeg != null && avatarJpeg.isNotEmpty()) {
+            bodyBuilder.addFormDataPart(
+                "avatar",
+                "avatar.jpg",
+                avatarJpeg.toRequestBody("image/jpeg".toMediaType())
+            )
+        }
+
+        executeAuth(
+            Request.Builder()
+                .url(endpoint(backendBaseUrl, "complete_profile"))
+                .post(bodyBuilder.build())
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer $token")
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Internals
     // -----------------------------------------------------------------------
@@ -349,15 +401,20 @@ object TheStudentAuthClient {
         endpointUrl: String,
         payload: JSONObject,
         bearerToken: String? = null
-    ): AuthApiResult {
-        val builder = Request.Builder()
+    ): AuthApiResult = executeAuth(
+        Request.Builder()
             .url(endpointUrl)
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json")
-        if (!bearerToken.isNullOrBlank()) {
-            builder.header("Authorization", "Bearer $bearerToken")
-        }
+            .apply { if (!bearerToken.isNullOrBlank()) header("Authorization", "Bearer $bearerToken") }
+    )
 
+    /**
+     * Single place where an auth response is turned into [AuthApiResult].
+     * Shared by the JSON endpoints and the multipart profile upload so both
+     * surface server errors identically.
+     */
+    private fun executeAuth(builder: Request.Builder): AuthApiResult {
         return try {
             httpClient.newCall(builder.build()).execute().use { response ->
                 val bodyString = response.body?.string().orEmpty()
@@ -501,10 +558,28 @@ object TheStudentAuthClient {
             name = userObj.optString("name", userObj.optString("full_name", "Student")),
             email = userObj.optString("email", ""),
             academicLevel = "G.C.E. Advanced Level",
-            streamOrDegree = userObj.optString("stream_or_degree", "Physical Science"),
-            institution = userObj.optString("institution", "Sri Lanka Education System"),
+            streamOrDegree = userObj.optString("stream_or_degree", ""),
+            institution = userObj.optString("institution", ""),
             targetExam = userObj.optString("target_exam", "G.C.E. A/L"),
-            isLoggedIn = true
+            isLoggedIn = true,
+            phone = userObj.optString("phone", ""),
+            avatarUrl = userObj.optString(
+                "avatar_url",
+                userObj.optString("profile_picture", "")
+            ),
+            // Absent on older server builds -> treat as complete so a rolling
+            // deploy can never trap a signed-in student on the setup screen.
+            profileCompleted = if (userObj.has("profile_completed")) {
+                userObj.optBoolean("profile_completed", true)
+            } else {
+                true
+            },
+            hasPassword = if (userObj.has("has_password")) {
+                userObj.optBoolean("has_password", true)
+            } else {
+                true
+            },
+            authProvider = userObj.optString("auth_provider", "email")
         )
     }
 }

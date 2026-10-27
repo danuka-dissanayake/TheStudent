@@ -181,7 +181,8 @@ The GitHub repo is local to you; the host has no git. Use **File Manager upload*
    > server error log over the web.
 
    > Updating an existing install? Re-upload at minimum: `config.php`, `error_handlers.php`,
-   > `api/auth.php`, `api/health.php`. Then confirm with
+   > `api/auth.php`, `api/health.php`, `api/_avatar.php` (profile-photo uploads), and make sure
+   > `uploads/avatars/.htaccess` exists. Then confirm with
    > `https://app.quizontal.site/api/auth.php?action=version` (see `docs/DEBUGGING.md`).
 
 **Do not** include `database.sql`, `database_auth.sql` or `README_INFINITYFREE.md` — they don't
@@ -205,7 +206,7 @@ public_html/
 │               delete_paper.php, _admin_guard.php)
 ├── admin/     (index.php, _guard.php)
 ├── legal/     (terms.html, privacy.html)
-└── uploads/   (.htaccess, + the paper PDFs)
+└── uploads/   (.htaccess, avatars/ for profile photos, + the paper PDFs)
 ```
 
 ### 2.3 Permissions

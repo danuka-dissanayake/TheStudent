@@ -150,7 +150,7 @@ $report = [
 // --- Database ---------------------------------------------------------------
 $requiredTables = ['users', 'email_verifications', 'user_tokens', 'login_attempts', 'password_resets'];
 $requiredColumns = [
-    'users'               => ['id', 'email', 'password_hash', 'full_name', 'role', 'is_active', 'is_email_verified', 'auth_provider', 'last_login_ip', 'suspicious_flag'],
+    'users'               => ['id', 'email', 'password_hash', 'full_name', 'role', 'is_active', 'is_email_verified', 'auth_provider', 'last_login_ip', 'suspicious_flag', 'phone', 'profile_completed_at'],
     'email_verifications' => ['id', 'user_id', 'email', 'otp_code', 'otp_type', 'pending_data', 'requested_ip', 'attempts', 'is_used', 'expires_at'],
     'user_tokens'         => ['id', 'user_id', 'token', 'expires_at', 'last_used_at'],
     'login_attempts'      => ['id', 'ip_address', 'email', 'attempted_at'],
@@ -270,11 +270,19 @@ if (!empty($report['database']['connected'])) {
 
 // --- Uploads directory ------------------------------------------------------
 $uploads = dirname(__DIR__) . '/uploads';
+$avatars = $uploads . '/avatars';
 $report['uploads'] = [
     'path'      => $uploads,
     'exists'    => is_dir($uploads),
     'writable'  => is_dir($uploads) ? is_writable($uploads) : false,
     'htaccess'  => is_file($uploads . '/.htaccess'),
+    'avatars'   => [
+        'path'     => $avatars,
+        'exists'   => is_dir($avatars),
+        'writable' => is_dir($avatars) ? is_writable($avatars) : false,
+        'htaccess' => is_file($avatars . '/.htaccess'),
+        'gd'       => function_exists('imagecreatefromstring'),
+    ],
 ];
 
 // --- Tail of the PHP error log ---------------------------------------------
