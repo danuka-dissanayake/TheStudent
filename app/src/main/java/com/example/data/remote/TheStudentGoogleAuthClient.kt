@@ -7,6 +7,7 @@ import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialCancellationException
 import androidx.credentials.exceptions.GetCredentialException
+import com.example.BuildConfig
 import com.example.data.model.UserProfile
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -34,7 +35,27 @@ object TheStudentGoogleAuthClient {
 
     private const val TAG = "TheStudentGoogleAuth"
 
-    const val GOOGLE_WEB_CLIENT_ID = "849765952531-7bnroph62m0homvnpfa3nngkmcorb4mf.apps.googleusercontent.com"
+    /**
+     * The *Web* OAuth client ID (a public identifier, not a secret) used as the
+     * server client ID for Credential Manager. It is read from `.env`
+     * (`GOOGLE_WEB_CLIENT_ID`) so no environment-specific value is baked into
+     * the source. The server must use the SAME value in
+     * `backend/config.secrets.php` - otherwise `google_login` rejects the token
+     * with "Token audience mismatch".
+     */
+    val GOOGLE_WEB_CLIENT_ID: String = run {
+        val configured = runCatching { BuildConfig.GOOGLE_WEB_CLIENT_ID.trim() }.getOrDefault("")
+        // `.env.example` ships a placeholder; treat anything unfinished as "unset"
+        // so the known-good client ID is still used for builds without a .env.
+        val isConfigured = configured.isNotBlank() &&
+            !configured.contains("xxxx", ignoreCase = true) &&
+            !configured.contains("YOUR_", ignoreCase = true)
+        if (isConfigured) configured else DEFAULT_GOOGLE_WEB_CLIENT_ID
+    }
+
+    /** Public identifier (not a secret) — the Google "Web application" OAuth client. */
+    private const val DEFAULT_GOOGLE_WEB_CLIENT_ID =
+        "849765952531-7bnroph62m0homvnpfa3nngkmcorb4mf.apps.googleusercontent.com"
 
     private val httpClient = OkHttpClient.Builder()
         .connectTimeout(15, TimeUnit.SECONDS)

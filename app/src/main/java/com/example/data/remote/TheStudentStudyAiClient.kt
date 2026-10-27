@@ -140,6 +140,25 @@ Guidelines:
     }
 
     /**
+     * Resolve the Hugging Face token from, in order:
+     *   1. a token the user pasted at runtime (never persisted by this class),
+     *   2. `HF_API_TOKEN` in `.env` (injected as BuildConfig at build time),
+     *   3. the process environment (CI / local run configurations).
+     *
+     * There is deliberately no built-in fallback: a hardcoded token in the source
+     * is a published credential.
+     */
+    private fun resolveHuggingFaceToken(customToken: String?): String {
+        val custom = customToken?.trim().orEmpty()
+        if (custom.isNotBlank()) return custom
+
+        val fromBuild = runCatching { BuildConfig.HF_API_TOKEN.trim() }.getOrDefault("")
+        if (fromBuild.isNotBlank() && !fromBuild.contains("YOUR_HF_ACCESS_TOKEN_HERE")) return fromBuild
+
+        return runCatching { System.getenv("HF_API_TOKEN")?.trim().orEmpty() }.getOrDefault("")
+    }
+
+    /**
      * Send query to the AI study backend with real-time SSE token streaming and live reasoning support.
      * Supports:
      * - GLM-4.7-Flash (Z.AI Free Tier) with multi-turn tool calling
@@ -951,11 +970,14 @@ Guidelines:
     ): TheStudentAiStudyResponse {
         val startTime = System.currentTimeMillis()
 
-        val token = when {
-            !customToken.isNullOrBlank() -> customToken.trim()
-            BuildConfig.HF_API_TOKEN.isNotBlank() && !BuildConfig.HF_API_TOKEN.contains("YOUR_HF_ACCESS_TOKEN_HERE") -> BuildConfig.HF_API_TOKEN.trim()
-            !System.getenv("HF_API_TOKEN").isNullOrBlank() -> System.getenv("HF_API_TOKEN")!!.trim()
-            else -> "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"
+        // NEVER hardcode a token here. It ships inside the APK and is readable by
+        // anyone who unzips it. Supply it through .env (HF_API_TOKEN) instead.
+        val token = resolveHuggingFaceToken(customToken)
+        if (token.isBlank()) {
+            return TheStudentAiStudyResponse.Error(
+                "The AI tutor is not configured on this build. Add HF_API_TOKEN to the .env file and rebuild.",
+                isAuthError = true
+            )
         }
 
         val targetBaseUrl = (customBaseUrl?.takeIf { it.isNotBlank() } ?: SPACE_DIRECT_URL).trimEnd('/')

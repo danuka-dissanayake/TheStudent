@@ -113,7 +113,8 @@ require an admin bearer token.
 1. **Rotate the leaked credentials** (they are in git history forever):
    * MySQL password for `quizontalcloud_app` (DirectAdmin → MySQL Management).
    * Gmail app password for the sender account (Google Account → Security → App passwords → revoke).
-2. Create `backend/config.secrets.php` from `config.secrets.example.php`:
+2. Create `backend/config.secrets.php` from `config.secrets.example.php`
+   (**full walkthrough — all settings, env-var alternative, rotation table: `docs/SECRETS.md`**):
    ```bash
    php -r "echo bin2hex(random_bytes(32));"   # APP_KEY
    chmod 600 backend/config.secrets.php

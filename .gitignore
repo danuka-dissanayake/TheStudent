@@ -19,3 +19,7 @@ backend/config.secrets.*.php
 app/directadmin_backend/config.secrets.php
 app/website_php_mysql/config.secrets.php
 !backend/config.secrets.example.php
+
+# Deployment bundles / archives: they get built locally from backend/ and used to
+# contain live credentials. Never commit them.
+*.zip

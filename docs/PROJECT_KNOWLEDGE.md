@@ -210,6 +210,13 @@ Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_b
    retry-able errors and a live password-strength meter. Compose BOM was raised to `2025.06.01`
    (1.8) for `androidx.compose.ui.autofill.ContentType`. Legal page templates live in
    `backend/legal/` and must be filled in and uploaded to `/legal/`.
+
+   **Secrets & configuration:** every credential now lives in exactly two git-ignored files —
+   `.env` (app; read by the Secrets Gradle Plugin → `BuildConfig`) and `backend/config.secrets.php`
+   (server; or `THESTUDENT_*` / plain env vars). Committed templates: `.env.example`,
+   `backend/config.secrets.example.php`. Full instructions, rotation table and the
+   "new feature needs a key" checklist: **`docs/SECRETS.md`**. A pre-commit leak scanner lives at
+   `scripts/check-secrets.sh`.
 8. **No real chat backend** — the CHAT tab is entirely local demo data despite looking production-ready.
 9. **Auth is mandatory** (guest deprecated) yet `MainActivity` still contains a fallback white-box + `openAuthScreen()` effect — a slightly awkward safety net.
 10. **Test coverage ≈ 0**, and nothing guards the 70-field UI state or the AI routing.
@@ -234,9 +241,12 @@ app/src/main/java/com/example/
     │                AiAssistant, Profile, AdminPanel, Learn(unused)
     ├── components/  nav, drawer, top bar, dialogs, visualizers, shimmer, logo
     └── theme/       Color, Theme, Type
-backend/                # live PHP/MySQL API (auth, papers, admin console, schema)
+backend/                # live PHP/MySQL API (auth, papers, admin console, schema, legal pages)
 app/website_php_mysql/  # older copy of the API + web portal
 app/directadmin_backend/ # minimal papers-only API copy
+docs/                   # AUTH_SECURITY.md, SECRETS.md, PROJECT_KNOWLEDGE.md
+scripts/                # check-secrets.sh (pre-commit leak guard)
+.env.example            # app secrets template (copy to .env, never commit .env)
 ```
 
 
