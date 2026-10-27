@@ -180,15 +180,17 @@ fun OnboardingScreen(
                 }
             }
         },
-        containerColor = OnboardingBg
+        // Transparent on purpose: the background below is drawn edge-to-edge, so
+        // the status and navigation bars show the same colour as the screen
+        // instead of a flat opaque strip. Inner padding is applied to the
+        // content column, never to the background.
+        containerColor = Color.Transparent
     ) { innerPadding ->
         // Same emerald-wash background as the profile setup screen. Onboarding
         // pins its own light palette, so the base colour is passed explicitly
-        // (the wash itself comes from the shared composable).
-        TheStudentAppBackground(
-            baseColor = OnboardingBg,
-            modifier = Modifier.padding(innerPadding)
-        ) {
+        // (the wash itself comes from the shared composable, which also makes
+        // the system bars transparent).
+        TheStudentAppBackground(baseColor = OnboardingBg) {
             // Elegant modern geometric arch & starlight background art at footer
             OnboardingModernFooterArt(
                 modifier = Modifier
@@ -200,6 +202,7 @@ fun OnboardingScreen(
             Column(
                 modifier = Modifier
                     .fillMaxSize()
+                    .padding(innerPadding)      // keep content clear of the bars
                     .padding(horizontal = 24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
