@@ -276,8 +276,11 @@ $query = "SELECT * FROM `past_papers` WHERE 1=1";
 $params = [];
 
 if (!empty($searchFilter)) {
-    $query .= " AND (`title` LIKE :s OR `subject` LIKE :s OR `stream` LIKE :s OR `grade` LIKE :s OR `year` LIKE :s)";
-    $params[':s'] = "%$searchFilter%";
+    // One distinct placeholder per occurrence - see the note in api/get_papers.php.
+    $query .= " AND (`title` LIKE :s1 OR `subject` LIKE :s2 OR `stream` LIKE :s3 OR `grade` LIKE :s4 OR `year` LIKE :s5)";
+    for ($i = 1; $i <= 5; $i++) {
+        $params[':s' . $i] = "%$searchFilter%";
+    }
 }
 if (!empty($categoryFilter)) {
     $query .= " AND `category` = :cat";

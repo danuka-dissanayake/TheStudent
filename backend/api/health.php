@@ -302,6 +302,13 @@ if (!extension_loaded('pdo_mysql')) {
 if ($report['config']['secrets_file']['location'] === 'NOT FOUND') {
     $problems[] = 'config.secrets.php was not found (expected one level above public_html).';
 }
+if (!empty($report['config']['secrets_file']['inside_web_root'])) {
+    $problems[] = 'config.secrets.php is INSIDE public_html ('
+        . $report['config']['secrets_file']['location']
+        . '). Move it one level up to ' . dirname(__DIR__, 2) . '/config.secrets.php and delete the copy '
+        . 'in public_html: while it sits in the web root the only thing protecting your DB password is a '
+        . '.htaccess rule.';
+}
 if ($report['config']['app_key_length'] < 32) {
     $problems[] = 'APP_KEY is missing or shorter than 32 characters.';
 }
@@ -309,11 +316,12 @@ if (empty($report['database']['connected'])) {
     $problems[] = 'Database connection failed — check DB_NAME / DB_USER / DB_PASS.';
 } elseif (!empty($report['database']['tables_missing'])) {
     $problems[] = 'Missing tables: ' . implode(', ', $report['database']['tables_missing'])
-        . '. Sign-up will fail until they exist — auth.php now creates them on demand, so re-run a request and check again.';
+        . '. Sign-up will fail until they exist — auth.php now creates them on demand (needs the fixed config.php, whose column check no longer uses a `?` placeholder), so re-run a sign-up and check again.';
 }
 foreach (($report['database']['columns'] ?? []) as $table => $state) {
     if (!empty($state['missing_columns'])) {
-        $problems[] = 'Missing columns in ' . $table . ': ' . implode(', ', $state['missing_columns']);
+        $problems[] = 'Missing columns in ' . $table . ': ' . implode(', ', $state['missing_columns'])
+            . '. The next /api/auth.php request adds them automatically once config.php is the fixed version.';
     }
 }
 if (empty($report['error_log']['dir_writable'])) {

@@ -75,8 +75,16 @@ try {
     }
 
     if (!empty($search)) {
-        $conditions[] = "(`title` LIKE :search OR `subject` LIKE :search OR `grade` LIKE :search OR (`stream` IS NOT NULL AND `stream` LIKE :search) OR `year` LIKE :search OR `description` LIKE :search)";
-        $params[':search'] = '%' . $search . '%';
+        // PDO forbids reusing one named placeholder with native prepares
+        // (ATTR_EMULATE_PREPARES = false): "Invalid parameter number". Use one
+        // distinct placeholder per occurrence.
+        $conditions[] = "(`title` LIKE :search_1 OR `subject` LIKE :search_2 OR `grade` LIKE :search_3"
+            . " OR (`stream` IS NOT NULL AND `stream` LIKE :search_4) OR `year` LIKE :search_5"
+            . " OR `description` LIKE :search_6)";
+        $searchLike = '%' . $search . '%';
+        for ($i = 1; $i <= 6; $i++) {
+            $params[':search_' . $i] = $searchLike;
+        }
     }
 
     $whereSql = !empty($conditions) ? 'WHERE ' . implode(' AND ', $conditions) : '';

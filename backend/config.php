@@ -322,10 +322,19 @@ function getDbConnection(): PDO
  */
 function ts_ensure_column(PDO $pdo, string $table, string $column, string $definition): void
 {
+    // Identifiers cannot be bound as parameters, and MariaDB rejects a `?` in
+    // `SHOW COLUMNS ... LIKE ?` when PDO uses native prepares (ATTR_EMULATE_PREPARES
+    // = false) - it fails with "1064 ... near '?'". Quote a WHITELISTED name
+    // instead. Getting this wrong silently skipped every missing column, which
+    // is what made sign-up die on `Unknown column 'requested_ip'`.
+    if (!preg_match('/^[A-Za-z0-9_]+$/', $table) || !preg_match('/^[A-Za-z0-9_]+$/', $column)) {
+        error_log("[TheStudent] ensure_column rejected unsafe name: $table.$column");
+        return;
+    }
+
     try {
-        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE :column");
-        $stmt->execute(['column' => $column]);
-        if ($stmt->fetch()) {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `$table` LIKE " . $pdo->quote($column));
+        if ($stmt && $stmt->fetch()) {
             return;
         }
         $pdo->exec("ALTER TABLE `$table` ADD COLUMN `$column` $definition");

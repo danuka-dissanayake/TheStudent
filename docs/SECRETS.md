@@ -119,7 +119,20 @@ way, and keep the `.jks` outside the repo.
 | 2 | `/home/USER/domains/config.secrets.php` (two levels above) | no |
 | 3 | `public_html/config.secrets.php` | yes — only safe because `.htaccess` denies it |
 
-`config.php` logs a warning if it finds the file inside the web root.
+`config.php` logs a warning if it finds the file inside the web root, and `api/health.php` lists it
+under `problems`.
+
+**Moving it out of `public_html` without SSH (File Manager):**
+
+1. Open `public_html/config.secrets.php` → **Edit** → Select All → copy the contents.
+2. Go up one level (path bar: `/home/USER/domains/app.quizontal.site/`) → **New File** →
+   `config.secrets.php` → paste → Save.
+3. Right-click the copy inside `public_html` → **Delete**.
+4. Reload `api/health.php` — `secrets_file.inside_web_root` must now be `false` and the location must
+   be the path outside `public_html`.
+
+Leaving both copies is worse than either one: priority 1 wins, so edits to the `public_html` copy
+silently stop taking effect.
 
 ### 2.2 Create it on the server (not in the repo)
 

@@ -290,7 +290,7 @@ function ensureAuthSchema(PDO $pdo): void
     try {
         $stmt = $pdo->query("SHOW COLUMNS FROM `email_verifications` LIKE 'otp_code'");
         $col = $stmt ? $stmt->fetch() : null;
-        if ($col && preg_match('/varchar\(\d+)\)/i', (string) $col['Type'], $m) && (int) $m[1] < 128) {
+        if ($col && preg_match('/^varchar\((\d+)\)/i', (string) $col['Type'], $m) && (int) $m[1] < 128) {
             $pdo->exec('ALTER TABLE `email_verifications` MODIFY COLUMN `otp_code` VARCHAR(128) NOT NULL');
         }
     } catch (Throwable $e) {

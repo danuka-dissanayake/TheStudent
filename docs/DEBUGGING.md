@@ -186,6 +186,19 @@ curl -s 'https://app.quizontal.site/api/health.php?token=YOUR_DIAG_TOKEN' | tail
 * Anything still fatal returns `{"status":"error", "ref": "<8 hex>"}` plus the header
   `X-TheStudent-Error-Ref`, and the same ref is written to the log.
 
+### Known traps in this codebase (all fixed — check your deploy has the fix)
+
+| Log line | Cause | Fix |
+|---|---|---|
+| `1064 ... near '?'` on `SHOW COLUMNS` from `config.php` | `ts_ensure_column()` bound the column name as a parameter; MariaDB rejects `?` in `SHOW COLUMNS ... LIKE ?` with native prepares | fixed: identifiers are now whitelisted and quoted, so missing columns really get added |
+| `1054 Unknown column 'requested_ip'` | the previous line meant the column was never added | both are fixed; the next API request adds the column |
+| `preg_match(): Compilation failed: unmatched closing parenthesis` | the `otp_code` width check had a broken pattern | fixed |
+| `Invalid parameter number` on paper search | one named placeholder reused several times in one statement (illegal with `ATTR_EMULATE_PREPARES = false`) | fixed in `api/get_papers.php` and `admin/index.php` |
+| `config.secrets.php is inside the web root` | the secrets file was created in `public_html` | move it one level above (see `docs/SECRETS.md`) and delete the copy inside `public_html` |
+
+Every one of these produced either a blank `500` or a silently skipped repair step, so none of them is
+visible from the app — only from `health.php` or `php-error.log`.
+
 ## 6. The `.htaccess` trap
 
 If **every** request (even `https://app.quizontal.site/`) returns 500 while `health.php` is
