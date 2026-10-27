@@ -339,6 +339,14 @@ object ChatCrypto {
 
     fun isEncrypted(payload: String): Boolean = payload.startsWith(PREFIX)
 
+    /**
+     * Drop every derived conversation key from memory. Called on sign-out so a
+     * different account on the same phone cannot reuse them.
+     */
+    fun clearSessionCache() {
+        conversationKeys.clear()
+    }
+
     // -----------------------------------------------------------------------
     // Keystore sealing
     // -----------------------------------------------------------------------

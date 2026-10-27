@@ -1424,6 +1424,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val serverUrl = serverUrlState.value
             preferences.logout()
             stopChatSync()
+            ChatCrypto.clearSessionCache()
             _chatState.value = ChatUiState()
             repository.clearUserProfile()
             _isAdmin.value = false
