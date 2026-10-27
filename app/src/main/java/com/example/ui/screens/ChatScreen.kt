@@ -16,6 +16,7 @@ import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
@@ -1096,6 +1097,21 @@ private fun ChatConversationScreen(
                 // The list is composed even while the loader is up: it gets parked
                 // at the newest message underneath, then the overlay fades away.
                 Box(modifier = Modifier.weight(1f)) {
+                    // Hidden (not removed) while the loader is up: it still has to
+                    // be laid out so it can be parked at the newest message, but
+                    // its contents must not flash before the overlay fades.
+                    // Cross-fades with the loader over the same 220 ms, so the
+                    // reveal is a fade rather than a snap.
+                    val listAlpha by animateFloatAsState(
+                        targetValue = if (conversationSettled) 1f else 0f,
+                        animationSpec = tween(220),
+                        label = "chat_list_reveal"
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .alpha(alpha = listAlpha)
+                    ) {
                     when {
                         state.messages.isEmpty() -> {
                             Box(
@@ -1199,6 +1215,8 @@ private fun ChatConversationScreen(
                             }
                         }
                     }
+
+                    } // end hidden list content
 
                     // Overlay inside the list container: the conversation is
                     // already parked at the bottom underneath when this fades out.
@@ -3285,13 +3303,11 @@ private fun ConversationLoadingOverlay(visible: Boolean) {
         enter = fadeIn(),
         exit = fadeOut(animationSpec = tween(220))
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                // Opaque, so the parked list is not visible popping into place
-                // behind the spinner.
-                .background(Color(0xFFF8FAFC))
-        ) {
+        // Deliberately NO background here. A flat fill (it used to be #F8FAFC)
+        // covered the app's gradient background art, so opening a chat flashed a
+        // plain white page before the real conversation appeared. The list itself
+        // is hidden with alpha instead, which keeps the backdrop identical.
+        Box(modifier = Modifier.fillMaxSize()) {
             ChatLoadingState()
         }
     }
