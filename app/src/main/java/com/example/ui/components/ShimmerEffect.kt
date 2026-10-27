@@ -20,6 +20,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.example.ui.screens.OnboardingModernFooterArt
+import com.example.ui.theme.EmeraldPrimary
 
 /**
  * High-performance, smooth skeleton shimmer effect for loading states.
@@ -230,209 +231,221 @@ fun HomeSkeletonLoading(modifier: Modifier = Modifier) {
 //  AUTH SCREEN SKELETONS
 // ─────────────────────────────────────────────────────────────────────────────
 
-private val AuthSkeletonGreen = Color(0xFF047857)
+// ─────────────────────────────────────────────────────────────────────────────
+//  AUTH SCREEN SKELETONS
+// ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Full-screen skeleton that mirrors the Sign-In / Sign-Up layout.
- * Shows the green header strip + white bottom sheet with shimmer placeholders.
+ * Skeleton shared by the sign-in and sign-up screens.
+ *
+ * It mirrors the redesigned auth layout 1:1 — slim top bar with the back circle
+ * and the logo mark, the big headline block, the segmented mode switch and the
+ * single floating white card that holds the form — so the shimmer that plays
+ * during a mode switch looks like the real screen loading in, not a different
+ * design.
  */
 @Composable
-fun AuthSignInSkeleton(modifier: Modifier = Modifier) {
-    Column(
+private fun AuthFormSkeleton(
+    isSignUp: Boolean,
+    modifier: Modifier = Modifier
+) {
+    // Opaque, so the real form underneath never shows through while the
+    // shimmer cross-fades in. The wash is reproduced here so the skeleton and
+    // the screen it replaces share exactly the same backdrop.
+    Box(
         modifier = modifier
             .fillMaxSize()
-            .background(AuthSkeletonGreen)
+            .background(Color(0xFFF8FAFC))
     ) {
-        // ── Top green header ──────────────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            // Back button circle
-            ShimmerBoxOnGreen(
-                modifier = Modifier.size(44.dp),
-                shapeRadius = 22.dp
-            )
-            Spacer(modifier = Modifier.height(4.dp))
-            // Title line 1
-            ShimmerBoxOnGreen(
-                modifier = Modifier
-                    .fillMaxWidth(0.78f)
-                    .height(26.dp),
-                shapeRadius = 8.dp
-            )
-            // Title line 2
-            ShimmerBoxOnGreen(
-                modifier = Modifier
-                    .fillMaxWidth(0.55f)
-                    .height(26.dp),
-                shapeRadius = 8.dp
-            )
-            // Subtitle
-            ShimmerBoxOnGreen(
-                modifier = Modifier
-                    .fillMaxWidth(0.90f)
-                    .height(14.dp),
-                shapeRadius = 6.dp
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // ── White bottom sheet ────────────────────────────────────────────────
         Box(
             modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
-                .shadow(16.dp, RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
-                .background(Color.White)
-                .padding(horizontal = 24.dp, vertical = 26.dp)
-        ) {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(18.dp),
-                modifier = Modifier.fillMaxWidth()
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0f to EmeraldPrimary.copy(alpha = 0.12f),
+                        0.35f to EmeraldPrimary.copy(alpha = 0.02f),
+                        1f to Color.Transparent
+                    )
+                )
+        )
+
+        Column(modifier = Modifier.fillMaxSize()) {
+            // ── top bar: back circle + logo mark ─────────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 16.dp, end = 16.dp, top = 10.dp, bottom = 4.dp),
+                verticalAlignment = Alignment.CenterVertically
             ) {
-                // Segment toggle pill
+                ShimmerBox(modifier = Modifier.size(42.dp), shapeRadius = 21.dp)
+                Spacer(Modifier.weight(1f))
+                ShimmerBox(
+                    modifier = Modifier.size(width = 94.dp, height = 26.dp),
+                    shapeRadius = 8.dp
+                )
+            }
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 20.dp)
+            ) {
+                Spacer(Modifier.height(10.dp))
+
+                // ── headline + subheadline ───────────────────────────────────────
+                ShimmerBox(
+                    modifier = Modifier
+                        .fillMaxWidth(if (isSignUp) 0.72f else 0.52f)
+                        .height(30.dp),
+                    shapeRadius = 10.dp
+                )
+                Spacer(Modifier.height(10.dp))
+                ShimmerBox(
+                    modifier = Modifier
+                        .fillMaxWidth(if (isSignUp) 0.88f else 0.62f)
+                        .height(14.dp),
+                    shapeRadius = 7.dp
+                )
+
+                Spacer(Modifier.height(22.dp))
+
+                // ── segmented sign in / sign up switch ───────────────────────────
                 ShimmerBox(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(58.dp),
-                    shapeRadius = 29.dp
+                        .height(48.dp),
+                    shapeRadius = 16.dp
                 )
 
-                // Email field
-                ShimmerBox(
+                Spacer(Modifier.height(18.dp))
+
+                // ── floating form card ───────────────────────────────────────────
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(56.dp),
-                    shapeRadius = 14.dp
-                )
+                        .clip(RoundedCornerShape(26.dp))
+                        .background(Color.White)
+                        .padding(horizontal = 18.dp, vertical = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    if (isSignUp) {
+                        // First + last name
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shapeRadius = 14.dp)
+                            ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shapeRadius = 14.dp)
+                        }
+                    }
 
-                // Password field
-                ShimmerBox(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(56.dp),
-                    shapeRadius = 14.dp
-                )
+                    // Email address
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
 
-                // Remember me + Forget row
+                    // Password
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
+
+                    if (!isSignUp) {
+                        // Remember me + forgot password row
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                ShimmerBox(modifier = Modifier.size(18.dp), shapeRadius = 4.dp)
+                                ShimmerBox(
+                                    modifier = Modifier.size(width = 86.dp, height = 12.dp),
+                                    shapeRadius = 6.dp
+                                )
+                            }
+                            ShimmerBox(
+                                modifier = Modifier.size(width = 104.dp, height = 12.dp),
+                                shapeRadius = 6.dp
+                            )
+                        }
+                    }
+
+                    if (isSignUp) {
+                        // Confirm password
+                        ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
+
+                        // Terms + privacy consent
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            verticalAlignment = Alignment.Top
+                        ) {
+                            ShimmerBox(modifier = Modifier.size(18.dp), shapeRadius = 4.dp)
+                            Column(
+                                modifier = Modifier.weight(1f),
+                                verticalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                ShimmerBox(modifier = Modifier.fillMaxWidth().height(12.dp), shapeRadius = 6.dp)
+                                ShimmerBox(modifier = Modifier.fillMaxWidth(0.7f).height(12.dp), shapeRadius = 6.dp)
+                            }
+                        }
+                    }
+
+                    Spacer(Modifier.height(2.dp))
+
+                    // Primary button
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), shapeRadius = 26.dp)
+
+                    // "or continue with" divider
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
+                        Spacer(Modifier.width(10.dp))
+                        ShimmerBox(
+                            modifier = Modifier.size(width = 96.dp, height = 11.dp),
+                            shapeRadius = 6.dp
+                        )
+                        Spacer(Modifier.width(10.dp))
+                        ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
+                    }
+
+                    // Google button
+                    ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), shapeRadius = 26.dp)
+                }
+
+                Spacer(Modifier.height(18.dp))
+
+                // ── footer mode switch ───────────────────────────────────────────
                 Row(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
+                    horizontalArrangement = Arrangement.Center,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    ShimmerBox(modifier = Modifier.size(width = 130.dp, height = 18.dp), shapeRadius = 6.dp)
-                    ShimmerBox(modifier = Modifier.size(width = 110.dp, height = 16.dp), shapeRadius = 6.dp)
+                    ShimmerBox(
+                        modifier = Modifier.size(width = 140.dp, height = 13.dp),
+                        shapeRadius = 7.dp
+                    )
                 }
-
-                // Primary sign-in button
-                ShimmerBox(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shapeRadius = 26.dp
-                )
-
-                // "Or Login With" divider shimmer
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    ShimmerBox(modifier = Modifier.size(width = 100.dp, height = 14.dp), shapeRadius = 6.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
-                }
-
-                // Google button
-                ShimmerBox(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(52.dp),
-                    shapeRadius = 26.dp
-                )
             }
         }
     }
 }
 
 /**
- * Full-screen skeleton that mirrors the Sign-Up (Register) layout.
+ * Shimmer shown while the app switches into the sign-in form.
+ */
+@Composable
+fun AuthSignInSkeleton(modifier: Modifier = Modifier) {
+    AuthFormSkeleton(isSignUp = false, modifier = modifier)
+}
+
+/**
+ * Shimmer shown while the app switches into the sign-up form.
  */
 @Composable
 fun AuthSignUpSkeleton(modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(AuthSkeletonGreen)
-    ) {
-        // ── Green header ──────────────────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp, vertical = 18.dp),
-            verticalArrangement = Arrangement.spacedBy(16.dp)
-        ) {
-            ShimmerBoxOnGreen(modifier = Modifier.size(44.dp), shapeRadius = 22.dp)
-            Spacer(modifier = Modifier.height(4.dp))
-            ShimmerBoxOnGreen(modifier = Modifier.fillMaxWidth(0.82f).height(26.dp), shapeRadius = 8.dp)
-            ShimmerBoxOnGreen(modifier = Modifier.fillMaxWidth(0.60f).height(26.dp), shapeRadius = 8.dp)
-            ShimmerBoxOnGreen(modifier = Modifier.fillMaxWidth(0.88f).height(14.dp), shapeRadius = 6.dp)
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
-
-        // ── White sheet ───────────────────────────────────────────────────────
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .clip(RoundedCornerShape(topStart = 34.dp, topEnd = 34.dp))
-                .background(Color.White)
-                .padding(horizontal = 24.dp, vertical = 26.dp)
-        ) {
-            Column(verticalArrangement = Arrangement.spacedBy(18.dp), modifier = Modifier.fillMaxWidth()) {
-                // Segmented toggle
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(58.dp), shapeRadius = 29.dp)
-
-                // First + Last name row
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(12.dp)
-                ) {
-                    ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shapeRadius = 14.dp)
-                    ShimmerBox(modifier = Modifier.weight(1f).height(56.dp), shapeRadius = 14.dp)
-                }
-
-                // Email field
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
-                // Password field
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
-                // Confirm password field
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(56.dp), shapeRadius = 14.dp)
-
-                // Register button
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), shapeRadius = 26.dp)
-
-                // Divider
-                Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-                    ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    ShimmerBox(modifier = Modifier.size(width = 110.dp, height = 14.dp), shapeRadius = 6.dp)
-                    Spacer(modifier = Modifier.width(12.dp))
-                    ShimmerBox(modifier = Modifier.weight(1f).height(1.dp), shapeRadius = 1.dp)
-                }
-
-                // Google button
-                ShimmerBox(modifier = Modifier.fillMaxWidth().height(52.dp), shapeRadius = 26.dp)
-            }
-        }
-    }
+    AuthFormSkeleton(isSignUp = true, modifier = modifier)
 }
 
 /**

@@ -829,11 +829,11 @@ fun AuthScreen(
                     }
 
                     // ── the form card ────────────────────────────────────────
+                    // Flat white card: no outline and no shadow, so the form
+                    // sits quietly on the wash instead of glowing around it.
                     Surface(
                         shape = RoundedCornerShape(26.dp),
                         color = Color.White,
-                        border = BorderStroke(1.dp, Color(0xFFEFF2F6)),
-                        shadowElevation = 3.dp,
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(
@@ -899,20 +899,16 @@ fun AuthScreen(
                                                     rememberMe = !rememberMe
                                                 }
                                             ) {
-                                                Switch(
+                                                Checkbox(
                                                     checked = rememberMe,
+                                                    onCheckedChange = null,
                                                     enabled = !isAnyLoading,
-                                                    onCheckedChange = { rememberMe = it },
-                                                    colors = SwitchDefaults.colors(
-                                                        checkedThumbColor = Color.White,
-                                                        checkedTrackColor = AuthModernDarkGreen,
-                                                        uncheckedThumbColor = Color.White,
-                                                        uncheckedTrackColor = Color(0xFFCBD5E1),
-                                                        uncheckedBorderColor = Color.Transparent
+                                                    colors = CheckboxDefaults.colors(
+                                                        checkedColor = AuthModernDarkGreen,
+                                                        checkmarkColor = Color.White,
+                                                        uncheckedColor = Color(0xFFCBD5E1)
                                                     ),
-                                                    modifier = Modifier
-                                                        .height(24.dp)
-                                                        .width(42.dp)
+                                                    modifier = Modifier.size(20.dp)
                                                 )
                                                 Spacer(Modifier.width(8.dp))
                                                 Text(
