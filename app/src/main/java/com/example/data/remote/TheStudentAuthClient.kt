@@ -9,68 +9,117 @@ import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONObject
+import java.io.IOException
+import java.net.SocketTimeoutException
+import java.net.UnknownHostException
 import java.util.concurrent.TimeUnit
 
+/**
+ * Result of an authentication call that may end in a session.
+ */
 sealed class AuthApiResult {
     data class Success(
         val profile: UserProfile,
         val token: String,
-        val message: String
+        val message: String,
+        val role: String = "student",
+        val expiresAt: String? = null
     ) : AuthApiResult()
 
+    /** Email verification required (registration, unverified account or new IP). */
     data class RequiresOtp(
         val email: String,
         val maskedEmail: String,
-        val reason: String, // 'registration', 'unverified_account', 'ip_change'
-        val message: String
+        val reason: String,
+        val message: String,
+        val resendCooldownSeconds: Int = 60
+    ) : AuthApiResult()
+
+    /** OTP verified for a password reset; a new password must be chosen. */
+    data class ResetRequired(
+        val resetToken: String,
+        val message: String,
+        val expiresInSeconds: Int = 900
     ) : AuthApiResult()
 
     data class Error(
         val message: String,
-        val statusCode: Int = 400
-    ) : AuthApiResult()
+        val statusCode: Int = 400,
+        val isNetworkError: Boolean = false,
+        val retryAfterSeconds: Int? = null
+    ) : AuthApiResult() {
+        /** True when the stored session must be discarded (401/403). */
+        val invalidatesSession: Boolean
+            get() = !isNetworkError && (statusCode == 401 || statusCode == 403)
+    }
 }
 
 /**
- * Production-grade client for TheStudent DirectAdmin MySQL Auth API.
- * Handles rate limits, server-side validation, anti-brute-force lockout, and dynamic OTP verification.
+ * Outcome for calls that do not create a session (resend code, password reset…).
+ */
+sealed class ApiOutcome {
+    data class Success(val message: String, val cooldownSeconds: Int = 60) : ApiOutcome()
+    data class Failure(
+        val message: String,
+        val statusCode: Int = 400,
+        val isNetworkError: Boolean = false,
+        val retryAfterSeconds: Int? = null
+    ) : ApiOutcome()
+}
+
+/**
+ * Result of validating a stored session on app start.
+ * Network problems are deliberately separated from real invalidation so a
+ * flaky connection can never sign the user out.
+ */
+sealed class SessionValidation {
+    data class Valid(
+        val profile: UserProfile,
+        val role: String,
+        val expiresAt: String?
+    ) : SessionValidation()
+
+    data class Invalid(val message: String, val statusCode: Int) : SessionValidation()
+
+    data class Unreachable(val message: String) : SessionValidation()
+}
+
+/**
+ * Client for the TheStudent authentication API (`/api/auth.php`).
+ *
+ * Contract notes
+ * --------------
+ * • All requests/responses are JSON; the bearer token travels ONLY in the
+ *   `Authorization` header (never in a query string).
+ * • Tokens are opaque 64-hex strings; the server stores only their digest.
+ * • Every method is safe to call from `Dispatchers.IO` and never throws.
  */
 object TheStudentAuthClient {
+
     private const val TAG = "TheStudentAuthClient"
     private val JSON_MEDIA_TYPE = "application/json; charset=utf-8".toMediaType()
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(12, TimeUnit.SECONDS)
-        .readTimeout(15, TimeUnit.SECONDS)
-        .writeTimeout(15, TimeUnit.SECONDS)
+        .connectTimeout(15, TimeUnit.SECONDS)
+        .readTimeout(20, TimeUnit.SECONDS)
+        .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
     private fun normalizeUrl(backendBaseUrl: String): String {
-        val trimmed = backendBaseUrl.trim()
+        val trimmed = backendBaseUrl.trim().ifEmpty { DEFAULT_BASE_URL }
         return if (trimmed.endsWith("/")) trimmed else "$trimmed/"
     }
 
-    /**
-     * Authenticates an email and password against the remote MySQL database.
-     */
-    suspend fun login(
-        backendBaseUrl: String,
-        email: String,
-        password: String
-    ): AuthApiResult = withContext(Dispatchers.IO) {
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=login"
-        val payload = JSONObject().apply {
-            put("email", email.trim().lowercase())
-            put("password", password)
-        }.toString()
+    private const val DEFAULT_BASE_URL = "https://app.quizontal.site/"
 
-        executeAuthRequest(endpoint, payload)
-    }
+    private fun endpoint(baseUrl: String, action: String): String =
+        "${normalizeUrl(baseUrl)}api/auth.php?action=$action"
 
-    /**
-     * Registers a new student account and triggers a 6-digit email OTP.
-     */
+    // -----------------------------------------------------------------------
+    // Public API
+    // -----------------------------------------------------------------------
+
     suspend fun register(
         backendBaseUrl: String,
         fullName: String,
@@ -78,229 +127,343 @@ object TheStudentAuthClient {
         password: String,
         targetExam: String = "G.C.E. A/L"
     ): AuthApiResult = withContext(Dispatchers.IO) {
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=register"
-        val payload = JSONObject().apply {
-            put("full_name", fullName.trim())
-            put("email", email.trim().lowercase())
-            put("password", password)
-            put("target_exam", targetExam)
-        }.toString()
-
-        executeAuthRequest(endpoint, payload)
+        postAuth(
+            endpoint(backendBaseUrl, "register"),
+            JSONObject().apply {
+                put("full_name", fullName.trim())
+                put("email", email.trim().lowercase())
+                put("password", password)
+                put("target_exam", targetExam.trim())
+            }
+        )
     }
 
-    /**
-     * Verifies the 6-digit OTP code against the database.
-     */
+    suspend fun login(
+        backendBaseUrl: String,
+        email: String,
+        password: String
+    ): AuthApiResult = withContext(Dispatchers.IO) {
+        postAuth(
+            endpoint(backendBaseUrl, "login"),
+            JSONObject().apply {
+                put("email", email.trim().lowercase())
+                put("password", password)
+            }
+        )
+    }
+
     suspend fun verifyOtp(
         backendBaseUrl: String,
         email: String,
         otpCode: String
     ): AuthApiResult = withContext(Dispatchers.IO) {
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=verify_otp"
-        val payload = JSONObject().apply {
-            put("email", email.trim().lowercase())
-            put("otp_code", otpCode.trim())
-        }.toString()
-
-        executeAuthRequest(endpoint, payload)
+        postAuth(
+            endpoint(backendBaseUrl, "verify_otp"),
+            JSONObject().apply {
+                put("email", email.trim().lowercase())
+                put("otp_code", otpCode.filter { it.isDigit() })
+            }
+        )
     }
 
-    /**
-     * Requests a new 6-digit OTP code with anti-spam rate limiting.
-     */
     suspend fun resendOtp(
         backendBaseUrl: String,
         email: String
-    ): Result<String> = withContext(Dispatchers.IO) {
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=resend_otp"
-        val payload = JSONObject().apply {
-            put("email", email.trim().lowercase())
-        }.toString()
-
-        val request = Request.Builder()
-            .url(endpoint)
-            .post(payload.toRequestBody(JSON_MEDIA_TYPE))
-            .build()
-
-        try {
-            val response = httpClient.newCall(request).execute()
-            val bodyString = response.body?.string().orEmpty()
-            val json = try { JSONObject(bodyString) } catch (e: Exception) { JSONObject() }
-            val message = json.optString("message", "A new code has been sent.")
-
-            if (response.isSuccessful && json.optString("status") == "success") {
-                Result.success(message)
-            } else {
-                Result.failure(Exception(message))
-            }
-        } catch (e: Exception) {
-            Log.e(TAG, "Error resending OTP: ${e.message}", e)
-            Result.failure(Exception("Could not connect to authentication server. Please check your internet connection."))
-        }
+    ): ApiOutcome = withContext(Dispatchers.IO) {
+        postOutcome(
+            endpoint(backendBaseUrl, "resend_otp"),
+            JSONObject().apply { put("email", email.trim().lowercase()) }
+        )
     }
 
-    /**
-     * Syncs Google OAuth ID Token with the server and enforces IP-change verification if needed.
-     */
+    /** Always returns a generic success on the server (no account enumeration). */
+    suspend fun requestPasswordReset(
+        backendBaseUrl: String,
+        email: String
+    ): ApiOutcome = withContext(Dispatchers.IO) {
+        postOutcome(
+            endpoint(backendBaseUrl, "request_password_reset"),
+            JSONObject().apply { put("email", email.trim().lowercase()) }
+        )
+    }
+
+    suspend fun resetPassword(
+        backendBaseUrl: String,
+        resetToken: String,
+        newPassword: String
+    ): ApiOutcome = withContext(Dispatchers.IO) {
+        postOutcome(
+            endpoint(backendBaseUrl, "reset_password"),
+            JSONObject().apply {
+                put("reset_token", resetToken)
+                put("new_password", newPassword)
+            }
+        )
+    }
+
     suspend fun googleLogin(
         backendBaseUrl: String,
         idToken: String,
         targetExam: String = "G.C.E. A/L"
     ): AuthApiResult = withContext(Dispatchers.IO) {
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=google_login"
-        val payload = JSONObject().apply {
-            put("id_token", idToken)
-            put("target_exam", targetExam)
-        }.toString()
-
-        executeAuthRequest(endpoint, payload)
+        postAuth(
+            endpoint(backendBaseUrl, "google_login"),
+            JSONObject().apply {
+                put("id_token", idToken)
+                put("target_exam", targetExam)
+            }
+        )
     }
 
     /**
-     * Verifies the active session token against the remote MySQL database.
-     * If the user record was deleted or token expired, returns failure with 401 error.
+     * Authenticated password change. The server revokes every other session and
+     * returns a brand new token for this device.
+     */
+    suspend fun changePassword(
+        backendBaseUrl: String,
+        token: String,
+        currentPassword: String,
+        newPassword: String
+    ): AuthApiResult = withContext(Dispatchers.IO) {
+        postAuth(
+            endpoint(backendBaseUrl, "change_password"),
+            JSONObject().apply {
+                put("current_password", currentPassword)
+                put("new_password", newPassword)
+            },
+            bearerToken = token
+        )
+    }
+
+    /**
+     * Validate a stored session. Distinguishes "invalid" from "offline".
      */
     suspend fun validateSession(
         backendBaseUrl: String,
         token: String
-    ): Result<UserProfile> = withContext(Dispatchers.IO) {
+    ): SessionValidation = withContext(Dispatchers.IO) {
         if (token.isBlank()) {
-            return@withContext Result.failure(Exception("Session token is empty"))
+            return@withContext SessionValidation.Invalid("Missing session token", 401)
         }
 
-        val encodedToken = java.net.URLEncoder.encode(token, "UTF-8")
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=me&token=$encodedToken"
         val request = Request.Builder()
-            .url(endpoint)
+            .url(endpoint(backendBaseUrl, "me"))
             .get()
             .header("Authorization", "Bearer $token")
+            .header("Accept", "application/json")
             .build()
 
         try {
-            val response = httpClient.newCall(request).execute()
-            val statusCode = response.code
-            val bodyString = response.body?.string().orEmpty()
-            val json = try { JSONObject(bodyString) } catch (e: Exception) { JSONObject() }
+            httpClient.newCall(request).execute().use { response ->
+                val body = response.body?.string().orEmpty()
+                val json = runCatching { JSONObject(body) }.getOrElse { JSONObject() }
 
-            if (response.isSuccessful && json.optString("status") == "success") {
-                val userObj = json.optJSONObject("user")
-                val isVerified = userObj?.optBoolean("is_verified", false) ?: false
-                if (!isVerified) {
-                    return@withContext Result.failure(Exception("Email not verified"))
+                if (response.isSuccessful && json.optString("status") == "success") {
+                    val userObj = json.optJSONObject("user")
+                    if (userObj == null) {
+                        return@withContext SessionValidation.Invalid("Malformed profile response", 500)
+                    }
+                    val role = userObj.optString("role", "student")
+                    SessionValidation.Valid(
+                        profile = parseUserProfile(userObj),
+                        role = role,
+                        expiresAt = json.optString("expires_at").takeIf { it.isNotBlank() }
+                    )
+                } else {
+                    SessionValidation.Invalid(
+                        json.optString("message", "Session expired"),
+                        response.code
+                    )
                 }
-                val profile = parseUserProfile(userObj)
-                Result.success(profile)
-            } else {
-                val message = json.optString("message", "Session invalid or expired (HTTP $statusCode)")
-                Result.failure(Exception(message))
             }
+        } catch (e: UnknownHostException) {
+            Log.w(TAG, "validateSession: host unreachable")
+            SessionValidation.Unreachable("Cannot reach the server. Please check your connection.")
+        } catch (e: SocketTimeoutException) {
+            Log.w(TAG, "validateSession: timeout")
+            SessionValidation.Unreachable("The server took too long to respond.")
+        } catch (e: IOException) {
+            Log.w(TAG, "validateSession: IO error - ${e.message}")
+            SessionValidation.Unreachable("Network error. Please check your connection.")
         } catch (e: Exception) {
-            Log.e(TAG, "validateSession network error: ${e.message}", e)
-            Result.failure(e)
+            Log.e(TAG, "validateSession: unexpected error - ${e.message}", e)
+            SessionValidation.Unreachable("Unexpected error while restoring your session.")
         }
     }
 
-    /**
-     * Invalidate session token on server.
-     */
+    /** Revoke this device's session. Best effort - never blocks sign-out. */
     suspend fun logout(backendBaseUrl: String, token: String): Boolean = withContext(Dispatchers.IO) {
         if (token.isBlank()) return@withContext true
-        val encodedToken = java.net.URLEncoder.encode(token, "UTF-8")
-        val endpoint = "${normalizeUrl(backendBaseUrl)}api/auth.php?action=logout&token=$encodedToken"
         val request = Request.Builder()
-            .url(endpoint)
+            .url(endpoint(backendBaseUrl, "logout"))
             .post("{}".toRequestBody(JSON_MEDIA_TYPE))
             .header("Authorization", "Bearer $token")
             .build()
         try {
-            val response = httpClient.newCall(request).execute()
-            response.isSuccessful
+            httpClient.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
+            Log.w(TAG, "logout failed: ${e.message}")
             false
         }
     }
 
-    private fun executeAuthRequest(endpoint: String, jsonPayload: String): AuthApiResult {
+    /** Revoke every session for the account (all devices). */
+    suspend fun logoutAll(backendBaseUrl: String, token: String): Boolean = withContext(Dispatchers.IO) {
+        if (token.isBlank()) return@withContext false
         val request = Request.Builder()
-            .url(endpoint)
-            .post(jsonPayload.toRequestBody(JSON_MEDIA_TYPE))
+            .url(endpoint(backendBaseUrl, "logout_all"))
+            .post("{}".toRequestBody(JSON_MEDIA_TYPE))
+            .header("Authorization", "Bearer $token")
             .build()
-
         try {
-            val response = httpClient.newCall(request).execute()
-            val statusCode = response.code
-            val bodyString = response.body?.string().orEmpty()
-
-            val json = try {
-                JSONObject(bodyString)
-            } catch (e: Exception) {
-                JSONObject()
-            }
-
-            val status = json.optString("status")
-            val message = json.optString("message", if (response.isSuccessful) "Success" else "Request failed ($statusCode)")
-
-            if (status == "requires_verification") {
-                return AuthApiResult.RequiresOtp(
-                    email = json.optString("email"),
-                    maskedEmail = json.optString("masked_email", json.optString("email")),
-                    reason = json.optString("verification_reason", "unverified_account"),
-                    message = message
-                )
-            }
-
-            if (response.isSuccessful && status == "success") {
-                val token = json.optString("token", "")
-                val userObj = json.optJSONObject("user")
-                val profile = parseUserProfile(userObj)
-                return AuthApiResult.Success(profile, token, message)
-            }
-
-            // HTTP 429 Too Many Requests (Brute-force lockout)
-            if (statusCode == 429) {
-                return AuthApiResult.Error(
-                    message = message.ifBlank { "Too many attempts. For your security, this action has been temporarily blocked for 15 minutes." },
-                    statusCode = 429
-                )
-            }
-
-            // Other errors (400, 401, 409, 500)
-            return AuthApiResult.Error(message, statusCode)
-        } catch (e: java.net.UnknownHostException) {
-            Log.e(TAG, "DNS resolution failed for $endpoint: ${e.message}")
-            return AuthApiResult.Error("Cannot reach authentication server. Please check your internet connection or server address.")
-        } catch (e: java.net.SocketTimeoutException) {
-            Log.e(TAG, "Connection timeout to $endpoint: ${e.message}")
-            return AuthApiResult.Error("Connection timed out. Server is taking too long to respond.")
+            httpClient.newCall(request).execute().use { it.isSuccessful }
         } catch (e: Exception) {
-            Log.e(TAG, "Auth request error: ${e.message}", e)
-            return AuthApiResult.Error(e.localizedMessage ?: "Network error during authentication.")
+            Log.w(TAG, "logoutAll failed: ${e.message}")
+            false
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Internals
+    // -----------------------------------------------------------------------
+
+    private fun postAuth(
+        endpointUrl: String,
+        payload: JSONObject,
+        bearerToken: String? = null
+    ): AuthApiResult {
+        val builder = Request.Builder()
+            .url(endpointUrl)
+            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .header("Accept", "application/json")
+        if (!bearerToken.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $bearerToken")
+        }
+
+        return try {
+            httpClient.newCall(builder.build()).execute().use { response ->
+                val bodyString = response.body?.string().orEmpty()
+                val json = runCatching { JSONObject(bodyString) }.getOrElse { JSONObject() }
+                val status = json.optString("status")
+                val message = json.optString("message").ifBlank {
+                    if (response.isSuccessful) "Success" else "Request failed (${response.code})"
+                }
+                val retryAfter = extractRetryAfter(json, response.headers["Retry-After"])
+
+                when {
+                    status == "requires_verification" -> AuthApiResult.RequiresOtp(
+                        email = json.optString("email"),
+                        maskedEmail = json.optString("masked_email", json.optString("email")),
+                        reason = json.optString("verification_reason", "unverified_account"),
+                        message = message,
+                        resendCooldownSeconds = json.optInt("resend_cooldown", 60)
+                    )
+
+                    status == "reset_required" -> AuthApiResult.ResetRequired(
+                        resetToken = json.optString("reset_token"),
+                        message = message,
+                        expiresInSeconds = json.optInt("reset_expires_in", 900)
+                    )
+
+                    response.isSuccessful && status == "success" -> {
+                        val token = json.optString("token")
+                        AuthApiResult.Success(
+                            profile = parseUserProfile(json.optJSONObject("user")),
+                            token = token,
+                            message = message,
+                            role = json.optJSONObject("user")?.optString("role", "student") ?: "student",
+                            expiresAt = json.optString("expires_at").takeIf { it.isNotBlank() }
+                        )
+                    }
+
+                    else -> AuthApiResult.Error(
+                        message = message,
+                        statusCode = response.code,
+                        retryAfterSeconds = retryAfter
+                    )
+                }
+            }
+        } catch (e: UnknownHostException) {
+            AuthApiResult.Error(
+                "Cannot reach the authentication server. Please check your connection.",
+                isNetworkError = true
+            )
+        } catch (e: SocketTimeoutException) {
+            AuthApiResult.Error(
+                "The connection timed out. Please try again.",
+                isNetworkError = true
+            )
+        } catch (e: IOException) {
+            AuthApiResult.Error(
+                "Network error. Please check your internet connection and try again.",
+                isNetworkError = true
+            )
+        } catch (e: Exception) {
+            Log.e(TAG, "Auth request failed: ${e.message}", e)
+            AuthApiResult.Error(
+                "Something went wrong while contacting the server. Please try again.",
+                isNetworkError = true
+            )
+        }
+    }
+
+    private fun postOutcome(
+        endpointUrl: String,
+        payload: JSONObject,
+        bearerToken: String? = null
+    ): ApiOutcome {
+        val builder = Request.Builder()
+            .url(endpointUrl)
+            .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
+            .header("Accept", "application/json")
+        if (!bearerToken.isNullOrBlank()) {
+            builder.header("Authorization", "Bearer $bearerToken")
+        }
+
+        return try {
+            httpClient.newCall(builder.build()).execute().use { response ->
+                val bodyString = response.body?.string().orEmpty()
+                val json = runCatching { JSONObject(bodyString) }.getOrElse { JSONObject() }
+                val message = json.optString("message").ifBlank {
+                    if (response.isSuccessful) "Done" else "Request failed (${response.code})"
+                }
+                val retryAfter = extractRetryAfter(json, response.headers["Retry-After"])
+
+                if (response.isSuccessful && json.optString("status") == "success") {
+                    ApiOutcome.Success(message, json.optInt("resend_cooldown", 60))
+                } else {
+                    ApiOutcome.Failure(
+                        message = message,
+                        statusCode = response.code,
+                        retryAfterSeconds = retryAfter
+                    )
+                }
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Request failed: ${e.message}")
+            ApiOutcome.Failure(
+                message = "Network error. Please check your internet connection and try again.",
+                isNetworkError = true
+            )
+        }
+    }
+
+    private fun extractRetryAfter(json: JSONObject, header: String?): Int? {
+        json.optInt("retry_after", 0).takeIf { it > 0 }?.let { return it }
+        return header?.toIntOrNull()?.takeIf { it > 0 }
     }
 
     private fun parseUserProfile(userObj: JSONObject?): UserProfile {
         if (userObj == null) {
             return UserProfile(isLoggedIn = true)
         }
-
-        val fullName = userObj.optString("name", userObj.optString("full_name", "Student"))
-        val email = userObj.optString("email", "")
-        val institution = userObj.optString("institution", "Sri Lanka Education System")
-        val stream = userObj.optString("stream_or_degree", "Physical Science")
-        val targetExam = userObj.optString("target_exam", "G.C.E. A/L")
-
         return UserProfile(
-            name = fullName,
-            email = email,
-            institution = institution,
-            targetExam = targetExam,
-            streamOrDegree = stream,
+            name = userObj.optString("name", userObj.optString("full_name", "Student")),
+            email = userObj.optString("email", ""),
             academicLevel = "G.C.E. Advanced Level",
-            streakDays = 1,
-            studyHoursThisWeek = 2.0f,
-            totalPapersSolved = 5,
-            points = 250,
+            streamOrDegree = userObj.optString("stream_or_degree", "Physical Science"),
+            institution = userObj.optString("institution", "Sri Lanka Education System"),
+            targetExam = userObj.optString("target_exam", "G.C.E. A/L"),
             isLoggedIn = true
         )
     }

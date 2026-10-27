@@ -8,11 +8,23 @@
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/_admin_guard.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
 
 try {
     $pdo = getDbConnection();
+
+    // Deleting papers is an administrator-only operation.
+    $adminUser = ts_require_admin_api($pdo);
+
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        header('Allow: POST');
+        echo json_encode(['status' => 'error', 'message' => 'Only POST requests are allowed.']);
+        exit();
+    }
 
     $rawInput = file_get_contents('php://input');
     $data = json_decode($rawInput, true);

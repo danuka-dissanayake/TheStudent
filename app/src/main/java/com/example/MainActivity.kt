@@ -166,9 +166,6 @@ class MainActivity : ComponentActivity() {
                                     },
                                     onBack = {
                                         viewModel.handleAuthBack()
-                                    },
-                                    onOpenAdminPanel = {
-                                        viewModel.openAdminPanel()
                                     }
                                 )
                             }
@@ -255,8 +252,10 @@ class MainActivity : ComponentActivity() {
                                     drawerState = drawerState,
                                     gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME,
                                     drawerContent = {
+                                        val isAdmin by viewModel.isAdmin.collectAsStateWithLifecycle()
                                         ModernSidebarDrawer(
                                             userProfile = userProfile,
+                                            isAdmin = isAdmin,
                                             currentTab = uiState.currentTab,
                                             onSelectTab = { tab ->
                                                 viewModel.setTab(tab)

@@ -22,6 +22,7 @@ import com.example.data.remote.TheStudentAiStudyResponse
 import com.example.data.remote.TheStudentOcrEngine
 import com.example.data.remote.TheStudentStudyAiClient
 import com.example.data.remote.TheStudentAuthClient
+import com.example.data.remote.SessionValidation
 import com.example.data.remote.EnglishVoiceTutorEngine
 import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
@@ -136,6 +137,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _uiState = MutableStateFlow(TheStudentUiState())
     val uiState: StateFlow<TheStudentUiState> = _uiState.asStateFlow()
+
+    /**
+     * Administrator access comes from the server-issued role ONLY.
+     * There is no local bypass: the flag is refreshed on every session
+     * validation and cleared on sign-out.
+     */
+    private val _isAdmin = MutableStateFlow(preferences.isAdmin)
+    val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
     private val _dynamicPapers = MutableStateFlow<List<PastPaper>>(DefaultPastPapersSeed.allPapers)
     val dynamicPapers: StateFlow<List<PastPaper>> = _dynamicPapers.asStateFlow()
@@ -355,6 +364,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun openAdminPanel() {
+        if (!preferences.isAdmin) {
+            // Defence in depth: the UI hides the entry point, but never trust it.
+            showSnackbar("Administrator access required.")
+            return
+        }
         _uiState.update { it.copy(isAdminPanelOpen = true) }
     }
 
@@ -433,94 +447,62 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     val chatMessages: StateFlow<List<AiChatMessage>> = _chatMessages.asStateFlow()
 
     // Session Verification & Flow Transitions
+    /**
+     * Validate the stored session once per app launch.
+     *
+     * Three outcomes are handled distinctly:
+     *  - VALID      -> refresh profile/role, stay signed in
+     *  - INVALID    -> the token really is dead (401/403): wipe it and sign out
+     *  - UNREACHABLE-> network problem: KEEP the session so a flaky connection
+     *                  never logs the student out; the API calls will simply
+     *                  fail until connectivity returns.
+     */
     fun verifySessionWithBackend() {
         sessionVerificationJob = viewModelScope.launch(Dispatchers.IO) {
             val token = preferences.sessionToken
             val isLoggedIn = preferences.isLoggedIn
 
             if (token.isNullOrBlank() || !isLoggedIn) {
-                // Not logged in or missing token
                 preferences.logout()
                 repository.clearUserProfile()
-                _uiState.update {
-                    it.copy(
-                        isAuthenticated = false,
-                        isSessionVerified = true
-                    )
-                }
+                _isAdmin.value = false
+                _uiState.update { it.copy(isAuthenticated = false, isSessionVerified = true) }
                 return@launch
             }
 
-            // Built-in Administrator session handling
-            if (token == "admin_master_token" || preferences.userEmail?.equals("admin@gmail.com", ignoreCase = true) == true) {
-                val adminProfile = UserProfile(
-                    name = "Administrator",
-                    email = "admin@gmail.com",
-                    academicLevel = "Administrator",
-                    streamOrDegree = "System Admin",
-                    institution = "TheStudent Console",
-                    targetExam = "Administration",
-                    streakDays = 1,
-                    studyHoursThisWeek = 10.0f,
-                    totalPapersSolved = 100,
-                    points = 9999,
-                    isLoggedIn = true
-                )
-                repository.saveUserProfile(adminProfile)
-                preferences.isLoggedIn = true
-                preferences.isGuest = false
-                preferences.userName = adminProfile.name
-                preferences.userEmail = adminProfile.email
-                _uiState.update {
-                    it.copy(
-                        isAuthenticated = true,
-                        isSessionVerified = true
-                    )
+            when (val validation = TheStudentAuthClient.validateSession(serverUrlState.value, token)) {
+                is SessionValidation.Valid -> {
+                    repository.saveUserProfile(validation.profile)
+                    preferences.isLoggedIn = true
+                    preferences.isGuest = false
+                    preferences.userName = validation.profile.name
+                    preferences.userEmail = validation.profile.email
+                    preferences.updateRoleFromServer(validation.role)
+                    validation.expiresAt?.let { preferences.sessionExpiresAt = it }
+                    _isAdmin.value = preferences.isAdmin
+                    _uiState.update { it.copy(isAuthenticated = true, isSessionVerified = true) }
                 }
-                return@launch
-            }
 
-            // Verify with remote DirectAdmin MySQL database
-            try {
-                val serverUrl = serverUrlState.value
-                val result = TheStudentAuthClient.validateSession(serverUrl, token)
-                result.fold(
-                    onSuccess = { profile ->
-                        // Server confirmed: user record exists in MySQL database and email is verified!
-                        repository.saveUserProfile(profile)
-                        preferences.isLoggedIn = true
-                        preferences.isGuest = false
-                        preferences.userName = profile.name
-                        preferences.userEmail = profile.email
-                        _uiState.update {
-                            it.copy(
-                                isAuthenticated = true,
-                                isSessionVerified = true
-                            )
-                        }
-                    },
-                    onFailure = { error ->
-                        // Server rejected: record deleted in MySQL, token expired, or email unverified
-                        Log.w("TheStudentViewModel", "Session verification failed: ${error.message}. Invaliding local session.")
-                        preferences.logout()
-                        repository.clearUserProfile()
-                        _uiState.update {
-                            it.copy(
-                                isAuthenticated = false,
-                                isSessionVerified = true
-                            )
-                        }
+                is SessionValidation.Invalid -> {
+                    Log.w("TheStudentViewModel", "Session rejected by server: ${validation.message}")
+                    preferences.logout()
+                    repository.clearUserProfile()
+                    _isAdmin.value = false
+                    _uiState.update {
+                        it.copy(
+                            isAuthenticated = false,
+                            isSessionVerified = true,
+                            isAdminPanelOpen = false
+                        )
                     }
-                )
-            } catch (e: Exception) {
-                Log.e("TheStudentViewModel", "Exception verifying session: ${e.message}", e)
-                preferences.logout()
-                repository.clearUserProfile()
-                _uiState.update {
-                    it.copy(
-                        isAuthenticated = false,
-                        isSessionVerified = true
-                    )
+                }
+
+                is SessionValidation.Unreachable -> {
+                    // Offline / server hiccup: keep the user signed in with the
+                    // locally cached profile.
+                    Log.w("TheStudentViewModel", "Session check skipped: ${validation.message}")
+                    _isAdmin.value = preferences.isAdmin
+                    _uiState.update { it.copy(isAuthenticated = true, isSessionVerified = true) }
                 }
             }
         }
@@ -601,12 +583,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun handleAuthSuccess(profile: UserProfile) {
         viewModelScope.launch {
             preferences.isOnboarded = true
-            preferences.isLoggedIn = true
+            // NOTE: do not force isLoggedIn here. TheStudentPreferences.setSession()
+            // already stored the session with the user's "remember me" choice, and
+            // overriding it would silently keep a session alive that the user asked
+            // not to persist. In-memory auth state is handled by _uiState below.
             preferences.isGuest = false
             preferences.userName = profile.name
             preferences.userEmail = profile.email
             val loggedInProfile = profile.copy(isLoggedIn = true)
             repository.saveUserProfile(loggedInProfile)
+            _isAdmin.value = preferences.isAdmin
             _uiState.update {
                 it.copy(
                     isAuthenticated = true,
@@ -631,11 +617,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         viewModelScope.launch {
             val token = preferences.sessionToken
             val serverUrl = serverUrlState.value
-            if (!token.isNullOrBlank()) {
-                TheStudentAuthClient.logout(serverUrl, token)
-            }
             preferences.logout()
             repository.clearUserProfile()
+            _isAdmin.value = false
+            _uiState.update { it.copy(isAdminPanelOpen = false) }
+            if (!token.isNullOrBlank()) {
+                // Revoke server-side AFTER clearing local state so the UI reacts
+                // instantly even if the network call is slow or fails.
+                TheStudentAuthClient.logout(serverUrl, token)
+            }
             _uiState.update {
                 it.copy(
                     isAuthenticated = false,

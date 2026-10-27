@@ -23,9 +23,23 @@ import java.util.concurrent.TimeUnit
 class PastPapersRemoteRepository(private val context: Context) {
 
     private val prefs = context.getSharedPreferences("thestudent_backend_prefs", Context.MODE_PRIVATE)
+    private val sessionPrefs by lazy { com.example.data.local.TheStudentPreferences(context) }
+
+    /** Bearer header for admin-only write endpoints, or null when signed out. */
+    private fun adminAuthorizationHeader(): String? {
+        val token = sessionPrefs.sessionToken
+        return if (token.isNullOrBlank()) null else "Bearer $token"
+    }
 
     companion object {
         private const val TAG = "PastPapersRemoteRepo"
+
+        /** RFC 1918 private ranges — the only addresses allowed to use cleartext HTTP. */
+        private val PRIVATE_IPV4 = Regex(
+            "^(10\\.\\d{1,3}\\.\\d{1,3}\\.\\d{1,3}" +
+                "|192\\.168\\.\\d{1,3}\\.\\d{1,3}" +
+                "|172\\.(1[6-9]|2\\d|3[01])\\.\\d{1,3}\\.\\d{1,3})$"
+        )
         const val KEY_BACKEND_URL = "custom_database_api_url"
         const val DEFAULT_BACKEND_URL = "https://app.quizontal.site/"
     }
@@ -33,7 +47,8 @@ class PastPapersRemoteRepository(private val context: Context) {
     var backendBaseUrl: String
         get() {
             val stored = prefs.getString(KEY_BACKEND_URL, DEFAULT_BACKEND_URL) ?: DEFAULT_BACKEND_URL
-            return if (stored == "https://api.thestudent.lk/") DEFAULT_BACKEND_URL else stored
+            if (stored == "https://api.thestudent.lk/") return DEFAULT_BACKEND_URL
+            return enforceTransportSecurity(stored)
         }
         set(value) {
             var sanitized = value.trim()
@@ -46,9 +61,39 @@ class PastPapersRemoteRepository(private val context: Context) {
             if (!sanitized.endsWith("/")) {
                 sanitized = "$sanitized/"
             }
+            sanitized = enforceTransportSecurity(sanitized)
             prefs.edit().putString(KEY_BACKEND_URL, sanitized).apply()
             cachedService = null
         }
+
+    /**
+     * Session tokens and passwords must never travel in clear text.
+     *
+     * Any plain `http://` URL is upgraded to `https://` unless it points at a
+     * local development host (emulator loopback / private LAN range), which is
+     * also the only cleartext allowed by res/xml/network_security_config.xml.
+     */
+    private fun enforceTransportSecurity(url: String): String {
+        val trimmed = url.trim()
+        if (!trimmed.startsWith("http://", ignoreCase = true)) return trimmed
+
+        val host = runCatching {
+            java.net.URI(trimmed).host?.lowercase()
+        }.getOrNull()
+
+        val isLocalDevHost = host != null && (
+            host == "localhost" ||
+                host == "127.0.0.1" ||
+                host == "10.0.2.2" ||            // Android emulator loopback alias
+                host == "::1" ||
+                host.endsWith(".local") ||
+                PRIVATE_IPV4.matches(host)
+            )
+
+        if (isLocalDevHost) return trimmed
+        Log.w(TAG, "Refusing cleartext backend URL; upgrading to HTTPS.")
+        return "https://" + trimmed.substring("http://".length)
+    }
 
     private var cachedService: PastPapersApiService? = null
 
@@ -149,6 +194,10 @@ class PastPapersRemoteRepository(private val context: Context) {
      * Upload paper details to the DirectAdmin / MySQL server API.
      */
     suspend fun uploadPaperRemote(paper: PastPaper): Boolean = withContext(Dispatchers.IO) {
+        val authorization = adminAuthorizationHeader() ?: run {
+            Log.w(TAG, "Upload blocked: an administrator session is required")
+            return@withContext false
+        }
         try {
             val service = getApiService()
             val req = PaperUploadRequest(
@@ -167,7 +216,7 @@ class PastPapersRemoteRepository(private val context: Context) {
                 markingSchemeUrl = paper.markingSchemeUrl,
                 description = paper.description
             )
-            val res = service.uploadPaper(req)
+            val res = service.uploadPaper(authorization, req)
             res.status == "success"
         } catch (e: Exception) {
             Log.e(TAG, "Error uploading paper to remote API ($backendBaseUrl): ${e.message}")
@@ -179,9 +228,13 @@ class PastPapersRemoteRepository(private val context: Context) {
      * Delete paper from the remote server database.
      */
     suspend fun deletePaperRemote(paperId: String): Boolean = withContext(Dispatchers.IO) {
+        val authorization = adminAuthorizationHeader() ?: run {
+            Log.w(TAG, "Delete blocked: an administrator session is required")
+            return@withContext false
+        }
         try {
             val service = getApiService()
-            val res = service.deletePaper(PaperDeleteRequest(paperId))
+            val res = service.deletePaper(authorization, PaperDeleteRequest(paperId))
             res.status == "success"
         } catch (e: Exception) {
             Log.e(TAG, "Error deleting paper from remote API: ${e.message}")

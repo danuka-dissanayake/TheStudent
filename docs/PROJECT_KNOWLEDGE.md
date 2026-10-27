@@ -85,7 +85,9 @@ Key flows exposed: `uiState`, `savedPapers`, `savedCourses`, `recentActivities`,
 
 Notable behaviour:
 - `init` → seeds Room, `loadDynamicPapers()` (Retrofit → falls back to `DefaultPastPapersSeed.allPapers`, 50 papers), `verifySessionWithBackend()`.
-- `verifySessionWithBackend()` validates the stored token via `api/auth.php?action=me`; failure ⇒ local logout. Hard-coded escape hatch: token `admin_master_token` / email `admin@gmail.com` ⇒ admin profile.
+- `verifySessionWithBackend()` validates the stored token via `api/auth.php?action=me`. Only a definitive
+  401/403 clears the session; network failures keep the user signed in (offline-tolerant). Administrator
+  access is `preferences.userRole == "admin"`, refreshed from the server on every validation.
 - `TheStudentPreferences` (SharedPreferences `thestudent_user_session`) stores `sessionToken`, `userEmail`, `isLoggedIn`, `isOnboarded`.
 - TTS (`TextToSpeech`, `Locale.US`, rate 0.95) + `SpeechRecognizer` are used for both the Language Lab and AI Tutor; hands-free mode auto-relistens after speaking.
 - `simulateSkeletonRefresh()` = fake 450 ms loading for shimmer polish.
@@ -157,9 +159,13 @@ local conversational engine (grammar corrections, scenario greetings, reply pill
 
 ## 7. Auth & backend
 
-`data/remote/TheStudentAuthClient` → `api/auth.php`:
-`register`, `login`, `verify_otp`, `resend_otp`, `google_login`, `me|profile`, `logout`, `validateSession`.
-Returns `AuthApiResult.Success / RequiresOtp(reason: registration | unverified_account | ip_change) / Error`.
+`data/remote/TheStudentAuthClient` → `api/auth.php` (v3, hardened — see `docs/AUTH_SECURITY.md`):
+`register`, `login`, `verify_otp`, `resend_otp`, `request_password_reset`, `reset_password`,
+`change_password`, `google_login`, `me|profile`, `logout`, `logout_all`, `validateSession`.
+Returns `AuthApiResult.Success / RequiresOtp / ResetRequired / Error` and, for session checks,
+`SessionValidation.Valid / Invalid / Unreachable`. Sessions are opaque 64-hex tokens sent **only**
+in `Authorization: Bearer`; the server stores SHA-256 digests, OTPs are HMAC digests, and the token is
+AES-GCM encrypted at rest on the device via the Android Keystore.
 
 Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_backend/`; zipped in `backend_directadmin.zip`):
 - `config.php` — PDO connection, CORS `*`, Google web client id, Gmail SMTP constants.
@@ -185,13 +191,20 @@ Backend (`backend/`, mirrored in `app/website_php_mysql/` and `app/directadmin_b
 
 ## 9. Findings worth fixing (ranked)
 
-1. **Live secrets committed to git.** `backend/config.php` holds the DirectAdmin DB password and the Gmail SMTP app password; `app/.../TheStudentEmailSender.kt` hard-codes the same Gmail address + app password **inside the APK** (anyone can decompile and send mail as that account). Move both server-side / to env, rotate the credentials, and drop the client-side SMTP path.
+1. ✅ **FIXED — live secrets were committed to git.** `backend/config.php` now reads credentials from
+   environment variables or a git-ignored `config.secrets.php`; the client-side SMTP sender
+   (`TheStudentEmailSender.kt`) with the Gmail app password baked into the APK was deleted.
+   **Still required:** rotate the leaked MySQL + Gmail passwords (they remain in git history).
 2. **`markPaperDownloaded()` looks the paper up in `SampleEducationalData.pastPapers`**, not the seeded/remote list — so "downloaded" state never persists for backend papers (silent no-op).
 3. **Build/plugin setup is half-wired:** the `google-services` Gradle plugin and `firebase-ai` are enabled while Firestore is commented out and no `google-services.json` exists (only `passthrough`), so Firebase never actually initialises — harmless but confusing dead weight.
 4. **Dead code:** `LearnScreen.kt` (428 lines) is unreachable; `SampleEducationalData.pastPapers` duplicates `DefaultPastPapersSeed`; `TheStudentEmailSender` duplicates backend SMTP; empty `untitled.tsx`.
 5. **Mic visualizer is static** — `onRmsChanged` throws away RMS to avoid recomposition, so `micRmsDb` is always 0 and the voice visualizer never reacts to actual volume (fix with a throttled/`snapshotFlow` publish).
 6. **Hard-verify model IDs** — `gemini-3.8-flash`, `glm-4.7-flash`, `glm-4-flash` should be checked against the providers' current catalogues; a wrong ID silently degrades to the HF fallback.
-7. **Security hardening:** cleartext traffic allowed (`usesCleartextTraffic="true"`), session token in plain SharedPreferences (consider `EncryptedSharedPreferences`), CORS `*` on an authenticated API, admin bypass via a fixed token string in `verifySessionWithBackend()`.
+7. **Security hardening — done (see `docs/AUTH_SECURITY.md`):** session token AES-GCM encrypted via the
+   Keystore; admin bypass removed (client *and* server); CORS restricted by `ALLOWED_ORIGINS`; the admin
+   console and the paper upload/delete APIs require authentication; cleartext HTTP disabled app-wide
+   (`network_security_config.xml` allows localhost/emulator/LAN only); session store excluded from backups.
+   Outstanding operator action: **rotate the MySQL and Gmail passwords that were committed to git history.**
 8. **No real chat backend** — the CHAT tab is entirely local demo data despite looking production-ready.
 9. **Auth is mandatory** (guest deprecated) yet `MainActivity` still contains a fallback white-box + `openAuthScreen()` effect — a slightly awkward safety net.
 10. **Test coverage ≈ 0**, and nothing guards the 70-field UI state or the AI routing.
@@ -206,8 +219,8 @@ app/src/main/java/com/example/
 ├── viewmodel/TheStudentViewModel.kt    # all app state + AI/TTS/Speech logic
 ├── data/
 │   ├── model/       TheStudentModels, AiAssistantModels, GradeCurriculum, SriLankanCurriculumConfig
-│   ├── local/       Room DB/DAO/entities, TheStudentPreferences, TesseractOcrEngine
-│   ├── remote/      PastPapers*, AuthClient, GoogleAuthClient, EmailSender, StudyAiClient,
+│   ├── local/       Room DB/DAO/entities, TheStudentPreferences (Keystore-encrypted token), TesseractOcrEngine
+│   ├── remote/      PastPapers*, AuthClient, GoogleAuthClient, StudyAiClient,
 │   │                StudyTools, DocumentHandler, OcrEngine, HuggingFaceSpaceClient,
 │   │                EnglishVoiceTutorEngine, DefaultPastPapersSeed
 │   └── repository/  TheStudentRepository, SampleEducationalData
@@ -220,3 +233,13 @@ backend/                # live PHP/MySQL API (auth, papers, admin console, schem
 app/website_php_mysql/  # older copy of the API + web portal
 app/directadmin_backend/ # minimal papers-only API copy
 ```
+
+
+---
+
+## 11. Authentication deep-dive
+
+The complete auth model, threat list and deployment runbook live in **`docs/AUTH_SECURITY.md`**.
+Short version: server-issued roles only, hashed session tokens + HMAC OTPs, per-email/-IP throttles,
+enumeration-resistant login & reset, locked-down admin console and paper write APIs, and a Keystore-encrypted
+token on the device.

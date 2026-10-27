@@ -9,23 +9,33 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $username = trim($_POST['username'] ?? '');
     $password = $_POST['password'] ?? '';
 
-    if ($username && $password) {
+    // Simple per-session throttle to slow down credential stuffing.
+    $_SESSION['login_failures'] = (int) ($_SESSION['login_failures'] ?? 0);
+    if ($_SESSION['login_failures'] >= 5) {
+        $error = 'Too many failed attempts. Please wait a few minutes and try again.';
+    } elseif ($username === '' || $password === '') {
+        $error = 'Please fill in both fields.';
+    } else {
         $pdo = getDbConnection();
         $stmt = $pdo->prepare("SELECT * FROM admins WHERE username = :u LIMIT 1");
         $stmt->execute(['u' => $username]);
         $admin = $stmt->fetch();
 
-        // Check password hash (or fallback default admin credentials for initial setup)
-        if ($admin && (password_verify($password, $admin['password_hash']) || $password === 'admin123password')) {
+        // Only a stored bcrypt hash is accepted - there is no default/backdoor
+        // password. Create/reset the admin with:
+        //   php -r "echo password_hash('your-new-password', PASSWORD_BCRYPT);"
+        //   UPDATE admins SET password_hash = '<hash>' WHERE username = 'admin';
+        if ($admin && !empty($admin['password_hash']) && password_verify($password, $admin['password_hash'])) {
+            session_regenerate_id(true);
+            $_SESSION['login_failures'] = 0;
             $_SESSION['admin_logged_in'] = true;
             $_SESSION['admin_username'] = $admin['username'];
             header('Location: index.php');
             exit;
-        } else {
-            $error = 'Invalid username or password.';
         }
-    } else {
-        $error = 'Please fill in both fields.';
+
+        $_SESSION['login_failures']++;
+        $error = 'Invalid username or password.';
     }
 }
 ?>
@@ -65,7 +75,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                 <label class="block text-xs font-bold text-slate-700 uppercase mb-1">Password</label>
                 <input type="password" name="password" placeholder="••••••••••••" required
                        class="w-full px-4 py-3 rounded-xl border border-slate-200 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500">
-                <p class="text-[11px] text-slate-400 mt-1">Default credentials: <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">admin</code> / <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">admin123password</code></p>
+                <p class="text-[11px] text-slate-400 mt-1">Credentials are managed in the <code class="bg-slate-100 px-1 py-0.5 rounded text-slate-700">admins</code> table.</p>
             </div>
 
             <button type="submit" class="w-full py-3.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-sm font-bold shadow-lg shadow-emerald-600/20 transition">

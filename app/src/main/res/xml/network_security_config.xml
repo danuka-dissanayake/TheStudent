@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Transport security for TheStudent.
+
+    Session tokens and passwords are sent as HTTP headers/bodies, so the app must
+    never talk to a plain-HTTP server on the public internet. Cleartext is
+    permitted ONLY for local development endpoints (emulator loopback and
+    RFC 1918 / .local LAN addresses), which is what the old
+    android:usesCleartextTraffic="true" flag allowed for every host.
+
+    `enforceTransportSecurity()` in PastPapersRemoteRepository upgrades any other
+    http:// URL to https:// automatically, so an admin that types a plain-HTTP
+    production URL cannot silently downgrade every login.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="false">
+        <trust-anchors>
+            <certificates src="system" />
+        </trust-anchors>
+    </base-config>
+
+    <!-- Local development only. -->
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">localhost</domain>
+        <domain includeSubdomains="false">127.0.0.1</domain>
+        <domain includeSubdomains="false">10.0.2.2</domain>
+    </domain-config>
+</network-security-config>

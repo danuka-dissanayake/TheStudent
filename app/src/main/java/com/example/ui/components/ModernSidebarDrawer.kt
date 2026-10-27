@@ -40,6 +40,7 @@ fun ModernSidebarDrawer(
     onOpenLanguageLab: () -> Unit,
     onCloseDrawer: () -> Unit,
     onOpenAdminPanel: (() -> Unit)? = null,
+    isAdmin: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
@@ -280,7 +281,8 @@ fun ModernSidebarDrawer(
             )
 
             // Administrator Special Access Section
-            if (userProfile.email.equals("admin@gmail.com", ignoreCase = true) && onOpenAdminPanel != null) {
+            // Visibility is driven by the server-issued role (never the email).
+            if (isAdmin && onOpenAdminPanel != null) {
                 Spacer(modifier = Modifier.height(20.dp))
                 Text(
                     text = "ADMINISTRATOR",

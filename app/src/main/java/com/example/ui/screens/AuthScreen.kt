@@ -34,6 +34,7 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Fill
+import android.util.Patterns
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -51,7 +52,7 @@ import com.example.data.remote.TheStudentGoogleAuthClient
 import com.example.data.remote.GoogleAuthResult
 import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
-import com.example.data.remote.TheStudentEmailSender
+import com.example.data.remote.ApiOutcome
 import com.example.data.local.TheStudentPreferences
 import com.example.ui.components.TheStudentLogo
 import com.example.ui.components.StudentLoadingSpinner
@@ -66,8 +67,27 @@ private val AuthModernDarkGreen = Color(0xFF047857)
 enum class AuthMode {
     SIGN_IN,
     SIGN_UP,
-    VERIFY_OTP
+    VERIFY_OTP,
+    FORGOT_PASSWORD,
+    RESET_PASSWORD
 }
+
+/**
+ * Client-side mirror of the server password policy. The server remains the
+ * source of truth - this only gives immediate feedback.
+ */
+private fun passwordPolicyError(password: String): String? = when {
+    password.isEmpty() -> "Please enter a password."
+    password.trim().isEmpty() -> "Please enter a password."
+    password.length < 8 -> "Use at least 8 characters."
+    password.length > 72 -> "Password is too long (maximum 72 characters)."
+    !password.any { it.isLetter() } -> "Include at least one letter."
+    !password.any { it.isDigit() } -> "Include at least one number."
+    else -> null
+}
+
+private fun isEmailValid(value: String): Boolean =
+    value.isNotBlank() && Patterns.EMAIL_ADDRESS.matcher(value.trim()).matches()
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -78,7 +98,6 @@ fun AuthScreen(
     initialOtpCode: String? = null,
     onAuthSuccess: (UserProfile) -> Unit,
     backendBaseUrl: String = "https://app.quizontal.site/",
-    onOpenAdminPanel: (() -> Unit)? = null,
     onBack: (() -> Unit)? = null,
     onContinueAsGuest: (() -> Unit)? = null,
     modifier: Modifier = Modifier
@@ -118,8 +137,16 @@ fun AuthScreen(
     var isGoogleSigningIn by remember { mutableStateOf(false) }
     var isSigningIn by remember { mutableStateOf(false) }
     var isRegistering by remember { mutableStateOf(false) }
+    var isRequestingReset by remember { mutableStateOf(false) }
+    var isResettingPassword by remember { mutableStateOf(false) }
+    var resetToken by remember { mutableStateOf("") }
+    var newPassword by remember { mutableStateOf("") }
+    var confirmNewPassword by remember { mutableStateOf("") }
+    var newPasswordVisible by remember { mutableStateOf(false) }
+    var confirmNewPasswordVisible by remember { mutableStateOf(false) }
     var isVerifyingOtp by remember { mutableStateOf(false) }
-    val isAnyLoading = isGoogleSigningIn || isSigningIn || isRegistering || isVerifyingOtp
+    val isAnyLoading = isGoogleSigningIn || isSigningIn || isRegistering || isVerifyingOtp ||
+        isRequestingReset || isResettingPassword
 
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -171,10 +198,11 @@ fun AuthScreen(
     androidx.activity.compose.BackHandler(enabled = true) {
         if (isAnyLoading) return@BackHandler
         when (authMode) {
-            AuthMode.VERIFY_OTP -> {
-                switchModeWithShimmer(AuthMode.SIGN_IN)
-            }
+            AuthMode.VERIFY_OTP,
+            AuthMode.RESET_PASSWORD,
+            AuthMode.FORGOT_PASSWORD,
             AuthMode.SIGN_UP -> {
+                errorMessage = null
                 switchModeWithShimmer(AuthMode.SIGN_IN)
             }
             AuthMode.SIGN_IN -> {
@@ -221,9 +249,14 @@ fun AuthScreen(
                                 token = authResult.token,
                                 userEmail = authResult.profile.email,
                                 userName = authResult.profile.name,
-                                rememberMe = true
+                                rememberMe = true,
+                                role = authResult.role,
+                                expiresAt = authResult.expiresAt
                             )
                             onAuthSuccess(authResult.profile)
+                        }
+                        is AuthApiResult.ResetRequired -> {
+                            errorMessage = "Unexpected response from the server. Please try again."
                         }
                         is AuthApiResult.Error -> {
                             errorMessage = authResult.message
@@ -244,8 +277,8 @@ fun AuthScreen(
 
     fun handleEmailSignIn() {
         if (isAnyLoading) return
-        if (email.isBlank()) {
-            errorMessage = "Please enter your email address."
+        if (!isEmailValid(email)) {
+            errorMessage = "Please enter a valid email address."
             return
         }
         if (password.isBlank()) {
@@ -253,42 +286,8 @@ fun AuthScreen(
             return
         }
 
-        val trimmedEmail = email.trim()
-        val trimmedPassword = password.trim()
-
-        // ── MASTER ADMIN INTERCEPT ──
-        // Email: admin@gmail.com, Pass: admin123 -> Navigates immediately to Admin Panel
-        if (trimmedEmail.equals("admin@gmail.com", ignoreCase = true) && trimmedPassword == "admin123") {
-            errorMessage = null
-            coroutineScope.launch {
-                isSigningIn = true
-                val adminProfile = UserProfile(
-                    name = "Administrator",
-                    email = "admin@gmail.com",
-                    academicLevel = "Administrator",
-                    streamOrDegree = "System Admin",
-                    institution = "TheStudent Console",
-                    targetExam = "Administration",
-                    streakDays = 1,
-                    studyHoursThisWeek = 10.0f,
-                    totalPapersSolved = 100,
-                    points = 9999,
-                    isLoggedIn = true
-                )
-                TheStudentPreferences.setSession(
-                    context = context,
-                    token = "admin_master_token",
-                    userEmail = adminProfile.email,
-                    userName = adminProfile.name,
-                    rememberMe = rememberMe
-                )
-                onAuthSuccess(adminProfile)
-                onOpenAdminPanel?.invoke()
-                isSigningIn = false
-            }
-            return
-        }
-
+        // NOTE: passwords are never trimmed or normalised - the exact characters
+        // entered are the exact characters hashed, so spaces are significant.
         coroutineScope.launch {
             isSigningIn = true
             errorMessage = null
@@ -315,9 +314,14 @@ fun AuthScreen(
                         token = result.token,
                         userEmail = result.profile.email,
                         userName = result.profile.name,
-                        rememberMe = rememberMe
+                        rememberMe = rememberMe,
+                        role = result.role,
+                        expiresAt = result.expiresAt
                     )
                     onAuthSuccess(result.profile)
+                }
+                is AuthApiResult.ResetRequired -> {
+                    errorMessage = "Unexpected response from the server. Please try again."
                 }
                 is AuthApiResult.Error -> {
                     errorMessage = result.message
@@ -333,12 +337,12 @@ fun AuthScreen(
             errorMessage = "Please enter your first and last name."
             return
         }
-        if (email.isBlank()) {
-            errorMessage = "Please enter your email address."
+        if (!isEmailValid(email)) {
+            errorMessage = "Please enter a valid email address."
             return
         }
-        if (password.length < 6) {
-            errorMessage = "Password must be at least 6 characters long."
+        passwordPolicyError(password)?.let { policyError ->
+            errorMessage = policyError
             return
         }
         if (password != confirmPassword) {
@@ -348,8 +352,8 @@ fun AuthScreen(
         coroutineScope.launch {
             isRegistering = true
             errorMessage = null
-            val fullName = "$firstName $lastName".trim()
-            when (val result = TheStudentAuthClient.register(backendBaseUrl, fullName, email, password, selectedStream)) {
+            val fullName = "${firstName.trim()} ${lastName.trim()}"
+            when (val result = TheStudentAuthClient.register(backendBaseUrl, fullName, email.trim(), password, selectedStream)) {
                 is AuthApiResult.RequiresOtp -> {
                     pendingVerificationEmail = result.email
                     pendingVerificationProfile = UserProfile(name = fullName, email = email, isLoggedIn = true)
@@ -371,9 +375,14 @@ fun AuthScreen(
                         token = result.token,
                         userEmail = result.profile.email,
                         userName = result.profile.name,
-                        rememberMe = true
+                        rememberMe = true,
+                        role = result.role,
+                        expiresAt = result.expiresAt
                     )
                     onAuthSuccess(result.profile)
+                }
+                is AuthApiResult.ResetRequired -> {
+                    errorMessage = "Unexpected response from the server. Please try again."
                 }
                 is AuthApiResult.Error -> {
                     errorMessage = result.message
@@ -403,16 +412,30 @@ fun AuthScreen(
                         token = result.token,
                         userEmail = result.profile.email,
                         userName = result.profile.name,
-                        rememberMe = true
+                        rememberMe = true,
+                        role = result.role,
+                        expiresAt = result.expiresAt
                     )
                     android.widget.Toast.makeText(context, result.message, android.widget.Toast.LENGTH_SHORT).show()
                     onAuthSuccess(result.profile)
+                }
+                is AuthApiResult.ResetRequired -> {
+                    // The code was valid but it belongs to a password reset:
+                    // no session is created, the user must choose a new password.
+                    resetToken = result.resetToken
+                    errorMessage = null
+                    otpDigits = listOf("", "", "", "", "", "")
+                    isVerifyingOtp = false
+                    switchModeWithShimmer(AuthMode.RESET_PASSWORD)
                 }
                 is AuthApiResult.RequiresOtp -> {
                     errorMessage = result.message
                 }
                 is AuthApiResult.Error -> {
                     errorMessage = result.message
+                    result.retryAfterSeconds?.let { wait ->
+                        if (wait in 1..300) resendCooldownSeconds = maxOf(resendCooldownSeconds, wait)
+                    }
                 }
             }
             isVerifyingOtp = false
@@ -422,19 +445,96 @@ fun AuthScreen(
     fun handleResendOtp() {
         if (isAnyLoading || resendCooldownSeconds > 0) return
         val targetEmail = pendingVerificationEmail.ifBlank { email }
-        if (targetEmail.isBlank()) {
-            errorMessage = "Please enter your email address."
+        if (!isEmailValid(targetEmail)) {
+            errorMessage = "Please enter a valid email address."
             return
         }
         coroutineScope.launch {
             errorMessage = null
-            val result = TheStudentAuthClient.resendOtp(backendBaseUrl, targetEmail)
-            result.onSuccess { msg ->
-                resendCooldownSeconds = 50
-                android.widget.Toast.makeText(context, msg, android.widget.Toast.LENGTH_SHORT).show()
-            }.onFailure { err ->
-                errorMessage = err.message
+            when (val outcome = TheStudentAuthClient.resendOtp(backendBaseUrl, targetEmail.trim())) {
+                is ApiOutcome.Success -> {
+                    resendCooldownSeconds = outcome.cooldownSeconds.coerceIn(30, 300)
+                    android.widget.Toast.makeText(context, outcome.message, android.widget.Toast.LENGTH_SHORT).show()
+                }
+                is ApiOutcome.Failure -> {
+                    errorMessage = outcome.message
+                    outcome.retryAfterSeconds?.let { wait ->
+                        if (wait in 1..300) resendCooldownSeconds = wait
+                    }
+                }
             }
+        }
+    }
+
+    /**
+     * Step 1 of the password reset flow: ask the server to email a reset code.
+     * The server intentionally returns the same response for unknown emails.
+     */
+    fun handleForgotPassword() {
+        if (isAnyLoading) return
+        if (!isEmailValid(email)) {
+            errorMessage = "Please enter a valid email address."
+            return
+        }
+        coroutineScope.launch {
+            isRequestingReset = true
+            errorMessage = null
+            when (val outcome = TheStudentAuthClient.requestPasswordReset(backendBaseUrl, email.trim())) {
+                is ApiOutcome.Success -> {
+                    pendingVerificationEmail = email.trim()
+                    pendingVerificationReason = "password_reset"
+                    otpDigits = listOf("", "", "", "", "", "")
+                    resendCooldownSeconds = outcome.cooldownSeconds.coerceIn(30, 300)
+                    android.widget.Toast.makeText(context, outcome.message, android.widget.Toast.LENGTH_LONG).show()
+                    isRequestingReset = false
+                    switchModeWithShimmer(AuthMode.VERIFY_OTP)
+                }
+                is ApiOutcome.Failure -> {
+                    errorMessage = outcome.message
+                    outcome.retryAfterSeconds?.let { wait ->
+                        if (wait in 1..300) resendCooldownSeconds = wait
+                    }
+                }
+            }
+            isRequestingReset = false
+        }
+    }
+
+    /** Step 3 of the reset flow: submit the new password with the reset token. */
+    fun handleResetPassword() {
+        if (isAnyLoading) return
+        if (resetToken.isBlank()) {
+            errorMessage = "Your reset session expired. Please request a new code."
+            return
+        }
+        passwordPolicyError(newPassword)?.let { policyError ->
+            errorMessage = policyError
+            return
+        }
+        if (newPassword != confirmNewPassword) {
+            errorMessage = "Passwords do not match."
+            return
+        }
+        coroutineScope.launch {
+            isResettingPassword = true
+            errorMessage = null
+            when (val outcome = TheStudentAuthClient.resetPassword(backendBaseUrl, resetToken, newPassword)) {
+                is ApiOutcome.Success -> {
+                    resetToken = ""
+                    newPassword = ""
+                    confirmNewPassword = ""
+                    otpDigits = listOf("", "", "", "", "", "")
+                    password = ""
+                    pendingVerificationReason = ""
+                    android.widget.Toast.makeText(context, outcome.message, android.widget.Toast.LENGTH_LONG).show()
+                    isResettingPassword = false
+                    switchModeWithShimmer(AuthMode.SIGN_IN)
+                }
+                is ApiOutcome.Failure -> {
+                    errorMessage = outcome.message
+                }
+            }
+            isResettingPassword = false
         }
     }
 
@@ -520,11 +620,11 @@ fun AuthScreen(
                             modifier = Modifier
                                 .size(44.dp)
                                 .clickable(enabled = !isAnyLoading) {
-                                    if (authMode == AuthMode.SIGN_UP) {
+                                    if (authMode == AuthMode.SIGN_IN) {
+                                        onBack?.invoke()
+                                    } else {
                                         errorMessage = null
                                         switchModeWithShimmer(AuthMode.SIGN_IN)
-                                    } else {
-                                        onBack?.invoke()
                                     }
                                 }
                                 .testTag("auth_back_button")
@@ -542,33 +642,32 @@ fun AuthScreen(
 
                     Spacer(modifier = Modifier.height(4.dp))
 
-                    if (authMode == AuthMode.SIGN_IN) {
-                        Text(
-                            text = "Go ahead and complete your\naccount and setup",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            lineHeight = 32.sp
-                        )
-                        Text(
-                            text = "Create your account and simplify your workflow instantly.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.92f)
-                        )
-                    } else {
-                        Text(
-                            text = "Sign up now to access your\npersonal account",
-                            style = MaterialTheme.typography.headlineSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = Color.White,
-                            lineHeight = 32.sp
-                        )
-                        Text(
-                            text = "Sign up to access your account and exclusive features.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = Color.White.copy(alpha = 0.92f)
-                        )
+                    val headline = when (authMode) {
+                        AuthMode.SIGN_IN -> "Go ahead and complete your\naccount and setup"
+                        AuthMode.SIGN_UP -> "Sign up now to access your\npersonal account"
+                        AuthMode.FORGOT_PASSWORD -> "Forgot your password?\nLet's get you back in"
+                        AuthMode.RESET_PASSWORD -> "Almost there -\nchoose a new password"
+                        AuthMode.VERIFY_OTP -> "Verify it's you"
                     }
+                    val subheadline = when (authMode) {
+                        AuthMode.SIGN_IN -> "Create your account and simplify your workflow instantly."
+                        AuthMode.SIGN_UP -> "Sign up to access your account and exclusive features."
+                        AuthMode.FORGOT_PASSWORD -> "We'll email a 6-digit reset code to your registered address."
+                        AuthMode.RESET_PASSWORD -> "Use at least 8 characters with a letter and a number."
+                        AuthMode.VERIFY_OTP -> "Enter the code we emailed you."
+                    }
+                    Text(
+                        text = headline,
+                        style = MaterialTheme.typography.headlineSmall,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        lineHeight = 32.sp
+                    )
+                    Text(
+                        text = subheadline,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.White.copy(alpha = 0.92f)
+                    )
                 }
 
                 Spacer(modifier = Modifier.height(10.dp))
@@ -591,7 +690,7 @@ fun AuthScreen(
                         verticalArrangement = Arrangement.spacedBy(18.dp)
                     ) {
                     // Redesigned modern toggle pill switcher
-                    if (authMode != AuthMode.VERIFY_OTP) {
+                    if (authMode == AuthMode.SIGN_IN || authMode == AuthMode.SIGN_UP) {
                         ModernSegmentedToggle(
                             isSignIn = authMode == AuthMode.SIGN_IN,
                             enabled = !isAnyLoading,
@@ -708,7 +807,10 @@ fun AuthScreen(
                                             fontWeight = FontWeight.SemiBold,
                                             color = RedError,
                                             modifier = Modifier
-                                                .clickable(enabled = !isAnyLoading) { switchModeWithShimmer(AuthMode.VERIFY_OTP) }
+                                                .clickable(enabled = !isAnyLoading) {
+                                                    errorMessage = null
+                                                    switchModeWithShimmer(AuthMode.FORGOT_PASSWORD)
+                                                }
                                                 .testTag("forget_password_button")
                                         )
                                     }
@@ -879,6 +981,105 @@ fun AuthScreen(
                                 }
                             }
 
+                            AuthMode.FORGOT_PASSWORD -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text(
+                                        text = "Enter the email linked to your account and we'll send you a 6-digit reset code.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    CleanLabeledTextField(
+                                        label = "Email",
+                                        value = email,
+                                        placeholder = "you@example.com",
+                                        keyboardType = KeyboardType.Email,
+                                        enabled = !isAnyLoading,
+                                        onValueChange = {
+                                            email = it
+                                            errorMessage = null
+                                        },
+                                        testTag = "forgot_email_field"
+                                    )
+                                    SolidPillButton(
+                                        text = if (isRequestingReset) "Sending code..." else "Send reset code",
+                                        buttonColor = AuthModernDarkGreen,
+                                        isLoading = isRequestingReset,
+                                        enabled = !isAnyLoading,
+                                        onClick = { handleForgotPassword() },
+                                        testTag = "btn_send_reset_code"
+                                    )
+                                    TextButton(
+                                        onClick = {
+                                            errorMessage = null
+                                            switchModeWithShimmer(AuthMode.SIGN_IN)
+                                        },
+                                        enabled = !isAnyLoading
+                                    ) {
+                                        Text(
+                                            text = "Back to sign in",
+                                            color = AuthModernDarkGreen,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+
+                            AuthMode.RESET_PASSWORD -> {
+                                Column(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    verticalArrangement = Arrangement.spacedBy(16.dp)
+                                ) {
+                                    Text(
+                                        text = "Enter a new password for " +
+                                            pendingVerificationEmail.ifBlank { email }.ifBlank { "your email" } +
+                                            ". All other devices will be signed out.",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    CleanLabeledTextField(
+                                        label = "New password",
+                                        value = newPassword,
+                                        placeholder = "At least 8 characters",
+                                        keyboardType = KeyboardType.Password,
+                                        isPassword = true,
+                                        passwordVisible = newPasswordVisible,
+                                        enabled = !isAnyLoading,
+                                        onTogglePassword = { newPasswordVisible = !newPasswordVisible },
+                                        onValueChange = {
+                                            newPassword = it
+                                            errorMessage = null
+                                        },
+                                        testTag = "reset_password_field"
+                                    )
+                                    CleanLabeledTextField(
+                                        label = "Confirm new password",
+                                        value = confirmNewPassword,
+                                        placeholder = "Repeat your new password",
+                                        keyboardType = KeyboardType.Password,
+                                        isPassword = true,
+                                        passwordVisible = confirmNewPasswordVisible,
+                                        enabled = !isAnyLoading,
+                                        onTogglePassword = { confirmNewPasswordVisible = !confirmNewPasswordVisible },
+                                        onValueChange = {
+                                            confirmNewPassword = it
+                                            errorMessage = null
+                                        },
+                                        testTag = "reset_confirm_password_field"
+                                    )
+                                    SolidPillButton(
+                                        text = if (isResettingPassword) "Updating..." else "Update password",
+                                        buttonColor = AuthModernDarkGreen,
+                                        isLoading = isResettingPassword,
+                                        enabled = !isAnyLoading,
+                                        onClick = { handleResetPassword() },
+                                        testTag = "btn_update_password"
+                                    )
+                                }
+                            }
+
                             AuthMode.VERIFY_OTP -> {}
                         }
                     }
@@ -903,8 +1104,10 @@ fun AuthScreen(
                     .padding(innerPadding)
             ) {
                 when (transitionTargetMode) {
-                    AuthMode.SIGN_IN  -> AuthSignInSkeleton()
-                    AuthMode.SIGN_UP  -> AuthSignUpSkeleton()
+                    AuthMode.SIGN_IN -> AuthSignInSkeleton()
+                    AuthMode.SIGN_UP -> AuthSignUpSkeleton()
+                    AuthMode.FORGOT_PASSWORD -> AuthSignInSkeleton()
+                    AuthMode.RESET_PASSWORD -> AuthSignUpSkeleton()
                     AuthMode.VERIFY_OTP -> AuthOtpSkeleton()
                 }
             }
@@ -1551,7 +1754,11 @@ fun ModernEmailVerificationScreen(
 
                 // Heading
                 Text(
-                    text = if (reason == "ip_change") "Security Verification" else "Verify Your Email",
+                    text = when (reason) {
+                        "ip_change" -> "Security Verification"
+                        "password_reset" -> "Reset Your Password"
+                        else -> "Verify Your Email"
+                    },
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 23.sp,
                     fontWeight = FontWeight.ExtraBold,

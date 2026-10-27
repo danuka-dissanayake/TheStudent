@@ -112,11 +112,18 @@ CREATE TABLE IF NOT EXISTS `admins` (
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
 
--- Default admin account (Username: admin, Password: admin123password)
--- Password hash generated with password_hash('admin123password', PASSWORD_DEFAULT)
-INSERT INTO `admins` (`username`, `password_hash`, `email`) VALUES
-('admin', '$2y$10$O0.cQjFm.l1E0.xZ8P23Q.d2y0yQyT56Q8e.rE8y7b7j9z9a8b1qK', 'admin@thestudent.lk')
-ON DUPLICATE KEY UPDATE `username`=`username`;
+-- No default admin account is seeded on purpose.
+-- A shipped "admin / admin123password" login is a backdoor: anyone who reads
+-- this file can sign in to the admin panel. Create the first admin yourself:
+--
+--   1) Generate a bcrypt hash on the server:
+--        php -r "echo password_hash('Your-Strong-Password-Here', PASSWORD_BCRYPT), PHP_EOL;"
+--   2) Insert it (never store the plaintext password in SQL or git):
+--        INSERT INTO `admins` (`username`, `password_hash`, `email`)
+--        VALUES ('admin', '<paste-hash-here>', 'you@thestudent.lk');
+--
+-- The new backend uses the `users` table with role='admin' instead:
+--        UPDATE `users` SET `role` = 'admin' WHERE `email` = 'you@thestudent.lk';
 
 -- Seed starter papers matching Grade 6 to Grade 13
 INSERT INTO `papers` (`grade_id`, `subject_id`, `title`, `year`, `exam_type`, `medium`, `file_path`, `file_size`, `pages`, `has_marking_scheme`, `status`) VALUES

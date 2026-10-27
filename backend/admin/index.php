@@ -6,9 +6,14 @@
  * Auto-detects real file size, page count, and handles PDF/Marking Scheme uploads to DirectAdmin.
  */
 
-require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/_guard.php';
 
 $pdo = getDbConnection();
+
+// Authentication gate: the console is administrators-only and every POST is
+// CSRF protected. This MUST stay immediately after the DB connection.
+$adminUser = ts_require_admin($pdo);
+
 $message = '';
 $messageType = '';
 
@@ -40,7 +45,8 @@ function getRemoteFileSize($url) {
     curl_setopt($ch, CURLOPT_NOBODY, true);
     curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
     curl_setopt($ch, CURLOPT_TIMEOUT, 4);
-    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+    curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
     curl_exec($ch);
     $bytes = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
     curl_close($ch);
@@ -76,19 +82,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $computedPages = 16;
 
     if (isset($_FILES['pdf_file']) && $_FILES['pdf_file']['error'] === UPLOAD_ERR_OK) {
-        $rawBytes = $_FILES['pdf_file']['size'];
-        $computedFileSize = formatBytes($rawBytes);
-        $fileName = time() . '_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['pdf_file']['name']));
-        $targetPath = $uploadDir . $fileName;
-        if (move_uploaded_file($_FILES['pdf_file']['tmp_name'], $targetPath)) {
-            $uploadedPdfUrl = $baseUrl . '/uploads/' . $fileName;
-            $computedPages = estimatePdfPages($targetPath);
+        $rawBytes = (int) $_FILES['pdf_file']['size'];
+        $uploadAllowed = true;
+        $rejectReason = '';
+
+        if ($rawBytes <= 0) {
+            $uploadAllowed = false;
+            $rejectReason = 'The uploaded PDF is empty.';
+        } elseif ($rawBytes > 25 * 1024 * 1024) {
+            $uploadAllowed = false;
+            $rejectReason = 'PDF rejected: file is larger than the 25 MB limit.';
+        } else {
+            $finfo = function_exists('finfo_open') ? finfo_open(FILEINFO_MIME_TYPE) : null;
+            $mime = $finfo ? (string) finfo_file($finfo, $_FILES['pdf_file']['tmp_name']) : '';
+            if ($finfo) {
+                finfo_close($finfo);
+            }
+            // Only genuine PDFs may be stored in the public uploads folder.
+            if ($finfo && $mime !== 'application/pdf') {
+                $uploadAllowed = false;
+                $rejectReason = 'PDF rejected: the uploaded file is not a valid PDF document.';
+            }
+        }
+
+        if (!$uploadAllowed) {
+            $message = $rejectReason;
+            $messageType = 'danger';
+            $action = '';
+        } else {
+            $computedFileSize = formatBytes($rawBytes);
+            $fileName = time() . '_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['pdf_file']['name']));
+            $targetPath = $uploadDir . $fileName;
+            if (move_uploaded_file($_FILES['pdf_file']['tmp_name'], $targetPath)) {
+                $uploadedPdfUrl = $baseUrl . '/uploads/' . $fileName;
+                $computedPages = estimatePdfPages($targetPath);
+            }
         }
     }
 
     // 2. Handle Marking Scheme Upload
     $uploadedSchemeUrl = '';
-    if (isset($_FILES['scheme_file']) && $_FILES['scheme_file']['error'] === UPLOAD_ERR_OK) {
+    if ($action !== '' && isset($_FILES['scheme_file']) && $_FILES['scheme_file']['error'] === UPLOAD_ERR_OK) {
         $schemeFileName = time() . '_scheme_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['scheme_file']['name']));
         $targetSchemePath = $uploadDir . $schemeFileName;
         if (move_uploaded_file($_FILES['scheme_file']['tmp_name'], $targetSchemePath)) {
@@ -475,6 +509,14 @@ $papers = $stmt->fetchAll();
         </a>
 
         <div class="d-flex align-items-center gap-2">
+            <span class="text-white-50 small d-none d-lg-inline"><?= htmlspecialchars((string) ($adminUser['email'] ?? '')) ?></span>
+            <form method="POST" class="d-inline">
+                <?= ts_csrf_field() ?>
+                <input type="hidden" name="action" value="logout">
+                <button type="submit" class="btn btn-sm btn-outline-light rounded-pill px-3">
+                    <i class="bi bi-box-arrow-right me-1"></i> Sign out
+                </button>
+            </form>
             <a href="../api/get_papers.php" target="_blank" class="btn btn-sm btn-outline-light rounded-pill px-3">
                 <i class="bi bi-braces me-1"></i> Live JSON API
             </a>
@@ -670,6 +712,7 @@ $papers = $stmt->fetchAll();
                                 </td>
                                 <td>
                                     <form method="POST" class="d-inline">
+                                        <?= ts_csrf_field() ?>
                                         <input type="hidden" name="action" value="toggle_status">
                                         <input type="hidden" name="id" value="<?= $p['id'] ?>">
                                         <input type="hidden" name="current_status" value="<?= $p['status'] ?>">
@@ -698,6 +741,7 @@ $papers = $stmt->fetchAll();
                                             <i class="bi bi-pencil-fill"></i>
                                         </button>
                                         <form method="POST" class="d-inline" onsubmit="return confirm('Are you sure you want to delete this paper?')">
+                                        <?= ts_csrf_field() ?>
                                             <input type="hidden" name="action" value="delete">
                                             <input type="hidden" name="id" value="<?= $p['id'] ?>">
                                             <button type="submit" class="btn btn-outline-danger" title="Delete">
@@ -722,6 +766,7 @@ $papers = $stmt->fetchAll();
     <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable">
         <div class="modal-content rounded-4 border-0 shadow-lg">
             <form method="POST" enctype="multipart/form-data" id="paperForm">
+                <?= ts_csrf_field() ?>
                 <input type="hidden" name="action" id="formAction" value="add">
                 <input type="hidden" name="id" id="paperId" value="">
 

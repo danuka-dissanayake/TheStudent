@@ -8,11 +8,23 @@
  */
 
 require_once __DIR__ . '/../config.php';
+require_once __DIR__ . '/_admin_guard.php';
 
 header('Content-Type: application/json; charset=utf-8');
+header('Cache-Control: no-store');
 
 try {
     $pdo = getDbConnection();
+
+    // Publishing papers is an administrator-only operation.
+    $adminUser = ts_require_admin_api($pdo);
+
+    if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+        http_response_code(405);
+        header('Allow: POST');
+        echo json_encode(['status' => 'error', 'message' => 'Only POST requests are allowed.']);
+        exit();
+    }
 
     // Support both raw JSON body and standard Form POST
     $rawInput = file_get_contents('php://input');
@@ -33,8 +45,19 @@ try {
 
     // Handle PDF file upload if provided via multipart/form-data
     $pdfUrl = trim($data['pdf_url'] ?? '');
+    if (isset($_FILES['pdf_file']) && $_FILES['pdf_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $uploadError = ts_validate_uploaded_pdf($_FILES['pdf_file']);
+        if ($uploadError !== null) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => $uploadError]);
+            exit();
+        }
+    }
     if (isset($_FILES['pdf_file']) && $_FILES['pdf_file']['error'] === UPLOAD_ERR_OK) {
         $cleanFileName = time() . '_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['pdf_file']['name']));
+        if (!preg_match('/\.pdf$/i', $cleanFileName)) {
+            $cleanFileName .= '.pdf';
+        }
         $targetFile = $uploadDir . $cleanFileName;
         if (move_uploaded_file($_FILES['pdf_file']['tmp_name'], $targetFile)) {
             $pdfUrl = $baseUrl . '/uploads/' . $cleanFileName;
@@ -43,8 +66,19 @@ try {
 
     // Handle Marking Scheme file upload if provided
     $schemeUrl = !empty($data['marking_scheme_url']) ? trim($data['marking_scheme_url']) : null;
+    if (isset($_FILES['scheme_file']) && $_FILES['scheme_file']['error'] !== UPLOAD_ERR_NO_FILE) {
+        $schemeError = ts_validate_uploaded_pdf($_FILES['scheme_file']);
+        if ($schemeError !== null) {
+            http_response_code(400);
+            echo json_encode(['status' => 'error', 'message' => $schemeError]);
+            exit();
+        }
+    }
     if (isset($_FILES['scheme_file']) && $_FILES['scheme_file']['error'] === UPLOAD_ERR_OK) {
         $cleanSchemeName = time() . '_scheme_' . preg_replace('/[^a-zA-Z0-9_\.-]/', '_', basename($_FILES['scheme_file']['name']));
+        if (!preg_match('/\.pdf$/i', $cleanSchemeName)) {
+            $cleanSchemeName .= '.pdf';
+        }
         $targetSchemeFile = $uploadDir . $cleanSchemeName;
         if (move_uploaded_file($_FILES['scheme_file']['tmp_name'], $targetSchemeFile)) {
             $schemeUrl = $baseUrl . '/uploads/' . $cleanSchemeName;
@@ -89,7 +123,8 @@ try {
         curl_setopt($ch, CURLOPT_NOBODY, true);
         curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
         curl_setopt($ch, CURLOPT_TIMEOUT, 3);
-        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, true);
+        curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 2);
         curl_exec($ch);
         $remoteBytes = curl_getinfo($ch, CURLINFO_CONTENT_LENGTH_DOWNLOAD);
         curl_close($ch);
@@ -136,8 +171,9 @@ try {
 
 } catch (Exception $e) {
     http_response_code(500);
+    error_log('[TheStudent][upload_paper] ' . $e->getMessage());
     echo json_encode([
         'status'  => 'error',
-        'message' => 'Upload failed: ' . $e->getMessage()
+        'message' => 'Upload failed. Please try again.'
     ]);
 }

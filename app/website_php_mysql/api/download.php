@@ -27,20 +27,41 @@ if (!$paper) {
 // Increment download count
 $pdo->prepare("UPDATE papers SET download_count = download_count + 1 WHERE id = :id")->execute(['id' => $paperId]);
 
-$filePath = __DIR__ . '/../' . $paper['file_path'];
+// Resolve the stored path against the site root and make sure it can never
+// escape that root (a "../" in file_path would otherwise read any file on disk).
+$root     = realpath(__DIR__ . '/..');
+$filePath = realpath($root . '/' . ltrim((string) $paper['file_path'], '/\\'));
+
+// Only ever serve files that resolve inside the site directory.
+if ($filePath === false || $root === false || strpos($filePath, $root . DIRECTORY_SEPARATOR) !== 0) {
+    $filePath = false;
+}
 
 // If local file exists, serve it
-if (file_exists($filePath)) {
-    $fileName = basename($paper['title']) . '.pdf';
+if ($filePath !== false && is_file($filePath)) {
+    // Strip quotes, semicolons, CR/LF and path separators so the title cannot
+    // inject extra headers or break out of the filename="..." parameter.
+    $safeName = preg_replace('/[^\p{L}\p{N}\-_. ]+/u', '', (string)$paper['title']);
+    $safeName = trim($safeName, " .-");
+    if ($safeName === '') {
+        $safeName = 'thestudent-paper-' . $paperId;
+    }
+    $fileName = $safeName . '.pdf';
+
     header('Content-Type: application/pdf');
-    header('Content-Disposition: ' . $action . '; filename="' . $fileName . '"');
+    header("Content-Disposition: {$action}; filename=\"{$fileName}\"; filename*=UTF-8''" . rawurlencode($fileName));
+    header('X-Content-Type-Options: nosniff');
     header('Content-Length: ' . filesize($filePath));
     readfile($filePath);
     exit;
 } else {
     // If it's a mock or remote file URL
-    if (filter_var($paper['file_path'], FILTER_VALIDATE_URL)) {
-        header("Location: " . $paper['file_path']);
+    // Only allow http(s) redirects; a javascript:/data: URL here would be an
+    // open redirect / XSS vector.
+    $remoteUrl = (string)$paper['file_path'];
+    $scheme = strtolower((string)parse_url($remoteUrl, PHP_URL_SCHEME));
+    if (filter_var($remoteUrl, FILTER_VALIDATE_URL) && in_array($scheme, ['http', 'https'], true)) {
+        header('Location: ' . $remoteUrl);
         exit;
     }
     

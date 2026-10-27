@@ -107,7 +107,9 @@ try {
     }
 
     echo json_encode(['status' => 'error', 'message' => 'Invalid action']);
-} catch (\Exception $e) {
+} catch (\Throwable $e) {
+    // Log the detail server-side, never return SQL/driver internals to clients.
+    error_log('TheStudent papers API error: ' . $e->getMessage());
     http_response_code(500);
-    echo json_encode(['status' => 'error', 'message' => $e->getMessage()]);
+    echo json_encode(['status' => 'error', 'message' => 'Unable to load past papers right now.']);
 }

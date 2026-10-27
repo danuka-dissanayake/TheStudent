@@ -150,13 +150,16 @@ interface PastPapersApiService {
         @Query("status") status: String? = "published"
     ): PastPapersApiResponse
 
+    // Publishing / deleting papers requires an authenticated administrator.
     @retrofit2.http.POST("api/upload_paper.php")
     suspend fun uploadPaper(
+        @retrofit2.http.Header("Authorization") authorization: String,
         @retrofit2.http.Body request: PaperUploadRequest
     ): PaperUploadResponse
 
     @retrofit2.http.POST("api/delete_paper.php")
     suspend fun deletePaper(
+        @retrofit2.http.Header("Authorization") authorization: String,
         @retrofit2.http.Body request: PaperDeleteRequest
     ): PaperUploadResponse
 }

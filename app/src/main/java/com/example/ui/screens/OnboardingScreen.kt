@@ -73,7 +73,6 @@ import com.example.data.remote.TheStudentGoogleAuthClient
 import com.example.data.remote.GoogleAuthResult
 import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
-import com.example.data.remote.TheStudentEmailSender
 import com.example.data.local.TheStudentPreferences
 import com.example.ui.components.StudentLoadingSpinner
 import com.example.ui.theme.MaisonNeueFontFamily
@@ -409,7 +408,10 @@ fun OnboardingScreen(
                                                 when (val result = TheStudentGoogleAuthClient.signIn(context)) {
                                                     is GoogleAuthResult.Success -> {
                                                         TheStudentPreferences.setIsOnboarded(context, true)
-                                                        when (val authResult = TheStudentAuthClient.googleLogin("https://app.quizontal.site/", result.idToken)) {
+                                                        // Use the server URL configured on this device instead of a
+                                                        // hard-coded host, so admin-configured endpoints are honoured.
+                                                        val configuredBaseUrl = com.example.data.remote.PastPapersRemoteRepository(context).backendBaseUrl
+                                                        when (val authResult = TheStudentAuthClient.googleLogin(configuredBaseUrl, result.idToken)) {
                                                             is AuthApiResult.RequiresOtp -> {
                                                                 if (onStartGoogleVerification != null) {
                                                                     onStartGoogleVerification(result.profile, "")
@@ -423,13 +425,19 @@ fun OnboardingScreen(
                                                                     token = authResult.token,
                                                                     userEmail = authResult.profile.email,
                                                                     userName = authResult.profile.name,
-                                                                    rememberMe = true
+                                                                    rememberMe = true,
+                                                                    role = authResult.role,
+                                                                    expiresAt = authResult.expiresAt
                                                                 )
                                                                 if (onAuthSuccess != null) {
                                                                     onAuthSuccess(authResult.profile)
                                                                 } else {
                                                                     onFinishOnboarding(false, false)
                                                                 }
+                                                            }
+                                                            is AuthApiResult.ResetRequired -> {
+                                                                android.widget.Toast.makeText(context, "Please sign in again to continue.", android.widget.Toast.LENGTH_LONG).show()
+                                                                onFinishOnboarding(true, false)
                                                             }
                                                             is AuthApiResult.Error -> {
                                                                 android.widget.Toast.makeText(context, authResult.message, android.widget.Toast.LENGTH_LONG).show()

@@ -5,10 +5,8 @@
 -->
 <data-extraction-rules>
     <cloud-backup>
-        <!-- TODO: Use <include> and <exclude> to control what is backed up.
-        <include .../>
-        <exclude .../>
-        -->
+        <!-- Keep the session store out of cloud backups and device transfers. -->
+        <exclude domain="sharedpref" path="thestudent_user_session.xml" />
     </cloud-backup>
     <!--
     <device-transfer>
