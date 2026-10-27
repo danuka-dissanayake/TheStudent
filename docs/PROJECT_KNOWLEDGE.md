@@ -56,7 +56,7 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `OnboardingScreen.kt` | 1097 | 3 intro cards, trust badges, Google/email entry, region picker |
 | `AuthScreen.kt` | 1921 | Sign-in / sign-up / OTP keypad, Google & Apple buttons, shimmer transitions |
 | `HomeScreen.kt` | 875 | Greeting, stats (streak, hours, papers, points), courses, papers, notes, AI entry points |
-| `ChatScreen.kt` | 1137 | Conversation list (All/Groups/Friends/Unread), online-students row, detail thread with attachments/paper snippets — **all hard-coded demo data** |
+| `ChatScreen.kt` | ~1050 | **Production 1:1 student chat** — directory of registered students (full name + avatar only), live online rail/count, unread badges, typing + last-seen, one-time safety notice, clear chat. Data from `api/chat.php` via `TheStudentChatClient`; see `docs/CHAT.md` |
 | `PapersScreen.kt` | 1423 | Grade/stream/medium/year filters (`FilterRightSidebar`), search, skeleton shimmer, save/download, server-URL sheet |
 | `AiTutorScreen.kt` | 603 | English voice tutor: visualizer, transcript, grammar tip, scenario pills, hands-free, HF settings |
 | `AiLanguageScreen.kt` | 786 | 4 sub-tabs: Voice Conversation, Vocabulary, Grammar quiz, Pronunciation |
@@ -73,6 +73,16 @@ Theme (`ui/theme`): emerald/teal/lime brand palette, light + dark schemes, custo
 (Plus Jakarta Sans, Outfit, DM Sans, Roboto) bundled in `res/font`.
 
 ---
+
+### 3b. Chat data flow (added with the chat batch)
+
+`ChatScreen` → `TheStudentViewModel.chatState` → `TheStudentChatClient` → `api/chat.php`.
+
+* Polling: directory 5 s, open conversation 2.5 s, presence heartbeat 20 s
+  (online window on the server is 45 s).
+* Tables: `chat_messages`, `chat_typing`, `chat_clears` + `users.last_seen_at`
+  and `users.chat_safety_ack_at` (`backend/database_chat.sql`, self-healed by the API).
+* Only full names and avatars are ever exposed about another student.
 
 ## 4. State layer — `TheStudentViewModel` (1660 lines)
 

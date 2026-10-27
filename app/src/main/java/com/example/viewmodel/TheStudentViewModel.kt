@@ -24,6 +24,7 @@ import com.example.data.remote.TheStudentStudyAiClient
 import com.example.data.remote.TheStudentAuthClient
 import com.example.data.remote.AuthApiResult
 import com.example.data.remote.SessionValidation
+import com.example.data.remote.TheStudentChatClient
 import com.example.data.remote.EnglishVoiceTutorEngine
 import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
@@ -40,6 +41,7 @@ import android.speech.SpeechRecognizer
 import android.speech.tts.UtteranceProgressListener
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 
 enum class AppScreenFlow {
@@ -132,8 +134,34 @@ data class TheStudentUiState(
     val isAdminPanelOpen: Boolean = false,
     // Account / security settings (change password, sign out everywhere, delete)
     val isSecurityPanelOpen: Boolean = false,
-    val activeChatConversation: ChatConversation? = null
+    /**
+     * True while a 1:1 conversation is open inside the chat tab. The dashboard
+     * uses it to hide the bottom bar and to route the back gesture to `closeChat`.
+     */
+    val isChatConversationOpen: Boolean = false
 )
+
+/**
+ * Everything the chat screen renders.
+ *
+ * [threads] is the directory of *real* registered students (full name + avatar
+ * only); [activePeer] / [messages] hold the conversation that is open.
+ */
+data class ChatUiState(
+    val isLoadingDirectory: Boolean = false,
+    val isLoadingMessages: Boolean = false,
+    val isSending: Boolean = false,
+    val errorMessage: String? = null,
+    val threads: List<ChatThread> = emptyList(),
+    val onlineCount: Int = 0,
+    val totalStudents: Int = 0,
+    val safetyAcknowledged: Boolean = false,
+    val activePeer: ChatPeer? = null,
+    val messages: List<ChatMessage> = emptyList()
+) {
+    val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
+    val totalUnread: Int get() = threads.sumOf { it.unreadCount }
+}
 
 class TheStudentViewModel(application: Application) : AndroidViewModel(application), TextToSpeech.OnInitListener {
 
@@ -280,7 +308,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         }
                         // If hands-free mode is active, automatically listen again after a brief pause
                         if (_uiState.value.isHandsFreeActive) {
-                            kotlinx.coroutines.delay(800)
+                            delay(800)
                             startVoiceListening()
                         }
                     }
@@ -405,12 +433,279 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update { it.copy(isSecurityPanelOpen = false) }
     }
 
-    fun openChat(conversation: ChatConversation) {
-        _uiState.update { it.copy(activeChatConversation = conversation) }
+    // ── Chat ─────────────────────────────────────────────────────────────────
+
+    private val _chatState = MutableStateFlow(ChatUiState())
+    val chatState: StateFlow<ChatUiState> = _chatState.asStateFlow()
+
+    private var chatDirectoryJob: Job? = null
+    private var chatPresenceJob: Job? = null
+    private var chatMessagesJob: Job? = null
+    private var chatTypingJob: Job? = null
+    private var chatIsDirectoryVisible = false
+
+    /** Backend + bearer token for chat calls, or null when signed out. */
+    private fun chatSession(): Pair<String, String>? {
+        val token = preferences.sessionToken
+        if (token.isNullOrBlank()) return null
+        return pastPapersRepository.backendBaseUrl to token
+    }
+
+    /**
+     * Called when the chat tab becomes visible: loads the student directory and
+     * starts the presence heartbeat + directory polling.
+     */
+    fun startChatSync() {
+        if (chatIsDirectoryVisible) return
+        chatIsDirectoryVisible = true
+
+        chatDirectoryJob?.cancel()
+        chatDirectoryJob = viewModelScope.launch {
+            refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty())
+            while (true) {
+                delay(CHAT_DIRECTORY_POLL_MS)
+                refreshChatDirectory(showSpinner = false)
+            }
+        }
+
+        chatPresenceJob?.cancel()
+        chatPresenceJob = viewModelScope.launch {
+            while (true) {
+                val session = chatSession()
+                if (session != null) {
+                    val (baseUrl, token) = session
+                    val onlineCount = TheStudentChatClient.heartbeat(baseUrl, token).dataOrNull()
+                    if (onlineCount != null) {
+                        _chatState.update { it.copy(onlineCount = onlineCount.toInt()) }
+                    }
+                }
+                delay(CHAT_PRESENCE_MS)
+            }
+        }
+    }
+
+    /** Called when the chat tab leaves the composition. */
+    fun stopChatSync() {
+        chatIsDirectoryVisible = false
+        chatDirectoryJob?.cancel()
+        chatDirectoryJob = null
+        chatPresenceJob?.cancel()
+        chatPresenceJob = null
+        closeChat()
+    }
+
+    fun refreshChatDirectoryNow() {
+        viewModelScope.launch { refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty()) }
+    }
+
+    private suspend fun refreshChatDirectory(showSpinner: Boolean) {
+        val session = chatSession() ?: run {
+            _chatState.update {
+                it.copy(
+                    isLoadingDirectory = false,
+                    errorMessage = "Sign in to chat with other students."
+                )
+            }
+            return
+        }
+        val (baseUrl, token) = session
+
+        if (showSpinner) _chatState.update { it.copy(isLoadingDirectory = true) }
+
+        val result = TheStudentChatClient.loadDirectory(baseUrl, token)
+        val directory = result.dataOrNull()
+        if (directory != null) {
+            _chatState.update { state ->
+                state.copy(
+                    isLoadingDirectory = false,
+                    errorMessage = null,
+                    threads = directory.threads,
+                    onlineCount = directory.onlineCount,
+                    totalStudents = directory.totalStudents,
+                    safetyAcknowledged = directory.safetyAcknowledged,
+                    // Keep the open conversation's presence fresh too.
+                    activePeer = state.activePeer?.let { active ->
+                        directory.threads.firstOrNull { it.peer.id == active.id }?.peer ?: active
+                    }
+                )
+            }
+        } else {
+            val message = result.failureMessage
+            _chatState.update {
+                it.copy(
+                    isLoadingDirectory = false,
+                    // A flaky connection must not wipe the last good list.
+                    errorMessage = if (it.threads.isEmpty()) message else null
+                )
+            }
+        }
+    }
+
+    /** Open a 1:1 conversation with a registered student. */
+    fun openChat(peer: ChatPeer) {
+        _chatState.update {
+            it.copy(
+                activePeer = peer,
+                messages = emptyList(),
+                isLoadingMessages = true,
+                errorMessage = null
+            )
+        }
+        _uiState.update { it.copy(isChatConversationOpen = true) }
+
+        chatMessagesJob?.cancel()
+        chatMessagesJob = viewModelScope.launch {
+            val session = chatSession()
+            if (session == null) {
+                _chatState.update {
+                    it.copy(isLoadingMessages = false, errorMessage = "Sign in to chat.")
+                }
+                return@launch
+            }
+            val (baseUrl, token) = session
+
+            // Initial history
+            val initial = TheStudentChatClient.loadMessages(baseUrl, token, peer.id, 0L)
+            val snapshot = initial.dataOrNull()
+            if (snapshot == null) {
+                _chatState.update {
+                    it.copy(isLoadingMessages = false, errorMessage = initial.failureMessage)
+                }
+                return@launch
+            }
+            applyMessages(snapshot, replace = true)
+            TheStudentChatClient.markRead(baseUrl, token, peer.id)
+
+            // Incremental polling
+            while (true) {
+                delay(CHAT_MESSAGES_POLL_MS)
+                val afterId = _chatState.value.messages.lastOrNull()?.id ?: 0L
+                val polled = TheStudentChatClient.loadMessages(baseUrl, token, peer.id, afterId)
+                    .dataOrNull()
+                if (polled != null) {
+                    applyMessages(polled, replace = afterId == 0L)
+                }
+            }
+        }
+    }
+
+    private fun applyMessages(snapshot: ChatConversationState, replace: Boolean) {
+        _chatState.update { state ->
+            val merged = if (replace) {
+                snapshot.messages
+            } else {
+                val known = state.messages.associateBy { it.id }
+                val incoming = snapshot.messages.filter { known[it.id] == null }
+                if (incoming.isEmpty()) state.messages else state.messages + incoming
+            }
+            state.copy(
+                isLoadingMessages = false,
+                activePeer = snapshot.peer,
+                messages = merged,
+                safetyAcknowledged = snapshot.safetyAcknowledged || state.safetyAcknowledged
+            )
+        }
+        // Clear the unread badge for this peer in the directory immediately.
+        val peerId = snapshot.peer.id
+        if (snapshot.messages.any { !it.isMine && !it.isRead }) {
+            _chatState.update { state ->
+                state.copy(
+                    threads = state.threads.map {
+                        if (it.peer.id == peerId) it.copy(unreadCount = 0) else it
+                    }
+                )
+            }
+        }
     }
 
     fun closeChat() {
-        _uiState.update { it.copy(activeChatConversation = null) }
+        chatMessagesJob?.cancel()
+        chatMessagesJob = null
+        chatTypingJob?.cancel()
+        chatTypingJob = null
+        _chatState.update { it.copy(activePeer = null, messages = emptyList()) }
+        _uiState.update { it.copy(isChatConversationOpen = false) }
+    }
+
+    /** Send a message to the open conversation. */
+    fun sendChatMessage(text: String) {
+        val body = text.trim()
+        val peer = _chatState.value.activePeer ?: return
+        if (body.isEmpty() || _chatState.value.isSending) return
+
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+
+        _chatState.update { it.copy(isSending = true, errorMessage = null) }
+        viewModelScope.launch {
+            val result = TheStudentChatClient.sendMessage(baseUrl, token, peer.id, body)
+            val sent = result.dataOrNull()
+            if (sent != null) {
+                _chatState.update { state ->
+                    val alreadyThere = state.messages.any { it.id == sent.id }
+                    state.copy(
+                        isSending = false,
+                        messages = if (alreadyThere) state.messages else state.messages + sent
+                    )
+                }
+            } else {
+                _chatState.update {
+                    it.copy(isSending = false, errorMessage = result.failureMessage)
+                }
+            }
+        }
+    }
+
+    /**
+     * Tell the server the student is typing. Throttled so a fast typist cannot
+     * flood the API (the server also expires the flag after 6 seconds).
+     */
+    fun notifyChatTyping() {
+        val peer = _chatState.value.activePeer ?: return
+        if (chatTypingJob?.isActive == true) return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        chatTypingJob = viewModelScope.launch {
+            TheStudentChatClient.setTyping(baseUrl, token, peer.id, true)
+            delay(CHAT_TYPING_THROTTLE_MS)
+        }
+    }
+
+    /** Acknowledge the one-time "don't share personal details" notice. */
+    fun acknowledgeChatSafetyNotice() {
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        _chatState.update { it.copy(safetyAcknowledged = true) }
+        viewModelScope.launch {
+            TheStudentChatClient.acknowledgeSafetyNotice(baseUrl, token)
+        }
+    }
+
+    /** Clear my copy of the open conversation (the other student keeps theirs). */
+    fun clearActiveChat() {
+        val peer = _chatState.value.activePeer ?: return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        viewModelScope.launch {
+            val result = TheStudentChatClient.clearConversation(baseUrl, token, peer.id)
+            if (result.dataOrNull() != null) {
+                _chatState.update { it.copy(messages = emptyList()) }
+                refreshChatDirectory(showSpinner = false)
+            } else {
+                _chatState.update { it.copy(errorMessage = result.failureMessage) }
+            }
+        }
+    }
+
+    fun dismissChatError() {
+        _chatState.update { it.copy(errorMessage = null) }
+    }
+
+    private companion object {
+        const val CHAT_DIRECTORY_POLL_MS = 5_000L
+        const val CHAT_MESSAGES_POLL_MS = 2_500L
+        const val CHAT_PRESENCE_MS = 20_000L
+        const val CHAT_TYPING_THROTTLE_MS = 3_000L
     }
 
     fun uploadNewPaper(paper: PastPaper) {

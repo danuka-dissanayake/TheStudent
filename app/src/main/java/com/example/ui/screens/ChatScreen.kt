@@ -1,579 +1,894 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.*
-import androidx.compose.material.icons.outlined.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import coil.compose.AsyncImage
+import com.example.data.model.ChatMessage
+import com.example.data.model.ChatPeer
+import com.example.data.model.ChatThread
+import com.example.ui.components.TheStudentAppBackground
 import com.example.ui.theme.EmeraldDark
-import com.example.ui.theme.PureLightGreenButton
+import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.theme.MaisonNeueFontFamily
+import com.example.viewmodel.ChatUiState
 import com.example.viewmodel.TheStudentViewModel
-import com.example.data.model.ChatConversation
-import com.example.data.model.ChatMessageItem
+import java.text.SimpleDateFormat
+import java.util.Calendar
+import java.util.Date
+import java.util.Locale
 
-data class OnlineStudent(
-    val id: String,
-    val name: String,
-    val initials: String,
-    val backgroundColor: Color,
-    val isOnline: Boolean = true
+// ─────────────────────────────────────────────────────────────────────────────
+//  Palette / helpers
+// ─────────────────────────────────────────────────────────────────────────────
+private val ChatInk = Color(0xFF0B1220)
+private val ChatMuted = Color(0xFF64748B)
+private val ChatFaint = Color(0xFF94A3B8)
+private val ChatHairline = Color(0xFFE8EDF3)
+private val ChatOnline = Color(0xFF22C55E)
+private val ChatError = Color(0xFFDC2626)
+
+/** Stable avatar tint per student id, so the initials avatar never flickers. */
+private val ChatAvatarPalette = listOf(
+    Color(0xFF047857), Color(0xFF0F766E), Color(0xFF065F46),
+    Color(0xFF15803D), Color(0xFF0369A1), Color(0xFF4338CA),
+    Color(0xFF7C3AED), Color(0xFFBE185D)
 )
 
-@OptIn(ExperimentalMaterial3Api::class)
+private fun avatarColorFor(id: Int): Color =
+    ChatAvatarPalette[Math.floorMod(id, ChatAvatarPalette.size)]
+
+private fun formatClock(epochSeconds: Long): String {
+    if (epochSeconds <= 0L) return ""
+    return SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(epochSeconds * 1000))
+}
+
+/** "9:45" today, "Yesterday", otherwise "12 Mar". */
+private fun formatThreadStamp(epochSeconds: Long): String {
+    if (epochSeconds <= 0L) return ""
+    val now = Calendar.getInstance()
+    val then = Calendar.getInstance().apply { timeInMillis = epochSeconds * 1000 }
+    val sameDay = now.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        now.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    if (sameDay) return formatClock(epochSeconds)
+
+    val yesterday = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -1) }
+    val wasYesterday = yesterday.get(Calendar.YEAR) == then.get(Calendar.YEAR) &&
+        yesterday.get(Calendar.DAY_OF_YEAR) == then.get(Calendar.DAY_OF_YEAR)
+    if (wasYesterday) return "Yesterday"
+
+    return SimpleDateFormat("d MMM", Locale.getDefault()).format(Date(epochSeconds * 1000))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Chat tab
+// ─────────────────────────────────────────────────────────────────────────────
 @Composable
 fun ChatScreen(
     viewModel: TheStudentViewModel,
     modifier: Modifier = Modifier
 ) {
-    val uiState by viewModel.uiState.collectAsStateWithLifecycle()
-    var searchQuery by remember { mutableStateOf("") }
-    var selectedFilter by remember { mutableStateOf("All") } // All, Groups, Friends, Unread
-    var showNewChatDialog by remember { mutableStateOf(false) }
+    val chatState by viewModel.chatState.collectAsStateWithLifecycle()
 
-    val onlineStudents = remember {
-        listOf(
-            OnlineStudent("1", "Dilshan", "DP", Color(0xFF0F172A)),
-            OnlineStudent("2", "Nimali", "NR", Color(0xFF15803D)),
-            OnlineStudent("3", "Sahan", "SF", Color(0xFF16A34A)),
-            OnlineStudent("4", "Tharushi", "TS", Color(0xFF0F172A)),
-            OnlineStudent("5", "Kasun", "KJ", Color(0xFF86EFAC)),
-            OnlineStudent("6", "Ayesha", "AY", Color(0xFF0284C7))
-        )
+    // The directory polls while the tab is visible; presence heartbeat runs too.
+    LaunchedEffect(Unit) { viewModel.startChatSync() }
+    DisposableEffect(Unit) {
+        onDispose { viewModel.stopChatSync() }
     }
 
-    val initialConversations = remember {
-        listOf(
-            ChatConversation(
-                id = "nimali_chat",
-                name = "Nimali Rathnayake",
-                lastMessage = "This is really helpful, thank you!",
-                time = "9:50",
-                unreadCount = 0,
-                initials = "NR",
-                avatarColor = Color(0xFF15803D),
-                isTyping = true,
-                messages = listOf(
-                    ChatMessageItem(
-                        id = "m1",
-                        senderName = "Nimali Rathnayake",
-                        text = "Hi! I saw your question in the Maths group. Need any help?",
-                        timestamp = "9:44",
-                        isUser = false
-                    ),
-                    ChatMessageItem(
-                        id = "m2",
-                        senderName = "You",
-                        text = "Yes please! Can you explain Q5 from this paper?",
-                        timestamp = "9:45",
-                        isUser = true,
-                        paperSnippetTitle = "A/L Combined Maths I – 2024",
-                        paperSnippetSubtitle = "Question 5 • Paper I"
-                    ),
-                    ChatMessageItem(
-                        id = "m3",
-                        senderName = "Nimali Rathnayake",
-                        text = "Sure. Start by writing the equation in terms of u. I made short notes on this, check them out.",
-                        timestamp = "9:48",
-                        isUser = false,
-                        attachmentName = "Integration short notes.pdf",
-                        attachmentSize = "1.2 MB",
-                        attachmentPages = "4 pages"
-                    ),
-                    ChatMessageItem(
-                        id = "m4",
-                        senderName = "You",
-                        text = "This is really helpful, thank you!",
-                        timestamp = "9:50",
-                        isUser = true
-                    )
-                )
-            ),
-            ChatConversation(
-                id = "c1",
-                name = "TheStudent AI",
-                lastMessage = "Here is a step-by-step solution for Q7...",
-                time = "9:41",
-                unreadCount = 2,
-                isAi = true,
-                initials = "AI",
-                avatarColor = Color(0xFF15803D),
-                messages = listOf(
-                    ChatMessageItem("m101", "TheStudent AI", "Hello! I am your AI study assistant. How can I help you with your past papers today?", "9:40", false),
-                    ChatMessageItem("m102", "TheStudent AI", "Here is a step-by-step solution for Q7...", "9:41", false)
-                )
-            ),
-            ChatConversation(
-                id = "c2",
-                name = "A/L Maths 2024",
-                lastMessage = "Kasun: Anyone solved Q7 part (b)?",
-                time = "9:32",
-                unreadCount = 5,
-                isGroup = true,
-                initials = "AL",
-                avatarColor = Color(0xFF0F172A),
-                messages = listOf(
-                    ChatMessageItem("m201", "Kasun", "Hey everyone, working on the 2024 paper.", "9:30", false),
-                    ChatMessageItem("m202", "Kasun", "Anyone solved Q7 part (b)?", "9:32", false)
-                )
-            ),
-            ChatConversation(
-                id = "c3",
-                name = "O/L Science Help",
-                lastMessage = "Nimali: Sharing the 2023 marking scheme...",
-                time = "8:50",
-                unreadCount = 2,
-                isGroup = true,
-                initials = "OS",
-                avatarColor = Color(0xFFBBF7D0),
-                messages = listOf(
-                    ChatMessageItem("m301", "Nimali", "Sharing the 2023 marking scheme for science.", "8:50", false)
-                )
-            ),
-            ChatConversation(
-                id = "c4",
-                name = "Dilshan Perera",
-                lastMessage = "Thanks, that makes sense now",
-                time = "Yesterday",
-                unreadCount = 0,
-                initials = "DP",
-                avatarColor = Color(0xFF16A34A),
-                messages = listOf(
-                    ChatMessageItem("m401", "Dilshan Perera", "Can you explain the physics vector question?", "Yesterday", false),
-                    ChatMessageItem("m402", "You", "Sure, you need to resolve components along x and y axes.", "Yesterday", true),
-                    ChatMessageItem("m403", "Dilshan Perera", "Thanks, that makes sense now", "Yesterday", false)
-                )
-            ),
-            ChatConversation(
-                id = "c5",
-                name = "Physics Revision Club",
-                lastMessage = "You: Let's meet at 7 pm for the quiz",
-                time = "Yesterday",
-                unreadCount = 0,
-                isGroup = true,
-                initials = "PR",
-                avatarColor = Color(0xFF0F172A),
-                messages = listOf(
-                    ChatMessageItem("m501", "You", "Let's meet at 7 pm for the quiz", "Yesterday", true)
-                )
-            ),
-            ChatConversation(
-                id = "c8",
-                name = "Tharushi Silva",
-                lastMessage = "typing...",
-                time = "9:15",
-                unreadCount = 0,
-                isTyping = false,
-                initials = "TS",
-                avatarColor = Color(0xFF0F172A),
-                messages = listOf(
-                    ChatMessageItem("m801", "Tharushi Silva", "Did you check the chemistry model paper?", "9:14", false)
-                )
-            )
-        )
-    }
-
-    var conversations by remember { mutableStateOf(initialConversations) }
-
-    if (uiState.activeChatConversation != null) {
-        val activeConv = uiState.activeChatConversation!!
-        ConversationDetailScreen(
-            conversation = activeConv,
+    val activePeer = chatState.activePeer
+    if (activePeer != null) {
+        BackHandler { viewModel.closeChat() }
+        ChatConversationScreen(
+            state = chatState,
             onBack = { viewModel.closeChat() },
-            onSendMessage = { text ->
-                val updatedMsg = ChatMessageItem(
-                    id = "msg-${System.currentTimeMillis()}",
-                    senderName = "You",
-                    text = text,
-                    timestamp = "Just now",
-                    isUser = true
-                )
-                val updatedConv = activeConv.copy(
-                    lastMessage = "You: $text",
-                    time = "Just now",
-                    isTyping = false,
-                    messages = activeConv.messages + updatedMsg
-                )
-                viewModel.openChat(updatedConv)
-                conversations = conversations.map { if (it.id == updatedConv.id) updatedConv else it }
-            },
-            onClearChat = {
-                val updatedConv = activeConv.copy(
-                    lastMessage = "",
-                    messages = emptyList()
-                )
-                viewModel.openChat(updatedConv)
-                conversations = conversations.map { if (it.id == updatedConv.id) updatedConv else it }
-            }
+            onSend = { viewModel.sendChatMessage(it) },
+            onTyping = { viewModel.notifyChatTyping() },
+            onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
+            onClearChat = { viewModel.clearActiveChat() },
+            onDismissError = { viewModel.dismissChatError() },
+            modifier = modifier
         )
         return
     }
+
+    ChatDirectoryScreen(
+        state = chatState,
+        onOpenChat = { viewModel.openChat(it) },
+        onRefresh = { viewModel.refreshChatDirectoryNow() },
+        onDismissError = { viewModel.dismissChatError() },
+        onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
+        modifier = modifier
+    )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Directory (list of registered students)
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ChatDirectoryScreen(
+    state: ChatUiState,
+    onOpenChat: (ChatPeer) -> Unit,
+    onRefresh: () -> Unit,
+    onDismissError: () -> Unit,
+    onAcknowledgeSafety: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    var searchQuery by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+
+    val visibleThreads = remember(state.threads, searchQuery) {
+        if (searchQuery.isBlank()) {
+            state.threads
+        } else {
+            state.threads.filter { it.peer.name.contains(searchQuery.trim(), ignoreCase = true) }
+        }
+    }
+
+    val onlineStudents = remember(state.threads) { state.threads.filter { it.peer.isOnline } }
 
     Scaffold(
         modifier = modifier
             .fillMaxSize()
             .testTag("chat_screen"),
-        floatingActionButton = {
-            FloatingActionButton(
-                onClick = {
-                    val nimali = conversations.find { it.name.contains("Nimali") }
-                    if (nimali != null) {
-                        viewModel.openChat(nimali)
-                    } else {
-                        showNewChatDialog = true
-                    }
-                },
-                containerColor = PureLightGreenButton,
-                contentColor = Color.White,
-                shape = CircleShape,
-                modifier = Modifier
-                    .padding(bottom = 16.dp)
-                    .size(56.dp)
-            ) {
-                Icon(Icons.Default.Chat, contentDescription = "Start Chat", modifier = Modifier.size(24.dp))
-            }
-        },
-        containerColor = Color.White
+        // Transparent on purpose: the app-wide wash is drawn edge-to-edge behind
+        // the content so the system bars blend into it, exactly like onboarding.
+        containerColor = Color.Transparent,
+        // The dashboard Scaffold already reserves the bottom-bar area; only the
+        // status bar has to be handled here.
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
-        Column(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(innerPadding)
+        TheStudentAppBackground(
+            baseColor = Color(0xFFF8FAFC),
+            modifier = Modifier.fillMaxSize()
         ) {
-            // Header: "TheStudent" & "Chats" with proper status bar padding
-            Surface(
-                color = Color.White,
-                shadowElevation = 0.dp,
-                modifier = Modifier.fillMaxWidth()
-            ) {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .statusBarsPadding()
-                        .padding(horizontal = 20.dp, vertical = 12.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Column {
-                            Text(
-                                text = "TheStudent",
-                                fontSize = 12.sp,
-                                color = Color.Gray,
-                                fontWeight = FontWeight.Medium
-                            )
-                            Text(
-                                text = "Chats",
-                                fontSize = 28.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A)
-                            )
-                        }
-
-                        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                            IconButton(
-                                onClick = { /* Search trigger */ },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .background(Color(0xFFF1F5F9), CircleShape)
-                            ) {
-                                Icon(Icons.Default.Search, contentDescription = "Search", tint = Color(0xFF0F172A))
-                            }
-                            IconButton(
-                                onClick = { showNewChatDialog = true },
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .background(PureLightGreenButton.copy(alpha = 0.15f), CircleShape)
-                            ) {
-                                Icon(Icons.Default.PersonAdd, contentDescription = "New Group/Chat", tint = PureLightGreenButton)
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Online Now Header & Horizontal Avatar Scroll
-            Column(
+            // Same architectural background art used on the onboarding slides.
+            OnboardingModernFooterArt(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(vertical = 8.dp)
+                    .height(260.dp)
+                    .align(Alignment.BottomCenter)
+                    .alpha(0.55f)
+            )
+
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .statusBarsPadding()
             ) {
+                // ── header ───────────────────────────────────────────────────
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 20.dp, vertical = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
+                        .padding(start = 20.dp, end = 16.dp, top = 8.dp, bottom = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .size(8.dp)
-                                .background(PureLightGreenButton, CircleShape)
-                        )
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = "Online now",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
-                            color = Color(0xFF0F172A)
+                            text = "Student chat",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 26.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ChatInk,
+                            letterSpacing = (-0.5).sp
                         )
+                        Spacer(Modifier.height(2.dp))
                         Text(
-                            text = "24 students",
-                            fontSize = 13.sp,
-                            color = Color.Gray
+                            text = buildString {
+                                append("${state.totalStudents} registered student")
+                                if (state.totalStudents != 1) append("s")
+                                append(" · ${state.onlineCount} online")
+                            },
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.5.sp,
+                            color = ChatMuted
                         )
                     }
 
-                    Text(
-                        text = "See all",
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 13.sp,
-                        color = PureLightGreenButton,
-                        modifier = Modifier.clickable { /* See all online */ }
+                    Surface(
+                        onClick = {
+                            searchOpen = !searchOpen
+                            if (!searchOpen) searchQuery = ""
+                        },
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier
+                            .size(40.dp)
+                            .testTag("chat_search_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = if (searchOpen) Icons.Default.Close else Icons.Default.Search,
+                                contentDescription = if (searchOpen) "Close search" else "Search students",
+                                tint = ChatInk,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        onClick = onRefresh,
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier.size(40.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Default.Refresh,
+                                contentDescription = "Refresh",
+                                tint = EmeraldDark,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                }
+
+                AnimatedVisibility(visible = searchOpen) {
+                    OutlinedTextField(
+                        value = searchQuery,
+                        onValueChange = { searchQuery = it },
+                        placeholder = {
+                            Text(
+                                "Search by full name",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 14.sp,
+                                color = ChatFaint
+                            )
+                        },
+                        leadingIcon = {
+                            Icon(Icons.Default.Search, contentDescription = null, tint = ChatFaint)
+                        },
+                        singleLine = true,
+                        shape = RoundedCornerShape(16.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = EmeraldPrimary,
+                            unfocusedBorderColor = ChatHairline
+                        ),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 6.dp)
+                            .testTag("chat_search_field")
                     )
                 }
 
-                Spacer(modifier = Modifier.height(8.dp))
+                // ── online now rail ──────────────────────────────────────────
+                if (onlineStudents.isNotEmpty()) {
+                    Spacer(Modifier.height(6.dp))
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .background(ChatOnline, CircleShape)
+                        )
+                        Spacer(Modifier.width(7.dp))
+                        Text(
+                            text = "Online now",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ChatInk
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "${state.onlineCount}",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.5.sp,
+                            color = ChatMuted
+                        )
+                    }
 
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
-                ) {
-                    items(onlineStudents) { student ->
-                        Column(
-                            horizontalAlignment = Alignment.CenterHorizontally,
-                            modifier = Modifier.clickable {
-                                val existing = conversations.find { it.name.contains(student.name, ignoreCase = true) }
-                                if (existing != null) {
-                                    viewModel.openChat(existing)
-                                } else {
-                                    val newConv = ChatConversation(
-                                        id = "chat-${System.currentTimeMillis()}",
-                                        name = student.name,
-                                        lastMessage = "Say hello to ${student.name}!",
-                                        time = "Just now",
-                                        initials = student.initials,
-                                        avatarColor = student.backgroundColor,
-                                        messages = listOf(ChatMessageItem("m", student.name, "Hi there! Let's discuss past paper questions.", "Just now", false))
-                                    )
-                                    conversations = listOf(newConv) + conversations
-                                    viewModel.openChat(newConv)
-                                }
-                            }
-                        ) {
-                            Box(
+                    Spacer(Modifier.height(10.dp))
+                    LazyRow(
+                        contentPadding = PaddingValues(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    ) {
+                        items(onlineStudents, key = { it.peer.id }) { thread ->
+                            Column(
+                                horizontalAlignment = Alignment.CenterHorizontally,
                                 modifier = Modifier
-                                    .size(62.dp)
-                                    .border(BorderStroke(2.5.dp, PureLightGreenButton), CircleShape)
-                                    .padding(3.dp)
+                                    .width(64.dp)
+                                    .clickable { onOpenChat(thread.peer) }
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxSize()
-                                        .background(student.backgroundColor, CircleShape),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = student.initials,
-                                        color = Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 15.sp
-                                    )
-                                }
-                                Box(
-                                    modifier = Modifier
-                                        .size(14.dp)
-                                        .align(Alignment.BottomEnd)
-                                        .background(Color.White, CircleShape)
-                                        .padding(2.dp)
-                                ) {
-                                    Box(
-                                        modifier = Modifier
-                                            .fillMaxSize()
-                                            .background(PureLightGreenButton, CircleShape)
-                                    )
-                                }
+                                ChatAvatar(
+                                    peer = thread.peer,
+                                    size = 58.dp,
+                                    showPresence = true,
+                                    ringColor = Color.White
+                                )
+                                Spacer(Modifier.height(5.dp))
+                                Text(
+                                    // First name only in the rail to keep the row tight;
+                                    // the full name is on the directory row below.
+                                    text = thread.peer.name.substringBefore(" "),
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 11.5.sp,
+                                    fontWeight = FontWeight.Medium,
+                                    color = ChatInk,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
                             }
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = student.name,
-                                fontSize = 12.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = Color(0xFF0F172A),
-                                maxLines = 1
+                        }
+                    }
+                    Spacer(Modifier.height(14.dp))
+                } else {
+                    Spacer(Modifier.height(10.dp))
+                }
+
+                // ── error banner ─────────────────────────────────────────────
+                state.errorMessage?.let { message ->
+                    Surface(
+                        shape = RoundedCornerShape(14.dp),
+                        color = Color(0xFFFEF2F2),
+                        border = BorderStroke(1.dp, Color(0xFFFECACA)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 20.dp, vertical = 4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.WifiOff,
+                                contentDescription = null,
+                                tint = ChatError,
+                                modifier = Modifier.size(16.dp)
                             )
+                            Spacer(Modifier.width(8.dp))
+                            Text(
+                                text = message,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                color = Color(0xFFB91C1C),
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "Dismiss",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = ChatError,
+                                modifier = Modifier
+                                    .clickable { onDismissError() }
+                                    .padding(start = 8.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(6.dp))
+
+                // ── student list ─────────────────────────────────────────────
+                when {
+                    state.isLoadingDirectory && state.threads.isEmpty() -> {
+                        ChatDirectorySkeleton()
+                    }
+
+                    visibleThreads.isEmpty() -> {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 40.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Icon(
+                                    Icons.Default.Groups,
+                                    contentDescription = null,
+                                    tint = ChatFaint,
+                                    modifier = Modifier.size(44.dp)
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Text(
+                                    text = if (state.threads.isEmpty()) {
+                                        "No other students have signed up yet"
+                                    } else {
+                                        "No student matches \"$searchQuery\""
+                                    },
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = ChatInk,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                                Spacer(Modifier.height(4.dp))
+                                Text(
+                                    text = "Only registered TheStudent students appear here.",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 12.5.sp,
+                                    color = ChatMuted,
+                                    textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                )
+                            }
+                        }
+                    }
+
+                    else -> {
+                        LazyColumn(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(horizontal = 12.dp),
+                            contentPadding = PaddingValues(
+                                bottom = if (state.safetyAcknowledged) 24.dp else 190.dp
+                            ),
+                            verticalArrangement = Arrangement.spacedBy(2.dp)
+                        ) {
+                            items(visibleThreads, key = { it.peer.id }) { thread ->
+                                ChatThreadRow(
+                                    thread = thread,
+                                    onClick = { onOpenChat(thread.peer) }
+                                )
+                            }
                         }
                     }
                 }
             }
 
-            Spacer(modifier = Modifier.height(4.dp))
-
-            // Filter Chips Row
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            // One-time safety notice: shown on first entry until acknowledged.
+            // Stored server-side (`users.chat_safety_ack_at`) so it never comes
+            // back — not even after a reinstall or on a second device.
+            AnimatedVisibility(
+                visible = !state.safetyAcknowledged,
+                enter = fadeIn(),
+                exit = fadeOut(),
+                modifier = Modifier.align(Alignment.BottomCenter)
             ) {
-                listOf("All", "Groups", "Friends", "Unread").forEach { filter ->
-                    val isSelected = selectedFilter == filter
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { selectedFilter = filter },
-                        label = { Text(filter, fontSize = 13.sp, fontWeight = FontWeight.Medium) },
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = Color(0xFF0F172A),
-                            selectedLabelColor = Color.White,
-                            containerColor = Color(0xFFF1F5F9),
-                            labelColor = Color(0xFF64748B)
-                        ),
-                        shape = RoundedCornerShape(20.dp),
-                        border = null
+                Box(modifier = Modifier.padding(bottom = 8.dp)) {
+                    SafetyNoticeBanner(onAcknowledge = onAcknowledgeSafety)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChatThreadRow(
+    thread: ChatThread,
+    onClick: () -> Unit
+) {
+    val peer = thread.peer
+    val preview = when {
+        peer.isTyping -> "typing…"
+        thread.lastMessage != null -> (if (thread.lastMessageIsMine) "You: " else "") + thread.lastMessage
+        else -> "Say hello 👋"
+    }
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color.Transparent,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .testTag("chat_thread_${peer.id}")
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 8.dp, vertical = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            ChatAvatar(peer = peer, size = 52.dp, showPresence = true, ringColor = Color.White)
+            Spacer(Modifier.width(12.dp))
+
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = peer.name,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ChatInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = preview,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    color = if (peer.isTyping) EmeraldPrimary else ChatMuted,
+                    fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(Modifier.width(10.dp))
+
+            Column(horizontalAlignment = Alignment.End) {
+                Text(
+                    text = formatThreadStamp(thread.lastMessageEpoch),
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    color = if (thread.unreadCount > 0) EmeraldPrimary else ChatFaint,
+                    fontWeight = if (thread.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
+                )
+                Spacer(Modifier.height(6.dp))
+                if (thread.unreadCount > 0) {
+                    Box(
+                        modifier = Modifier
+                            .defaultMinSize(minWidth = 20.dp, minHeight = 20.dp)
+                            .background(EmeraldPrimary, CircleShape)
+                            .padding(horizontal = 6.dp, vertical = 2.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = if (thread.unreadCount > 99) "99+" else thread.unreadCount.toString(),
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                } else if (peer.isOnline) {
+                    Text(
+                        text = "online",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        color = ChatOnline,
+                        fontWeight = FontWeight.Medium
                     )
                 }
             }
+        }
+    }
+}
 
-            Spacer(modifier = Modifier.height(8.dp))
+// ─────────────────────────────────────────────────────────────────────────────
+//  Conversation
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ChatConversationScreen(
+    state: ChatUiState,
+    onBack: () -> Unit,
+    onSend: (String) -> Unit,
+    onTyping: () -> Unit,
+    onAcknowledgeSafety: () -> Unit,
+    onClearChat: () -> Unit,
+    onDismissError: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val peer = state.activePeer ?: return
+    var input by remember { mutableStateOf("") }
+    var showMenu by remember { mutableStateOf(false) }
+    var showClearDialog by remember { mutableStateOf(false) }
+    val listState = rememberLazyListState()
 
-            // Conversation List
-            val filteredConversations = conversations.filter { conv ->
-                val matchesFilter = when (selectedFilter) {
-                    "Groups" -> conv.isGroup
-                    "Friends" -> !conv.isGroup && !conv.isAi
-                    "Unread" -> conv.unreadCount > 0
-                    else -> true
-                }
-                val matchesSearch = searchQuery.isBlank() ||
-                        conv.name.contains(searchQuery, ignoreCase = true) ||
-                        conv.lastMessage.contains(searchQuery, ignoreCase = true)
-                matchesFilter && matchesSearch
-            }
+    // Follow the conversation as new messages arrive.
+    LaunchedEffect(state.messages.size) {
+        if (state.messages.isNotEmpty()) {
+            listState.animateScrollToItem(state.messages.lastIndex)
+        }
+    }
 
-            LazyColumn(
+    Scaffold(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("chat_conversation_screen"),
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { innerPadding ->
+        TheStudentAppBackground(
+            baseColor = Color(0xFFF8FAFC),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            OnboardingModernFooterArt(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(210.dp)
+                    .align(Alignment.BottomCenter)
+                    .alpha(0.30f)
+            )
+
+            Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(horizontal = 20.dp),
-                verticalArrangement = Arrangement.spacedBy(4.dp)
+                    .padding(innerPadding)
+                    .statusBarsPadding()
+                    .windowInsetsPadding(
+                        WindowInsets.navigationBars
+                            .only(WindowInsetsSides.Bottom)
+                            .union(WindowInsets.ime)
+                    )
             ) {
-                items(filteredConversations, key = { it.id }) { chat ->
+                // ── top bar ──────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 8.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Surface(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { viewModel.openChat(chat) },
-                        color = Color.Transparent
+                        onClick = onBack,
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier.size(40.dp)
                     ) {
-                        Row(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(vertical = 10.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = ChatInk,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    ChatAvatar(peer = peer, size = 42.dp, showPresence = true, ringColor = Color.White)
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = peer.name,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 15.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ChatInk,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = peer.presenceLabel,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = when {
+                                peer.isTyping -> EmeraldPrimary
+                                peer.isOnline -> ChatOnline
+                                else -> ChatMuted
+                            },
+                            maxLines = 1
+                        )
+                    }
+
+                    Box {
+                        Surface(
+                            onClick = { showMenu = true },
+                            shape = CircleShape,
+                            color = Color.White,
+                            border = BorderStroke(1.dp, ChatHairline),
+                            modifier = Modifier.size(40.dp)
                         ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.Default.MoreVert,
+                                    contentDescription = "Conversation options",
+                                    tint = ChatInk,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            }
+                        }
+                        DropdownMenu(
+                            expanded = showMenu,
+                            onDismissRequest = { showMenu = false }
+                        ) {
+                            DropdownMenuItem(
+                                text = { Text("Clear chat", fontFamily = MaisonNeueFontFamily) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.DeleteOutline,
+                                        contentDescription = null,
+                                        tint = ChatError
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    showClearDialog = true
+                                }
+                            )
+                        }
+                    }
+                }
+
+                // ── messages ─────────────────────────────────────────────────
+                Box(modifier = Modifier.weight(1f)) {
+                    when {
+                        state.isLoadingMessages && state.messages.isEmpty() -> {
+                            ChatMessageSkeleton()
+                        }
+
+                        state.messages.isEmpty() -> {
                             Box(
                                 modifier = Modifier
-                                    .size(54.dp)
-                                    .background(chat.avatarColor, CircleShape),
+                                    .fillMaxSize()
+                                    .padding(horizontal = 32.dp),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (chat.isAi) {
-                                    Icon(
-                                        Icons.Default.AutoAwesome,
-                                        contentDescription = null,
-                                        tint = Color.White,
-                                        modifier = Modifier.size(26.dp)
+                                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                    ChatAvatar(
+                                        peer = peer,
+                                        size = 64.dp,
+                                        showPresence = false,
+                                        ringColor = Color.Transparent
                                     )
-                                } else {
+                                    Spacer(Modifier.height(12.dp))
                                     Text(
-                                        text = chat.initials,
-                                        color = if (chat.avatarColor == Color(0xFFBBF7D0)) Color(0xFF0F172A) else Color.White,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp
+                                        text = "This is the start with ${peer.name}",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = 14.sp,
+                                        fontWeight = FontWeight.SemiBold,
+                                        color = ChatInk,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                                    )
+                                    Spacer(Modifier.height(4.dp))
+                                    Text(
+                                        text = "Ask about a past paper, share how you solved a question, or just say hello.",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = 12.5.sp,
+                                        color = ChatMuted,
+                                        textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                                        lineHeight = 18.sp
                                     )
                                 }
                             }
+                        }
 
-                            Column(
-                                modifier = Modifier.weight(1f),
-                                verticalArrangement = Arrangement.spacedBy(3.dp)
+                        else -> {
+                            LazyColumn(
+                                state = listState,
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .padding(horizontal = 14.dp),
+                                contentPadding = PaddingValues(vertical = 12.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = chat.name,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 16.sp,
-                                        color = Color(0xFF0F172A),
-                                        maxLines = 1,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Text(
-                                        text = chat.time,
-                                        fontSize = 12.sp,
-                                        color = if (chat.unreadCount > 0) PureLightGreenButton else Color.Gray,
-                                        fontWeight = if (chat.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
-                                    )
+                                items(state.messages, key = { it.id }) { message ->
+                                    ChatBubble(message = message)
                                 }
 
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = chat.lastMessage,
-                                        fontSize = 13.sp,
-                                        color = if (chat.isTyping) PureLightGreenButton else Color(0xFF64748B),
-                                        fontWeight = if (chat.isTyping) FontWeight.SemiBold else FontWeight.Normal,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-
-                                    if (chat.unreadCount > 0) {
-                                        Spacer(modifier = Modifier.width(8.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .background(PureLightGreenButton, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = chat.unreadCount.toString(),
-                                                color = Color.White,
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Bold
-                                            )
-                                        }
-                                    }
+                                if (peer.isTyping) {
+                                    item { TypingBubble(peerName = peer.name.substringBefore(" ")) }
                                 }
+                            }
+                        }
+                    }
+                }
+
+                state.errorMessage?.let { message ->
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 14.dp, vertical = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = message,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            color = ChatError,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "Dismiss",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ChatError,
+                            modifier = Modifier
+                                .clickable { onDismissError() }
+                                .padding(start = 8.dp)
+                        )
+                    }
+                }
+
+                // ── one-time safety notice ───────────────────────────────────
+                AnimatedVisibility(
+                    visible = !state.safetyAcknowledged,
+                    enter = fadeIn(),
+                    exit = fadeOut()
+                ) {
+                    SafetyNoticeBanner(onAcknowledge = onAcknowledgeSafety)
+                }
+
+                // ── composer ─────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.Bottom
+                ) {
+                    OutlinedTextField(
+                        value = input,
+                        onValueChange = {
+                            input = it
+                            if (it.isNotBlank()) onTyping()
+                        },
+                        placeholder = {
+                            Text(
+                                "Message ${peer.name.substringBefore(" ")}…",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 14.sp,
+                                color = ChatFaint
+                            )
+                        },
+                        maxLines = 5,
+                        shape = RoundedCornerShape(24.dp),
+                        colors = OutlinedTextFieldDefaults.colors(
+                            focusedContainerColor = Color.White,
+                            unfocusedContainerColor = Color.White,
+                            focusedBorderColor = EmeraldPrimary,
+                            unfocusedBorderColor = ChatHairline
+                        ),
+                        modifier = Modifier
+                            .weight(1f)
+                            .heightIn(min = 50.dp)
+                            .testTag("chat_input_field")
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Surface(
+                        onClick = {
+                            val text = input.trim()
+                            if (text.isNotEmpty()) {
+                                onSend(text)
+                                input = ""
+                            }
+                        },
+                        enabled = input.isNotBlank() && !state.isSending,
+                        shape = CircleShape,
+                        color = if (input.isNotBlank()) EmeraldPrimary else Color(0xFFCBD5E1),
+                        modifier = Modifier
+                            .size(50.dp)
+                            .testTag("chat_send_button")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            if (state.isSending) {
+                                CircularProgressIndicator(
+                                    modifier = Modifier.size(20.dp),
+                                    color = Color.White,
+                                    strokeWidth = 2.dp
+                                )
+                            } else {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
                     }
@@ -582,556 +897,312 @@ fun ChatScreen(
         }
     }
 
-    if (showNewChatDialog) {
+    if (showClearDialog) {
         AlertDialog(
-            onDismissRequest = { showNewChatDialog = false },
-            title = { Text("Start New Chat or Group", fontWeight = FontWeight.Bold) },
+            onDismissRequest = { showClearDialog = false },
+            title = { Text("Clear this chat?", fontWeight = FontWeight.Bold) },
             text = {
-                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Connect with fellow Sri Lankan students to discuss past papers, syllabi, and study groups.")
-                    Button(
-                        onClick = {
-                            val newGroup = ChatConversation(
-                                id = "group-${System.currentTimeMillis()}",
-                                name = "Study Group #${(10..99).random()}",
-                                lastMessage = "New study group created. Say hi!",
-                                time = "Just now",
-                                isGroup = true,
-                                initials = "SG",
-                                avatarColor = Color(0xFF0F172A),
-                                messages = listOf(ChatMessageItem("mg1", "System", "Group created successfully. Invite friends to collaborate!", "Just now", false))
-                            )
-                            conversations = listOf(newGroup) + conversations
-                            showNewChatDialog = false
-                            viewModel.openChat(newGroup)
-                        },
-                        modifier = Modifier.fillMaxWidth(),
-                        colors = ButtonDefaults.buttonColors(containerColor = PureLightGreenButton)
-                    ) {
-                        Icon(Icons.Default.GroupAdd, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Create New Study Group")
-                    }
-                }
+                Text(
+                    "Your copy of the conversation with ${peer.name} will be removed. " +
+                        "The messages stay in their chat."
+                )
             },
             confirmButton = {
-                TextButton(onClick = { showNewChatDialog = false }) {
-                    Text("Cancel")
+                TextButton(
+                    onClick = {
+                        showClearDialog = false
+                        onClearChat()
+                    }
+                ) {
+                    Text("Clear chat", color = ChatError, fontWeight = FontWeight.Bold)
                 }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearDialog = false }) { Text("Cancel") }
             }
         )
     }
 }
 
-@OptIn(ExperimentalMaterial3Api::class)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Pieces
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Circular avatar: the uploaded profile picture when there is one, initials otherwise. */
 @Composable
-fun ConversationDetailScreen(
-    conversation: ChatConversation,
-    onBack: () -> Unit,
-    onSendMessage: (String) -> Unit,
-    onClearChat: () -> Unit = {}
+private fun ChatAvatar(
+    peer: ChatPeer,
+    size: androidx.compose.ui.unit.Dp,
+    showPresence: Boolean,
+    ringColor: Color,
+    modifier: Modifier = Modifier
 ) {
-    var inputMessage by remember { mutableStateOf("") }
-    var showMenu by remember { mutableStateOf(false) }
-    var showRateDialog by remember { mutableStateOf(false) }
-    var showClearConfirmDialog by remember { mutableStateOf(false) }
-    var ratingStars by remember { mutableIntStateOf(5) }
-    var ratingComment by remember { mutableStateOf("") }
-    var showFeedbackToast by remember { mutableStateOf(false) }
+    Box(modifier = modifier.size(size)) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .clip(CircleShape)
+                .background(avatarColorFor(peer.id)),
+            contentAlignment = Alignment.Center
+        ) {
+            val avatarUrl = peer.avatarUrl
+            if (!avatarUrl.isNullOrBlank()) {
+                AsyncImage(
+                    model = avatarUrl,
+                    contentDescription = "${peer.name} profile picture",
+                    contentScale = ContentScale.Crop,
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .clip(CircleShape)
+                )
+            } else {
+                Text(
+                    text = peer.initials,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = (size.value / 2.6f).sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Color.White
+                )
+            }
+        }
 
-    // Intercept hardware/gesture back press to return to chat list
-    BackHandler(onBack = onBack)
+        if (showPresence && peer.isOnline) {
+            Box(
+                modifier = Modifier
+                    .size(size * 0.30f)
+                    .align(Alignment.BottomEnd)
+                    .clip(CircleShape)
+                    .background(ringColor)
+                    .padding(size * 0.055f),
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(ChatOnline, CircleShape)
+                )
+            }
+        }
+    }
+}
 
-    // Main layout container: WindowInsets handles navigation bar & software keyboard with ZERO gap
+@Composable
+private fun ChatBubble(message: ChatMessage) {
+    val isMine = message.isMine
+    Box(
+        modifier = Modifier.fillMaxWidth(),
+        contentAlignment = if (isMine) Alignment.CenterEnd else Alignment.CenterStart
+    ) {
+        Surface(
+            shape = RoundedCornerShape(
+                topStart = 18.dp,
+                topEnd = 18.dp,
+                bottomStart = if (isMine) 18.dp else 5.dp,
+                bottomEnd = if (isMine) 5.dp else 18.dp
+            ),
+            color = if (isMine) EmeraldPrimary else Color.White,
+            border = if (isMine) null else BorderStroke(1.dp, ChatHairline),
+            modifier = Modifier.widthIn(max = 300.dp)
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp)) {
+                Text(
+                    text = message.body,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = if (isMine) Color.White else ChatInk
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.align(Alignment.End),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = formatClock(message.sentAtEpoch),
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.sp,
+                        color = if (isMine) Color.White.copy(alpha = 0.82f) else ChatFaint
+                    )
+                    if (isMine) {
+                        Spacer(Modifier.width(3.dp))
+                        Icon(
+                            imageVector = if (message.isRead) Icons.Default.DoneAll else Icons.Default.Done,
+                            contentDescription = if (message.isRead) "Read" else "Sent",
+                            tint = if (message.isRead) Color(0xFFBBF7D0) else Color.White.copy(alpha = 0.82f),
+                            modifier = Modifier.size(13.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TypingBubble(peerName: String) {
+    val transition = rememberInfiniteTransition(label = "typing")
+    val phase by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 3f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "typing_phase"
+    )
+
+    Surface(
+        shape = RoundedCornerShape(topStart = 18.dp, topEnd = 18.dp, bottomEnd = 18.dp, bottomStart = 5.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, ChatHairline)
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp),
+            horizontalArrangement = Arrangement.spacedBy(5.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            repeat(3) { index ->
+                val lift = if (phase.toInt() == index) 1f else 0.45f
+                Box(
+                    modifier = Modifier
+                        .size(6.dp)
+                        .background(ChatMuted.copy(alpha = lift), CircleShape)
+                )
+            }
+            Spacer(Modifier.width(4.dp))
+            Text(
+                text = "$peerName is typing",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.sp,
+                color = ChatFaint
+            )
+        }
+    }
+}
+
+@Composable
+private fun SafetyNoticeBanner(onAcknowledge: () -> Unit) {
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color(0xFFECFDF5),
+        border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 12.dp, vertical = 4.dp)
+            .testTag("chat_safety_banner")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Shield,
+                    contentDescription = null,
+                    tint = EmeraldDark,
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(6.dp))
+                Text(
+                    text = "Keep your chats safe",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = EmeraldDark
+                )
+            }
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = "Never share phone numbers, home address, school, bank details or " +
+                    "passwords here. TheStudent will never ask for your password, and you " +
+                    "can report a message from the chat menu.",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.sp,
+                lineHeight = 17.sp,
+                color = Color(0xFF065F46)
+            )
+            Spacer(Modifier.height(8.dp))
+            Row(horizontalArrangement = Arrangement.End, modifier = Modifier.fillMaxWidth()) {
+                Surface(
+                    onClick = onAcknowledge,
+                    shape = RoundedCornerShape(12.dp),
+                    color = EmeraldDark,
+                    modifier = Modifier.testTag("chat_safety_ack_button")
+                ) {
+                    Text(
+                        text = "I understand",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Loading placeholders
+// ─────────────────────────────────────────────────────────────────────────────
+@Composable
+private fun ChatDirectorySkeleton() {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFFF4F6F5))
-            .windowInsetsPadding(
-                WindowInsets.navigationBars
-                    .only(WindowInsetsSides.Bottom)
-                    .union(WindowInsets.ime)
-            )
+            .padding(horizontal = 20.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Top Bar Header
-        Surface(
-            color = Color.White,
-            shadowElevation = 2.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .statusBarsPadding()
-                    .padding(horizontal = 4.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onBack) {
-                    Icon(Icons.Default.ArrowBack, contentDescription = "Back", tint = Color(0xFF0F172A))
-                }
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(12.dp),
-                    modifier = Modifier.weight(1f)
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .size(40.dp)
-                            .background(Color(0xFF15803D), CircleShape),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        Text(conversation.initials, color = Color.White, fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                        Box(
-                            modifier = Modifier
-                                .size(12.dp)
-                                .align(Alignment.BottomEnd)
-                                .background(Color.White, CircleShape)
-                                .padding(2.dp)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color(0xFF16A34A), CircleShape)
-                            )
-                        }
-                    }
-                    Column {
-                        Text(
-                            text = conversation.name,
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 16.sp,
-                            color = Color(0xFF0F172A),
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = if (conversation.isTyping) "typing..." else "Online",
-                            fontSize = 12.sp,
-                            color = Color(0xFF16A34A),
-                            fontWeight = FontWeight.Medium
-                        )
-                    }
-                }
-
-                // 3-Dots Menu Dropdown
-                Box {
-                    IconButton(
-                        onClick = { showMenu = true },
-                        modifier = Modifier
-                            .size(40.dp)
-                            .border(BorderStroke(1.dp, Color(0xFFE2E8F0)), CircleShape)
-                    ) {
-                        Icon(
-                            Icons.Default.MoreVert,
-                            contentDescription = "Menu",
-                            tint = Color(0xFF0F172A),
-                            modifier = Modifier.size(20.dp)
-                        )
-                    }
-                    DropdownMenu(
-                        expanded = showMenu,
-                        onDismissRequest = { showMenu = false }
-                    ) {
-                        DropdownMenuItem(
-                            text = { Text("Rate Student") },
-                            leadingIcon = {
-                                Icon(Icons.Default.StarRate, contentDescription = null, tint = Color(0xFFF59E0B))
-                            },
-                            onClick = {
-                                showMenu = false
-                                showRateDialog = true
-                            }
-                        )
-                        DropdownMenuItem(
-                            text = { Text("Clear Chat", color = Color(0xFFDC2626)) },
-                            leadingIcon = {
-                                Icon(Icons.Default.DeleteOutline, contentDescription = null, tint = Color(0xFFDC2626))
-                            },
-                            onClick = {
-                                showMenu = false
-                                showClearConfirmDialog = true
-                            }
-                        )
-                    }
-                }
-            }
-        }
-
-        // 2. Chat Messages Area (takes all remaining vertical space)
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp),
-            contentPadding = PaddingValues(vertical = 16.dp)
-        ) {
-            // Today pill header
-            item {
+        repeat(7) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(16.dp),
-                        color = Color(0xFFE2E8F0).copy(alpha = 0.7f)
-                    ) {
-                        Text(
-                            text = "Today",
-                            fontSize = 12.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = Color(0xFF475569),
-                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
-                        )
-                    }
-                }
-            }
-
-            items(conversation.messages) { msg ->
-                val isMe = msg.isUser
-                Box(
-                    modifier = Modifier.fillMaxWidth(),
-                    contentAlignment = if (isMe) Alignment.CenterEnd else Alignment.CenterStart
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(
-                            topStart = 16.dp,
-                            topEnd = 16.dp,
-                            bottomStart = if (isMe) 16.dp else 4.dp,
-                            bottomEnd = if (isMe) 4.dp else 16.dp
-                        ),
-                        color = if (isMe) PureLightGreenButton else Color.White,
-                        shadowElevation = 1.dp,
-                        modifier = Modifier.widthIn(max = 300.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(horizontal = 14.dp, vertical = 10.dp),
-                            verticalArrangement = Arrangement.spacedBy(6.dp)
-                        ) {
-                            if (!isMe && conversation.isGroup) {
-                                Text(
-                                    text = msg.senderName,
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldDark
-                                )
-                            }
-
-                            // Paper snippet card if attached to message
-                            if (msg.paperSnippetTitle != null) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = Color.White.copy(alpha = 0.22f),
-                                    modifier = Modifier.fillMaxWidth()
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(10.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(36.dp)
-                                                .background(Color.White, CircleShape),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Text(
-                                                text = "M",
-                                                color = PureLightGreenButton,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 16.sp
-                                            )
-                                        }
-                                        Column {
-                                            Text(
-                                                text = msg.paperSnippetTitle,
-                                                color = Color.White,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp
-                                            )
-                                            if (msg.paperSnippetSubtitle != null) {
-                                                Text(
-                                                    text = msg.paperSnippetSubtitle,
-                                                    color = Color.White.copy(alpha = 0.85f),
-                                                    fontSize = 11.sp
-                                                )
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-
-                            // PDF Attachment card (clickable for automatic download, no separate download button icon)
-                            if (msg.attachmentName != null) {
-                                Surface(
-                                    shape = RoundedCornerShape(12.dp),
-                                    color = Color(0xFFF1F5F9),
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            // Automatic file download / open action
-                                        }
-                                ) {
-                                    Row(
-                                        modifier = Modifier.padding(12.dp),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(12.dp)
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(40.dp)
-                                                .background(Color(0xFF0F172A), RoundedCornerShape(8.dp)),
-                                            contentAlignment = Alignment.Center
-                                        ) {
-                                            Icon(
-                                                Icons.Default.Description,
-                                                contentDescription = "PDF",
-                                                tint = PureLightGreenButton,
-                                                modifier = Modifier.size(22.dp)
-                                            )
-                                        }
-                                        Column(
-                                            modifier = Modifier.weight(1f),
-                                            verticalArrangement = Arrangement.spacedBy(2.dp)
-                                        ) {
-                                            Text(
-                                                text = msg.attachmentName,
-                                                color = Color(0xFF0F172A),
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                maxLines = 1,
-                                                overflow = TextOverflow.Ellipsis
-                                            )
-                                            Text(
-                                                text = "${msg.attachmentSize} • ${msg.attachmentPages}",
-                                                color = Color(0xFF64748B),
-                                                fontSize = 11.sp
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-
-                            if (msg.text.isNotBlank()) {
-                                Text(
-                                    text = msg.text,
-                                    fontSize = 14.sp,
-                                    color = if (isMe) Color.White else Color(0xFF0F172A)
-                                )
-                            }
-
-                            Row(
-                                horizontalArrangement = Arrangement.End,
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.align(Alignment.End)
-                            ) {
-                                Text(
-                                    text = msg.timestamp,
-                                    fontSize = 10.sp,
-                                    color = if (isMe) Color.White.copy(alpha = 0.8f) else Color.Gray
-                                )
-                                if (isMe) {
-                                    Spacer(modifier = Modifier.width(3.dp))
-                                    Icon(
-                                        Icons.Default.DoneAll,
-                                        contentDescription = "Read",
-                                        tint = Color.White.copy(alpha = 0.9f),
-                                        modifier = Modifier.size(14.dp)
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-
-            // Typing indicator bubble (appears ONLY when conversation.isTyping is true)
-            if (conversation.isTyping) {
-                item {
-                    Box(
-                        modifier = Modifier.fillMaxWidth(),
-                        contentAlignment = Alignment.CenterStart
-                    ) {
-                        Surface(
-                            shape = RoundedCornerShape(16.dp),
-                            color = Color.White,
-                            shadowElevation = 1.dp
-                        ) {
-                            Row(
-                                modifier = Modifier.padding(horizontal = 16.dp, vertical = 12.dp),
-                                horizontalArrangement = Arrangement.spacedBy(6.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(modifier = Modifier.size(6.dp).background(Color(0xFF94A3B8), CircleShape))
-                                Box(modifier = Modifier.size(6.dp).background(Color(0xFF94A3B8), CircleShape))
-                                Box(modifier = Modifier.size(6.dp).background(Color(0xFF94A3B8), CircleShape))
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // 3. Bottom Message Input Bar (docked flush at the bottom of the Column with 0px gap above keyboard)
-        Surface(
-            color = Color.White,
-            shadowElevation = 8.dp,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 12.dp, vertical = 8.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                IconButton(onClick = { /* Attach paper/notes */ }) {
-                    Icon(
-                        Icons.Default.AttachFile,
-                        contentDescription = "Attach",
-                        tint = Color(0xFF64748B)
-                    )
-                }
-                OutlinedTextField(
-                    value = inputMessage,
-                    onValueChange = { inputMessage = it },
-                    placeholder = {
-                        val recipientName = conversation.name.split(" ").firstOrNull() ?: conversation.name
-                        Text(
-                            text = "Message $recipientName...",
-                            fontSize = 14.sp,
-                            color = Color(0xFF94A3B8)
-                        )
-                    },
                     modifier = Modifier
-                        .weight(1f)
-                        .heightIn(min = 50.dp),
-                    shape = RoundedCornerShape(28.dp),
-                    colors = OutlinedTextFieldDefaults.colors(
-                        unfocusedBorderColor = Color(0xFFE2E8F0),
-                        focusedBorderColor = PureLightGreenButton,
-                        unfocusedContainerColor = Color(0xFFF8FAFC),
-                        focusedContainerColor = Color.White
-                    )
+                        .size(52.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFFE9EEF5))
                 )
-                IconButton(
-                    onClick = {
-                        if (inputMessage.isNotBlank()) {
-                            onSendMessage(inputMessage.trim())
-                            inputMessage = ""
-                        }
-                    },
-                    modifier = Modifier
-                        .size(48.dp)
-                        .background(PureLightGreenButton, CircleShape)
-                ) {
-                    Icon(
-                        Icons.Default.Send,
-                        contentDescription = "Send",
-                        tint = Color.White,
-                        modifier = Modifier.size(20.dp)
+                Spacer(Modifier.width(12.dp))
+                Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.45f)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFE9EEF5))
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.72f)
+                            .height(11.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(Color(0xFFEFF3F8))
                     )
                 }
             }
         }
     }
+}
 
-    // Rate Student Dialog
-    if (showRateDialog) {
-        AlertDialog(
-            onDismissRequest = { showRateDialog = false },
-            title = {
-                Text(
-                    text = "Rate ${conversation.name}",
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 18.sp
+@Composable
+private fun ChatMessageSkeleton() {
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(10.dp)
+    ) {
+        repeat(4) { index ->
+            val isMine = index % 2 == 1
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = if (isMine) Arrangement.End else Arrangement.Start
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(if (isMine) 0.55f else 0.68f)
+                        .height(if (index % 2 == 0) 46.dp else 64.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(if (isMine) Color(0xFFD9F2E6) else Color(0xFFE9EEF5))
                 )
-            },
-            text = {
-                Column(
-                    verticalArrangement = Arrangement.spacedBy(12.dp),
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Text(
-                        text = "How helpful was ${conversation.name}'s explanation with questions & past papers?",
-                        fontSize = 14.sp,
-                        color = Color(0xFF475569)
-                    )
-                    // Star rating selector
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        for (i in 1..5) {
-                            IconButton(
-                                onClick = { ratingStars = i },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = if (i <= ratingStars) Icons.Default.Star else Icons.Default.StarBorder,
-                                    contentDescription = "Star $i",
-                                    tint = Color(0xFFF59E0B),
-                                    modifier = Modifier.size(28.dp)
-                                )
-                            }
-                        }
-                    }
-                    OutlinedTextField(
-                        value = ratingComment,
-                        onValueChange = { ratingComment = it },
-                        placeholder = { Text("Add optional feedback...", fontSize = 13.sp) },
-                        modifier = Modifier.fillMaxWidth(),
-                        shape = RoundedCornerShape(12.dp),
-                        minLines = 2,
-                        maxLines = 3
-                    )
-                }
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        showRateDialog = false
-                        ratingComment = ""
-                        showFeedbackToast = true
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = PureLightGreenButton)
-                ) {
-                    Text("Submit Rating")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showRateDialog = false }) {
-                    Text("Cancel")
-                }
             }
-        )
-    }
-
-    // Clear Chat Confirmation Dialog
-    if (showClearConfirmDialog) {
-        AlertDialog(
-            onDismissRequest = { showClearConfirmDialog = false },
-            title = { Text("Clear Chat?", fontWeight = FontWeight.Bold) },
-            text = {
-                Text("Are you sure you want to clear all messages with ${conversation.name}? This action cannot be undone.")
-            },
-            confirmButton = {
-                Button(
-                    onClick = {
-                        onClearChat()
-                        showClearConfirmDialog = false
-                    },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFDC2626))
-                ) {
-                    Text("Clear All Messages")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showClearConfirmDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
+        }
     }
 }

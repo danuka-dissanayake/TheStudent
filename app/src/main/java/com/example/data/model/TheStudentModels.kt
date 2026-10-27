@@ -1,6 +1,5 @@
 package com.example.data.model
 
-import androidx.compose.ui.graphics.Color
 
 enum class EducationLevel(val displayName: String) {
     ALL("All Levels"),
@@ -176,39 +175,4 @@ data class ProfileSetupSubmission(
     val streamOrDegree: String,
     val password: String? = null,
     val avatarJpeg: ByteArray? = null
-)
-
-data class OnlineStudent(
-    val id: String,
-    val name: String,
-    val initials: String,
-    val backgroundColor: Color,
-    val isOnline: Boolean = true
-)
-
-data class ChatMessageItem(
-    val id: String,
-    val senderName: String,
-    val text: String,
-    val timestamp: String,
-    val isUser: Boolean,
-    val attachmentName: String? = null,
-    val attachmentSize: String? = null,
-    val attachmentPages: String? = null,
-    val paperSnippetTitle: String? = null,
-    val paperSnippetSubtitle: String? = null
-)
-
-data class ChatConversation(
-    val id: String,
-    val name: String,
-    val lastMessage: String,
-    val time: String,
-    val unreadCount: Int = 0,
-    val isGroup: Boolean = false,
-    val isAi: Boolean = false,
-    val initials: String,
-    val avatarColor: Color,
-    val isTyping: Boolean = false,
-    val messages: List<ChatMessageItem> = emptyList()
 )

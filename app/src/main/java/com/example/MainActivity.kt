@@ -61,8 +61,8 @@ class MainActivity : ComponentActivity() {
                 // consumed on purpose
             }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.activeChatConversation != null)) {
-                if (uiState.activeChatConversation != null) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+                if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
                     viewModel.setTab(TheStudentNavTab.HOME)
@@ -364,7 +364,7 @@ class MainActivity : ComponentActivity() {
                                              }
                                          },
                                             bottomBar = {
-                                                if (uiState.currentTab != TheStudentNavTab.CHAT || uiState.activeChatConversation == null) {
+                                                if (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen) {
                                                     TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
