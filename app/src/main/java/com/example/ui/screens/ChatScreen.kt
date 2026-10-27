@@ -1153,21 +1153,7 @@ private fun ChatConversationScreen(
 
                     // Overlay inside the list container: the conversation is
                     // already parked at the bottom underneath when this fades out.
-                    AnimatedVisibility(
-                        visible = !conversationSettled,
-                        enter = fadeIn(),
-                        exit = fadeOut(animationSpec = tween(220))
-                    ) {
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                // Opaque, so the parked list is not visible popping
-                                // into place behind the spinner.
-                                .background(Color(0xFFF8FAFC))
-                        ) {
-                            ChatLoadingState()
-                        }
-                    }
+                    ConversationLoadingOverlay(visible = !conversationSettled)
                 }
 
                 state.errorMessage?.let { message ->
@@ -3037,6 +3023,33 @@ private fun ChatDirectorySkeleton() {
                     )
                 }
             }
+        }
+    }
+}
+
+/**
+ * Loader scrim drawn over the conversation list during the first open.
+ *
+ * It is a separate composable on purpose: calling `AnimatedVisibility` inline
+ * from inside the list's `Box` makes Kotlin resolve the `ColumnScope` extension
+ * from the enclosing `Column` and reject the implicit receiver. At file scope
+ * the plain, scope-free overload is used.
+ */
+@Composable
+private fun ConversationLoadingOverlay(visible: Boolean) {
+    AnimatedVisibility(
+        visible = visible,
+        enter = fadeIn(),
+        exit = fadeOut(animationSpec = tween(220))
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                // Opaque, so the parked list is not visible popping into place
+                // behind the spinner.
+                .background(Color(0xFFF8FAFC))
+        ) {
+            ChatLoadingState()
         }
     }
 }
