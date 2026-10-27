@@ -49,6 +49,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.UtteranceProgressListener
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
@@ -1095,19 +1096,28 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun observeChatDatabase() {
         viewModelScope.launch {
-            val summaries = runCatching { chatDao.observeSummaries() }.getOrElse { error ->
-                // Chat is a feature; it must not be able to crash the app on launch.
-                Log.e("TheStudentViewModel", "Chat database unavailable", error)
-                return@launch
+            while (true) {
+                try {
+                    chatDao.observeSummaries().collect { rows ->
+                        chatSummaries = rows
+                        rebuildChatThreads()
+                    }
+                    // A Room flow over a whole table never finishes on its own,
+                    // so reaching this line means the database was closed (sign
+                    // out). Nothing left to observe.
+                    return@launch
+                } catch (cancelled: CancellationException) {
+                    throw cancelled
+                } catch (error: Throwable) {
+                    // Chat is a feature; it must never crash the app. Retrying
+                    // matters because this one collector feeds every preview and
+                    // unread badge on the chat list: before, a single hiccup
+                    // ended it and the whole list quietly showed no badges, with
+                    // no way back short of restarting the app.
+                    Log.e("TheStudentViewModel", "Chat summaries failed, retrying", error)
+                    delay(2_000)
+                }
             }
-            summaries
-                .catch { error ->
-                    Log.e("TheStudentViewModel", "Chat summaries failed", error)
-                }
-                .collect { rows ->
-                    chatSummaries = rows
-                    rebuildChatThreads()
-                }
         }
     }
 
