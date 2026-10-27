@@ -51,6 +51,7 @@ import androidx.compose.ui.text.withStyle
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
+import com.example.ui.components.TheStudentAppBackground
 import com.example.ui.theme.*
 import kotlinx.coroutines.delay
 
@@ -335,220 +336,225 @@ fun SplashScreen(
         onSplashFinished()
     }
 
-    Box(
-        modifier = modifier
-            .fillMaxSize()
-            .background(Color.White)
-            .clickable { onSplashFinished() }
-            .testTag("splash_screen"),
-        contentAlignment = Alignment.Center
+    // Same emerald-wash background as onboarding / profile setup, and the status
+    // bar is transparent so it blends into it (see TheStudentSystemBars).
+    TheStudentAppBackground(
+        modifier = modifier.fillMaxSize()
     ) {
-        // Modern decorative footer art matching onboarding flow
-        OnboardingModernFooterArt(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(260.dp)
-                .align(Alignment.BottomCenter)
-        )
-
-        // Center content column with proper statusBarsPadding
-        Column(
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center,
+        Box(
             modifier = Modifier
                 .fillMaxSize()
-                .statusBarsPadding()
-                .navigationBarsPadding()
-                .padding(horizontal = 24.dp)
-                .scale(scaleAnim.value)
-                .alpha(alphaAnim.value)
+                .clickable { onSplashFinished() }
+                .testTag("splash_screen"),
+            contentAlignment = Alignment.Center
         ) {
-            // Real TheStudent Logo centered inside an elegant circular frame
-            Box(
-                contentAlignment = Alignment.Center,
+            // Modern decorative footer art matching onboarding flow
+            OnboardingModernFooterArt(
                 modifier = Modifier
-                    .size(174.dp)
-                    .testTag("splash_logo_container")
-            ) {
-                // Outer soft glowing aura in brand green
-                Box(
-                    modifier = Modifier
-                        .size(174.dp)
-                        .clip(CircleShape)
-                        .background(
-                            Brush.radialGradient(
-                                colors = listOf(
-                                    Color(0xFF22C55E).copy(alpha = 0.22f),
-                                    Color(0xFF16A34A).copy(alpha = 0.08f),
-                                    Color.Transparent
-                                )
-                            )
-                        )
-                )
-
-                // White disc with pure light green boundary
-                Surface(
-                    shape = CircleShape,
-                    color = Color.White,
-                    shadowElevation = 8.dp,
-                    border = androidx.compose.foundation.BorderStroke(2.8.dp, Color(0xFF22C55E)),
-                    modifier = Modifier
-                        .size(152.dp)
-                        .shadow(16.dp, CircleShape, spotColor = Color(0xFF22C55E).copy(alpha = 0.35f))
-                ) {
-                    Box(
-                        contentAlignment = Alignment.Center,
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .padding(18.dp)
-                    ) {
-                        Image(
-                            painter = painterResource(id = R.drawable.the_student_icon),
-                            contentDescription = "TheStudent Logo",
-                            contentScale = ContentScale.Fit,
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    }
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Main Brand Display Name with Roboto Black and highlighted green 'The'
-            Text(
-                text = buildAnnotatedString {
-                    withStyle(SpanStyle(color = Color(0xFF16A34A))) { // Emerald green for distinctive branding
-                        append("The")
-                    }
-                    append("Student.")
-                },
-                style = TextStyle(
-                    fontFamily = RobotoFontFamily,
-                    fontWeight = FontWeight.Black,
-                    fontSize = 38.sp,
-                    letterSpacing = (-0.8).sp,
-                    color = Color(0xFF0F172A)
-                ),
-                textAlign = TextAlign.Center
+                    .fillMaxWidth()
+                    .height(260.dp)
+                    .align(Alignment.BottomCenter)
             )
 
-            Spacer(modifier = Modifier.height(8.dp))
-
-            // Brand Tagline Pill Badge
-            Surface(
-                shape = RoundedCornerShape(20.dp),
-                color = Color(0xFFF0FDF4),
-                border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0).copy(alpha = 0.85f))
+            // Center content column with proper statusBarsPadding
+            Column(
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.Center,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .statusBarsPadding()
+                    .navigationBarsPadding()
+                    .padding(horizontal = 24.dp)
+                    .scale(scaleAnim.value)
+                    .alpha(alphaAnim.value)
             ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                // Real TheStudent Logo centered inside an elegant circular frame
+                Box(
+                    contentAlignment = Alignment.Center,
+                    modifier = Modifier
+                        .size(174.dp)
+                        .testTag("splash_logo_container")
                 ) {
+                    // Outer soft glowing aura in brand green
                     Box(
                         modifier = Modifier
-                            .size(7.dp)
+                            .size(174.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFF22C55E))
-                    )
-                    Text(
-                        text = "Everything a Student Needs",
-                        fontFamily = RobotoFontFamily,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 12.5.sp,
-                        color = Color(0xFF16A34A),
-                        letterSpacing = 0.2.sp
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(18.dp))
-
-            // Redesigned Feature Blocks (Replaced the plain single-line text with polished feature chips)
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-                modifier = Modifier.padding(horizontal = 8.dp)
-            ) {
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SplashFeatureChip(
-                        icon = Icons.Rounded.MenuBook,
-                        label = "Smart Practice"
-                    )
-                    SplashFeatureChip(
-                        icon = Icons.Rounded.Psychology,
-                        label = "AI Mentor"
-                    )
-                }
-                Row(
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    SplashFeatureChip(
-                        icon = Icons.Rounded.TrendingUp,
-                        label = "Rank Analytics"
-                    )
-                    SplashFeatureChip(
-                        icon = Icons.Rounded.AutoAwesome,
-                        label = "24/7 Voice Tutor"
-                    )
-                }
-            }
-
-            Spacer(modifier = Modifier.height(34.dp))
-
-            // --- REDESIGNED DYNAMIC LOADER (Tri-spinner + Cycling words -> Ready to go!) ---
-            Column(
-                horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.testTag("tri_spinner_container")
-            ) {
-                // Spinner to celebratory checkmark transition
-                AnimatedContent(
-                    targetState = isReadyToGo,
-                    transitionSpec = {
-                        (scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn())
-                            .togetherWith(scaleOut() + fadeOut())
-                    },
-                    label = "spinner_to_ready_badge"
-                ) { ready ->
-                    if (!ready) {
-                        // Multi-ring tri-spinner with custom rotation speeds in green palette
-                        TriSpinnerGreen(
-                            sizeDp = 50,
-                            color = Color(0xFF22C55E),
-                            secondaryColor = Color(0xFF16A34A),
-                            innerColor = Color(0xFF4ADE80)
-                        )
-                    } else {
-                        Surface(
-                            shape = CircleShape,
-                            color = Color(0xFFDCFCE7),
-                            border = BorderStroke(2.dp, Color(0xFF22C55E)),
-                            shadowElevation = 4.dp,
-                            modifier = Modifier.size(50.dp)
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Icon(
-                                    imageVector = Icons.Default.Check,
-                                    contentDescription = "Ready to go",
-                                    tint = Color(0xFF16A34A),
-                                    modifier = Modifier.size(28.dp)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        Color(0xFF22C55E).copy(alpha = 0.22f),
+                                        Color(0xFF16A34A).copy(alpha = 0.08f),
+                                        Color.Transparent
+                                    )
                                 )
-                            }
+                            )
+                    )
+
+                    // White disc with pure light green boundary
+                    Surface(
+                        shape = CircleShape,
+                        color = Color.White,
+                        shadowElevation = 8.dp,
+                        border = androidx.compose.foundation.BorderStroke(2.8.dp, Color(0xFF22C55E)),
+                        modifier = Modifier
+                            .size(152.dp)
+                            .shadow(16.dp, CircleShape, spotColor = Color(0xFF22C55E).copy(alpha = 0.35f))
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .padding(18.dp)
+                        ) {
+                            Image(
+                                painter = painterResource(id = R.drawable.the_student_icon),
+                                contentDescription = "TheStudent Logo",
+                                contentScale = ContentScale.Fit,
+                                modifier = Modifier.fillMaxSize()
+                            )
                         }
                     }
                 }
 
-                // Cycling animated words transitioning into "Ready to go!"
-                CyclingWordLoader(
-                    words = words,
-                    currentWordIndex = currentWordIndex,
-                    isReady = isReadyToGo
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Main Brand Display Name with Roboto Black and highlighted green 'The'
+                Text(
+                    text = buildAnnotatedString {
+                        withStyle(SpanStyle(color = Color(0xFF16A34A))) { // Emerald green for distinctive branding
+                            append("The")
+                        }
+                        append("Student.")
+                    },
+                    style = TextStyle(
+                        fontFamily = RobotoFontFamily,
+                        fontWeight = FontWeight.Black,
+                        fontSize = 38.sp,
+                        letterSpacing = (-0.8).sp,
+                        color = Color(0xFF0F172A)
+                    ),
+                    textAlign = TextAlign.Center
                 )
+
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Brand Tagline Pill Badge
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFFF0FDF4),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFFBBF7D0).copy(alpha = 0.85f))
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 5.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(7.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF22C55E))
+                        )
+                        Text(
+                            text = "Everything a Student Needs",
+                            fontFamily = RobotoFontFamily,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 12.5.sp,
+                            color = Color(0xFF16A34A),
+                            letterSpacing = 0.2.sp
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(18.dp))
+
+                // Redesigned Feature Blocks (Replaced the plain single-line text with polished feature chips)
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.padding(horizontal = 8.dp)
+                ) {
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SplashFeatureChip(
+                            icon = Icons.Rounded.MenuBook,
+                            label = "Smart Practice"
+                        )
+                        SplashFeatureChip(
+                            icon = Icons.Rounded.Psychology,
+                            label = "AI Mentor"
+                        )
+                    }
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        SplashFeatureChip(
+                            icon = Icons.Rounded.TrendingUp,
+                            label = "Rank Analytics"
+                        )
+                        SplashFeatureChip(
+                            icon = Icons.Rounded.AutoAwesome,
+                            label = "24/7 Voice Tutor"
+                        )
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(34.dp))
+
+                // --- REDESIGNED DYNAMIC LOADER (Tri-spinner + Cycling words -> Ready to go!) ---
+                Column(
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.testTag("tri_spinner_container")
+                ) {
+                    // Spinner to celebratory checkmark transition
+                    AnimatedContent(
+                        targetState = isReadyToGo,
+                        transitionSpec = {
+                            (scaleIn(animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy)) + fadeIn())
+                                .togetherWith(scaleOut() + fadeOut())
+                        },
+                        label = "spinner_to_ready_badge"
+                    ) { ready ->
+                        if (!ready) {
+                            // Multi-ring tri-spinner with custom rotation speeds in green palette
+                            TriSpinnerGreen(
+                                sizeDp = 50,
+                                color = Color(0xFF22C55E),
+                                secondaryColor = Color(0xFF16A34A),
+                                innerColor = Color(0xFF4ADE80)
+                            )
+                        } else {
+                            Surface(
+                                shape = CircleShape,
+                                color = Color(0xFFDCFCE7),
+                                border = BorderStroke(2.dp, Color(0xFF22C55E)),
+                                shadowElevation = 4.dp,
+                                modifier = Modifier.size(50.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Default.Check,
+                                        contentDescription = "Ready to go",
+                                        tint = Color(0xFF16A34A),
+                                        modifier = Modifier.size(28.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    // Cycling animated words transitioning into "Ready to go!"
+                    CyclingWordLoader(
+                        words = words,
+                        currentWordIndex = currentWordIndex,
+                        isReady = isReadyToGo
+                    )
+                }
             }
         }
     }

@@ -8,6 +8,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.material3.MaterialTheme
 import com.example.ui.theme.EmeraldPrimary
 
@@ -26,6 +27,10 @@ import com.example.ui.theme.EmeraldPrimary
  * }
  * ```
  *
+ * The status bar blends in automatically: the composable also makes the system
+ * bars transparent and flips the icon colour to suit [baseColor] (dark icons on
+ * a light background, white icons on a dark one).
+ *
  * @param baseColor flat colour underneath the wash. Defaults to the theme
  *   background (`#F8FAFC` light, dark surface in dark theme). Pass an explicit
  *   colour for screens that pin their own palette.
@@ -36,6 +41,9 @@ fun TheStudentAppBackground(
     baseColor: Color = MaterialTheme.colorScheme.background,
     content: @Composable BoxScope.() -> Unit
 ) {
+    // Icons must contrast with the colour actually under the status bar.
+    TheStudentSystemBars(darkIcons = baseColor.luminance() > 0.5f)
+
     Box(
         modifier = modifier
             .fillMaxSize()

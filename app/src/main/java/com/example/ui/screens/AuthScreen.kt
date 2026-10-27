@@ -65,6 +65,8 @@ import com.example.data.remote.ApiOutcome
 import com.example.data.local.TheStudentPreferences
 import com.example.ui.components.TheStudentLogo
 import com.example.ui.components.StudentLoadingSpinner
+import com.example.ui.components.TheStudentAppBackground
+import com.example.ui.components.TheStudentSystemBars
 import com.example.ui.components.AuthSignInSkeleton
 import com.example.ui.components.AuthSignUpSkeleton
 import com.example.ui.components.AuthOtpSkeleton
@@ -610,6 +612,13 @@ fun AuthScreen(
         }
     }
 
+    // Lightwash screens: e-mail verification, forgot-password and reset-password.
+    // These use the same background as onboarding / profile setup (with the
+    // status bar blending into it); sign-in / sign-up keep the dark-green header.
+    val isLightWashMode = authMode == AuthMode.VERIFY_OTP ||
+        authMode == AuthMode.FORGOT_PASSWORD ||
+        authMode == AuthMode.RESET_PASSWORD
+
     Scaffold(
         modifier = modifier
             .fillMaxSize()
@@ -638,10 +647,27 @@ fun AuthScreen(
                 }
             }
         },
-        containerColor = if (authMode == AuthMode.VERIFY_OTP) Color(0xFFF8FAFC) else AuthModernDarkGreen
+        // Transparent on purpose: the backgrounds below are drawn edge-to-edge
+        // so the status bar shows the same colour as the screen.
+        containerColor = Color.Transparent
     ) { innerPadding ->
         // ── Box overlay: real content underneath, shimmer fades on top ──────
         Box(modifier = Modifier.fillMaxSize()) {
+
+        if (isLightWashMode) {
+            TheStudentAppBackground(
+                baseColor = Color(0xFFF8FAFC),
+                modifier = Modifier.fillMaxSize()
+            ) {}
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .background(AuthModernDarkGreen)
+            )
+            // White status-bar icons over the dark-green header.
+            TheStudentSystemBars(darkIcons = false)
+        }
 
         if (authMode == AuthMode.VERIFY_OTP) {
             ModernEmailVerificationScreen(
@@ -671,7 +697,9 @@ fun AuthScreen(
                 modifier = Modifier
                     .fillMaxSize()
                     .padding(innerPadding)
-                    .background(AuthModernDarkGreen)
+                    .background(
+                        if (isLightWashMode) Color.Transparent else AuthModernDarkGreen
+                    )
             ) {
                 // Top Header section for Sign In & Sign Up
                 Column(
@@ -733,13 +761,13 @@ fun AuthScreen(
                         text = headline,
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White,
+                        color = if (isLightWashMode) Color(0xFF0F172A) else Color.White,
                         lineHeight = 32.sp
                     )
                     Text(
                         text = subheadline,
                         style = MaterialTheme.typography.bodyMedium,
-                        color = Color.White.copy(alpha = 0.92f)
+                        color = if (isLightWashMode) Color(0xFF475569) else Color.White.copy(alpha = 0.92f)
                     )
                 }
 
@@ -1837,10 +1865,11 @@ fun ModernEmailVerificationScreen(
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    // Transparent: the caller paints TheStudentAppBackground edge-to-edge
+    // behind the status bar, so the wash stays continuous.
     Box(
         modifier = modifier
             .fillMaxSize()
-            .background(Color(0xFFF8FAFC))
     ) {
         // Celestial background art from splash screen (glowing orbital curves & stars)
         OnboardingModernFooterArt(

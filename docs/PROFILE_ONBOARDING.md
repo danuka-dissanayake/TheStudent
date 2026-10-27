@@ -192,6 +192,25 @@ client defaults to `true` when the field is absent).
 | `MainActivity.kt` | route + back-gesture block |
 | `ui/screens/ProfileScreen.kt` | shows the uploaded photo |
 
+## 7b. Background & system bars (shared by every screen)
+
+`ui/components/TheStudentAppBackground.kt` is the single screen background:
+
+* a flat base colour (theme background `#F8FAFC`, or an explicit colour), plus
+* a vertical emerald wash — 12 % at the top, 2 % a third of the way down,
+  transparent at the bottom.
+
+Used by **splash**, **onboarding** (all slides + the "Welcome to TheStudent"
+page), the **auth** flow in its light modes (**e-mail verification**,
+**forgot password**, **reset password**) and **profile setup**. Sign-in /
+sign-up keep their dark-green header.
+
+`ui/components/TheStudentSystemBars.kt` makes the status and navigation bars
+transparent and picks the icon colour by luminance (dark icons on the light
+wash, white icons over the dark-green header). Because the background is drawn
+edge-to-edge and `Scaffold`'s `contentWindowInsets` pushes the content below the
+bar, the status bar always shows the same colour as the top of the screen.
+
 ## 8. Branding
 
 The header uses the real artwork, `res/drawable-nodpi/thestudent_logo_full.png`
