@@ -19,12 +19,12 @@ backend/
 ## 1. Import Database to InfinityFree
 1. Log in to your **InfinityFree Client Area** and go to **Control Panel (vPanel)**.
 2. Under the **Databases** section, open **MySQL Databases**.
-3. Create a new database named `dzdlearn` (or note your generated database name, e.g. `epiz_12345678_dzdlearn`).
+3. Create a new database named `thestudent` (or note your generated database name, e.g. `epiz_12345678_thestudent`).
 4. Note your credentials shown on that page:
    - **MySQL Host:** (e.g. `sql108.infinityfree.com` or `sql202.epizy.com`)
    - **MySQL Username:** (e.g. `epiz_12345678`)
    - **Password:** (your vPanel account password)
-   - **Database Name:** (e.g. `epiz_12345678_dzdlearn`)
+   - **Database Name:** (e.g. `epiz_12345678_thestudent`)
 5. Click **phpMyAdmin** next to the database name.
 6. In phpMyAdmin, click the **Import** tab at the top.
 7. Choose the `database.sql` file and click **Go**.
@@ -53,7 +53,7 @@ Open `config.php` in the File Manager (or before uploading) and fill in your det
 
 ```php
 $DB_HOST = 'sql108.infinityfree.com'; // Your MySQL Host from InfinityFree
-$DB_NAME = 'epiz_xxxxxxx_dzdlearn';    // Your Database Name
+$DB_NAME = 'epiz_xxxxxxx_thestudent';    // Your Database Name
 $DB_USER = 'epiz_xxxxxxx';            // Your MySQL Username
 $DB_PASS = 'your_account_password';   // Your vPanel Password
 ```

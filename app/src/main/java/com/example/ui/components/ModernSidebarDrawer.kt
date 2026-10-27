@@ -34,11 +34,12 @@ import com.example.ui.theme.EmeraldPrimary
 @Composable
 fun ModernSidebarDrawer(
     userProfile: UserProfile,
-    currentTab: DzdNavTab,
-    onSelectTab: (DzdNavTab) -> Unit,
+    currentTab: TheStudentNavTab,
+    onSelectTab: (TheStudentNavTab) -> Unit,
     onOpenAiAssistant: () -> Unit,
     onOpenLanguageLab: () -> Unit,
     onCloseDrawer: () -> Unit,
+    onOpenAdminPanel: (() -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
@@ -217,37 +218,37 @@ fun ModernSidebarDrawer(
             DrawerNavTile(
                 title = "Dashboard Home",
                 icon = Icons.Filled.Home,
-                isSelected = currentTab == DzdNavTab.HOME,
-                onClick = { onSelectTab(DzdNavTab.HOME) }
+                isSelected = currentTab == TheStudentNavTab.HOME,
+                onClick = { onSelectTab(TheStudentNavTab.HOME) }
             )
 
             DrawerNavTile(
                 title = "Student Chats & Groups",
                 icon = Icons.Filled.Chat,
-                isSelected = currentTab == DzdNavTab.CHAT,
-                onClick = { onSelectTab(DzdNavTab.CHAT) }
+                isSelected = currentTab == TheStudentNavTab.CHAT,
+                onClick = { onSelectTab(TheStudentNavTab.CHAT) }
             )
 
             DrawerNavTile(
                 title = "AI Voice Tutor",
                 icon = Icons.Filled.AutoAwesome,
-                isSelected = currentTab == DzdNavTab.AI_TUTOR,
+                isSelected = currentTab == TheStudentNavTab.AI_TUTOR,
                 badge = "Interactive",
-                onClick = { onSelectTab(DzdNavTab.AI_TUTOR) }
+                onClick = { onSelectTab(TheStudentNavTab.AI_TUTOR) }
             )
 
             DrawerNavTile(
                 title = "Past Papers & Exams",
                 icon = Icons.Filled.Description,
-                isSelected = currentTab == DzdNavTab.PAPERS,
-                onClick = { onSelectTab(DzdNavTab.PAPERS) }
+                isSelected = currentTab == TheStudentNavTab.PAPERS,
+                onClick = { onSelectTab(TheStudentNavTab.PAPERS) }
             )
 
             DrawerNavTile(
                 title = "My Profile & Settings",
                 icon = Icons.Filled.Person,
-                isSelected = currentTab == DzdNavTab.PROFILE,
-                onClick = { onSelectTab(DzdNavTab.PROFILE) }
+                isSelected = currentTab == TheStudentNavTab.PROFILE,
+                onClick = { onSelectTab(TheStudentNavTab.PROFILE) }
             )
 
             Spacer(modifier = Modifier.height(20.dp))
@@ -277,6 +278,27 @@ fun ModernSidebarDrawer(
                 badge = "CEFR B2",
                 onClick = onOpenLanguageLab
             )
+
+            // Administrator Special Access Section
+            if (userProfile.email.equals("admin@gmail.com", ignoreCase = true) && onOpenAdminPanel != null) {
+                Spacer(modifier = Modifier.height(20.dp))
+                Text(
+                    text = "ADMINISTRATOR",
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.error,
+                    letterSpacing = 1.sp,
+                    modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
+                )
+
+                DrawerNavTile(
+                    title = "Admin Panel",
+                    icon = Icons.Filled.AdminPanelSettings,
+                    isSelected = false,
+                    badge = "Admin",
+                    onClick = onOpenAdminPanel
+                )
+            }
         }
     }
 }

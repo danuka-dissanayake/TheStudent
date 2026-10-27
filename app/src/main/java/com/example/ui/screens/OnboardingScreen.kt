@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.Email
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material.icons.filled.TrendingUp
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -68,6 +69,13 @@ import coil.compose.AsyncImage
 import coil.request.ImageRequest
 import com.example.R
 import com.example.data.model.UserProfile
+import com.example.data.remote.TheStudentGoogleAuthClient
+import com.example.data.remote.GoogleAuthResult
+import com.example.data.remote.TheStudentAuthClient
+import com.example.data.remote.AuthApiResult
+import com.example.data.remote.TheStudentEmailSender
+import com.example.data.local.TheStudentPreferences
+import com.example.ui.components.StudentLoadingSpinner
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.EmeraldDark
@@ -98,11 +106,15 @@ data class OnboardingCardData(
 fun OnboardingScreen(
     onFinishOnboarding: (openAuth: Boolean, isRegister: Boolean) -> Unit,
     onContinueAsGuest: () -> Unit,
-    onSocialLoginSuccess: ((UserProfile) -> Unit)? = null,
+    onStartGoogleVerification: ((UserProfile, String) -> Unit)? = null,
+    onAuthSuccess: ((UserProfile) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val coroutineScope = rememberCoroutineScope()
+    val context = LocalContext.current
     val pagerState = rememberPagerState(pageCount = { 4 })
+    val snackbarHostState = remember { SnackbarHostState() }
+    var isGoogleSigningIn by remember { mutableStateOf(false) }
     var selectedRegion by remember { mutableStateOf("🇱🇰 Sri Lanka") }
     var showRegionSelector by remember { mutableStateOf(false) }
 
@@ -146,6 +158,30 @@ fun OnboardingScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("onboarding_screen"),
+        snackbarHost = {
+            SnackbarHost(
+                hostState = snackbarHostState,
+                modifier = Modifier
+                    .padding(bottom = 16.dp)
+                    .imePadding()
+            ) { data ->
+                Surface(
+                    shape = RoundedCornerShape(22.dp),
+                    color = Color(0xFF1E293B),
+                    shadowElevation = 6.dp,
+                    border = BorderStroke(1.dp, Color(0xFF334155))
+                ) {
+                    Text(
+                        text = data.visuals.message,
+                        fontFamily = MaisonNeueFontFamily,
+                        color = Color.White,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
+                    )
+                }
+            }
+        },
         containerColor = OnboardingBg
     ) { innerPadding ->
         Box(
@@ -193,7 +229,7 @@ fun OnboardingScreen(
                             .fillMaxSize()
                             .testTag("onboarding_pager")
                     ) { page ->
-                        Column(
+                        Box(
                             modifier = Modifier
                                 .fillMaxSize()
                                 .graphicsLayer {
@@ -208,14 +244,14 @@ fun OnboardingScreen(
                                     scaleX = scale
                                     scaleY = scale
                                 }
-                                .verticalScroll(rememberScrollState()),
-                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             when (page) {
                                 0, 1, 2 -> {
                                     val slide = slides[page]
                                     Column(
-                                        modifier = Modifier.fillMaxWidth(),
+                                        modifier = Modifier
+                                            .fillMaxSize()
+                                            .verticalScroll(rememberScrollState()),
                                         horizontalAlignment = Alignment.CenterHorizontally
                                     ) {
                                         // High-quality Photo Card with increased height & Floating Trust Badges
@@ -360,46 +396,68 @@ fun OnboardingScreen(
                                     // Screen 4: Redesigned Welcome and Auth Landing Screen with Circular Logo Frame & Skeleton Shimmer
                                     WelcomeAuthLandingContent(
                                         selectedRegion = selectedRegion,
-                                        onSelectRegionClick = { showRegionSelector = true },
+                                        isGoogleLoading = isGoogleSigningIn,
+                                        onSelectRegionClick = { if (!isGoogleSigningIn) showRegionSelector = true },
                                         onContinueWithApple = {
-                                            if (onSocialLoginSuccess != null) {
-                                                onSocialLoginSuccess(
-                                                    UserProfile(
-                                                        name = "Apple Student",
-                                                        email = "apple.student@icloud.com",
-                                                        institution = "University of Moratuwa",
-                                                        targetExam = "G.C.E. A/L",
-                                                        streamOrDegree = "Combined Maths & Physics",
-                                                        isLoggedIn = true
-                                                    )
-                                                )
-                                            } else {
-                                                onFinishOnboarding(true, false)
-                                            }
+                                            if (isGoogleSigningIn) return@WelcomeAuthLandingContent
+                                            onFinishOnboarding(true, false)
                                         },
                                         onContinueWithGoogle = {
-                                            if (onSocialLoginSuccess != null) {
-                                                onSocialLoginSuccess(
-                                                    UserProfile(
-                                                        name = "Google Student",
-                                                        email = "student@gmail.com",
-                                                        institution = "Royal College, Colombo",
-                                                        targetExam = "G.C.E. A/L",
-                                                        streamOrDegree = "Combined Maths, Physics, Chemistry",
-                                                        isLoggedIn = true
-                                                    )
-                                                )
-                                            } else {
-                                                onFinishOnboarding(true, false)
+                                            if (isGoogleSigningIn) return@WelcomeAuthLandingContent
+                                            coroutineScope.launch {
+                                                isGoogleSigningIn = true
+                                                when (val result = TheStudentGoogleAuthClient.signIn(context)) {
+                                                    is GoogleAuthResult.Success -> {
+                                                        TheStudentPreferences.setIsOnboarded(context, true)
+                                                        when (val authResult = TheStudentAuthClient.googleLogin("https://app.quizontal.site/", result.idToken)) {
+                                                            is AuthApiResult.RequiresOtp -> {
+                                                                if (onStartGoogleVerification != null) {
+                                                                    onStartGoogleVerification(result.profile, "")
+                                                                } else {
+                                                                    onFinishOnboarding(true, false)
+                                                                }
+                                                            }
+                                                            is AuthApiResult.Success -> {
+                                                                TheStudentPreferences.setSession(
+                                                                    context = context,
+                                                                    token = authResult.token,
+                                                                    userEmail = authResult.profile.email,
+                                                                    userName = authResult.profile.name,
+                                                                    rememberMe = true
+                                                                )
+                                                                if (onAuthSuccess != null) {
+                                                                    onAuthSuccess(authResult.profile)
+                                                                } else {
+                                                                    onFinishOnboarding(false, false)
+                                                                }
+                                                            }
+                                                            is AuthApiResult.Error -> {
+                                                                android.widget.Toast.makeText(context, authResult.message, android.widget.Toast.LENGTH_LONG).show()
+                                                                onFinishOnboarding(true, false)
+                                                            }
+                                                        }
+                                                    }
+                                                    is GoogleAuthResult.Cancelled -> {
+                                                        android.widget.Toast.makeText(context, "Sign in with Google was cancelled", android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                    is GoogleAuthResult.Error -> {
+                                                        android.widget.Toast.makeText(context, result.message, android.widget.Toast.LENGTH_SHORT).show()
+                                                    }
+                                                }
+                                                isGoogleSigningIn = false
                                             }
                                         },
                                         onSignUpWithEmail = {
-                                            onFinishOnboarding(true, true)
+                                            if (!isGoogleSigningIn) onFinishOnboarding(true, true)
                                         },
                                         onSignIn = {
-                                            onFinishOnboarding(true, false)
+                                            if (!isGoogleSigningIn) onFinishOnboarding(true, false)
                                         },
-                                        onContinueAsGuest = onContinueAsGuest
+                                        onContinueAsGuest = {
+                                            // Protected flow: Always require authentication
+                                            if (!isGoogleSigningIn) onFinishOnboarding(true, false)
+                                        },
+                                        modifier = Modifier.fillMaxSize()
                                     )
                                 }
                             }
@@ -576,7 +634,7 @@ fun OnboardingModernFooterArt(modifier: Modifier = Modifier) {
 /**
  * Screen 4: Redesigned Welcome Screen.
  * Features:
- * - Circular logo frame with adequate inner breathing room so "DZD Learn" text on the logo is never cropped.
+ * - Circular logo frame with adequate inner breathing room so TheStudent logo is never cropped.
  * - Bold display typography using high-contrast bold font styling.
  * - Clean action buttons stacked below.
  */
@@ -589,16 +647,26 @@ fun WelcomeAuthLandingContent(
     onSignUpWithEmail: () -> Unit,
     onSignIn: () -> Unit,
     onContinueAsGuest: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isGoogleLoading: Boolean = false
 ) {
-    Column(
-        modifier = modifier.fillMaxWidth(),
-        horizontalAlignment = Alignment.CenterHorizontally
-    ) {
-        Spacer(modifier = Modifier.height(12.dp))
+    var showTermsDialog by remember { mutableStateOf(false) }
+    var showPrivacyDialog by remember { mutableStateOf(false) }
 
-        // --- CIRCULAR IMAGE FRAME FOR THE DZD LEARN LOGO ---
-        // Generously sized circular container with ample breathing room so "DZD Learn" text and cap on the logo are 100% visible and uncropped
+    Box(
+        modifier = modifier.fillMaxSize()
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(bottom = 76.dp),
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Spacer(modifier = Modifier.height(12.dp))
+
+        // --- CIRCULAR IMAGE FRAME FOR THESTUDENT LOGO ---
+        // Generously sized circular container with ample breathing room so TheStudent logo is 100% visible and uncropped
         Box(
             contentAlignment = Alignment.Center,
             modifier = Modifier
@@ -635,11 +703,11 @@ fun WelcomeAuthLandingContent(
                     contentAlignment = Alignment.Center,
                     modifier = Modifier
                         .fillMaxSize()
-                        .padding(horizontal = 26.dp, vertical = 22.dp) // Generous padding so text & cap inside logo fit completely without clipping
+                        .padding(18.dp)
                 ) {
-                    // Actual TheStudent Logo centered inside circular frame with ContentScale.Fit
+                    // Crisp TheStudent Emblem centered inside circular frame with ContentScale.Fit
                     Image(
-                        painter = painterResource(id = R.drawable.the_student_logo),
+                        painter = painterResource(id = R.drawable.the_student_icon),
                         contentDescription = "TheStudent Logo",
                         modifier = Modifier
                             .fillMaxSize()
@@ -720,22 +788,21 @@ fun WelcomeAuthLandingContent(
 
         Spacer(modifier = Modifier.height(18.dp))
 
-        // --- COMMUNITY USER COUNT / REGION SELECTOR ---
+        // --- COMMUNITY USER TRUST BADGE LABEL ---
         Surface(
             shape = RoundedCornerShape(20.dp),
-            color = Color(0xFFF1F5F9),
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            shadowElevation = 1.dp,
+            color = Color(0xFFF0FDF4),
+            border = BorderStroke(1.dp, Color(0xFFDCFCE7)),
             modifier = Modifier
-                .clickable(onClick = onSelectRegionClick)
-                .testTag("region_selector_pill")
+                .clickable(enabled = !isGoogleLoading, onClick = onSelectRegionClick)
+                .testTag("region_badge_label")
         ) {
             Row(
-                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-                // Small glowing dot indicator
+                // Small glowing emerald dot indicator
                 Box(
                     modifier = Modifier
                         .size(7.dp)
@@ -746,71 +813,39 @@ fun WelcomeAuthLandingContent(
                     text = "Join 50K+ learners in",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 13.sp,
-                    color = OnboardingMutedText
+                    color = Color(0xFF166534),
+                    fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = selectedRegion,
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = OnboardingDarkText
-                )
-                Icon(
-                    imageVector = Icons.Default.KeyboardArrowDown,
-                    contentDescription = "Select region",
-                    tint = OnboardingMutedText,
-                    modifier = Modifier.size(16.dp)
+                    color = Color(0xFF14532D)
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(34.dp))
+        Spacer(modifier = Modifier.height(30.dp))
 
         // --- AUTH ACTION BUTTONS STACKED CLEANLY BELOW ---
 
-        // 1. Continue with Apple Button (Dark obsidian pill button)
+        // 1. Continue with Google Button (Premium styled white card with custom loading spinner)
         Surface(
-            onClick = onContinueWithApple,
+            onClick = { if (!isGoogleLoading) onContinueWithGoogle() },
+            enabled = !isGoogleLoading,
             shape = RoundedCornerShape(26.dp),
-            color = Color(0xFF0F172A),
-            shadowElevation = 3.dp,
+            color = if (isGoogleLoading) Color(0xFFF8FAFC) else Color.White,
+            border = BorderStroke(1.2.dp, if (isGoogleLoading) Color(0xFFCBD5E1) else Color(0xFFE2E8F0)),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
-                .testTag("btn_continue_apple")
-        ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(horizontal = 16.dp),
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.Center
-            ) {
-                AppleSilhouetteIcon(modifier = Modifier.size(19.dp), tint = Color.White)
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Continue with Apple",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color.White,
-                    letterSpacing = (-0.2).sp
+                .shadow(
+                    elevation = if (isGoogleLoading) 1.dp else 3.dp,
+                    shape = RoundedCornerShape(26.dp),
+                    spotColor = Color(0x14000000),
+                    ambientColor = Color(0x08000000)
                 )
-            }
-        }
-
-        Spacer(modifier = Modifier.height(13.dp))
-
-        // 2. Continue with Google Button (Crisp white pill button with official 4-color G logo)
-        Surface(
-            onClick = onContinueWithGoogle,
-            shape = RoundedCornerShape(26.dp),
-            color = Color.White,
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            shadowElevation = 1.5.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(52.dp)
                 .testTag("btn_continue_google")
         ) {
             Row(
@@ -820,31 +855,53 @@ fun WelcomeAuthLandingContent(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.Center
             ) {
-                GoogleLogoIcon(modifier = Modifier.size(20.dp))
-                Spacer(modifier = Modifier.width(10.dp))
-                Text(
-                    text = "Continue with Google",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 15.sp,
-                    color = Color(0xFF1F2937),
-                    letterSpacing = (-0.2).sp
-                )
+                if (isGoogleLoading) {
+                    StudentLoadingSpinner(
+                        size = 26.dp,
+                        isOnDarkBackground = false
+                    )
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Connecting to Google...",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color(0xFF334155),
+                        letterSpacing = (-0.2).sp
+                    )
+                } else {
+                    GoogleLogoIcon(modifier = Modifier.size(20.dp))
+                    Spacer(modifier = Modifier.width(10.dp))
+                    Text(
+                        text = "Continue with Google",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = Color(0xFF1F2937),
+                        letterSpacing = (-0.2).sp
+                    )
+                }
             }
         }
 
-        Spacer(modifier = Modifier.height(13.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
-        // 3. Sign up with email Button (Light styled pill button)
+        // 2. Sign up with email Button (Light styled pill button)
         Surface(
-            onClick = onSignUpWithEmail,
+            onClick = { if (!isGoogleLoading) onSignUpWithEmail() },
+            enabled = !isGoogleLoading,
             shape = RoundedCornerShape(26.dp),
             color = Color.White,
-            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
-            shadowElevation = 0.5.dp,
+            border = BorderStroke(1.2.dp, Color(0xFFE2E8F0)),
             modifier = Modifier
                 .fillMaxWidth()
                 .height(52.dp)
+                .shadow(
+                    elevation = 2.dp,
+                    shape = RoundedCornerShape(26.dp),
+                    spotColor = Color(0x0F000000),
+                    ambientColor = Color(0x06000000)
+                )
                 .testTag("btn_signup_email")
         ) {
             Row(
@@ -857,7 +914,7 @@ fun WelcomeAuthLandingContent(
                 Icon(
                     imageVector = Icons.Default.Email,
                     contentDescription = "Email",
-                    tint = OnboardingDarkText,
+                    tint = if (!isGoogleLoading) OnboardingDarkText else Color(0xFF94A3B8),
                     modifier = Modifier.size(19.dp)
                 )
                 Spacer(modifier = Modifier.width(10.dp))
@@ -866,20 +923,20 @@ fun WelcomeAuthLandingContent(
                     fontFamily = MaisonNeueFontFamily,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.sp,
-                    color = OnboardingDarkText,
+                    color = if (!isGoogleLoading) OnboardingDarkText else Color(0xFF94A3B8),
                     letterSpacing = (-0.2).sp
                 )
             }
         }
 
-        Spacer(modifier = Modifier.height(20.dp))
+        Spacer(modifier = Modifier.height(24.dp))
 
-        // 4. "Already have an account? Sign in"
+        // 3. "Already have an account? Sign in"
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier
-                .clickable(onClick = onSignIn)
+                .clickable(enabled = !isGoogleLoading, onClick = onSignIn)
                 .padding(vertical = 4.dp, horizontal = 12.dp)
                 .testTag("btn_signin_link")
         ) {
@@ -894,31 +951,147 @@ fun WelcomeAuthLandingContent(
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
-                color = OnboardingLimeGreenButton
+                color = if (!isGoogleLoading) OnboardingLimeGreenButton else Color(0xFF94A3B8)
             )
         }
 
-        Spacer(modifier = Modifier.height(18.dp))
+        Spacer(modifier = Modifier.height(16.dp))
+    }
 
-        // 5. "Continue as a guest" (lowers entry barrier)
+    // --- ATTACHED DIRECTLY TO THE BOTTOM OF THE SCREEN ---
+    Column(
+        modifier = Modifier
+            .align(Alignment.BottomCenter)
+            .fillMaxWidth()
+            .padding(bottom = 6.dp),
+        horizontalAlignment = Alignment.CenterHorizontally
+    ) {
+        // Security & Student Privacy Trust Badge
         Surface(
-            shape = RoundedCornerShape(16.dp),
+            shape = RoundedCornerShape(20.dp),
             color = Color(0xFFF8FAFC),
-            border = BorderStroke(0.5.dp, Color(0xFFE2E8F0)),
-            modifier = Modifier
-                .clickable(onClick = onContinueAsGuest)
-                .testTag("btn_continue_guest")
+            border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
+            modifier = Modifier.testTag("security_trust_badge")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.Center
+            ) {
+                Icon(
+                    imageVector = Icons.Default.Security,
+                    contentDescription = "Secure",
+                    tint = OnboardingLimeGreenButton,
+                    modifier = Modifier.size(13.5.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "100% Free & Secure for Sri Lankan Students 🇱🇰",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = OnboardingMutedText
+                )
+            }
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
+
+        // Legal disclaimer with interactive Terms & Privacy links
+        Row(
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier.fillMaxWidth()
         ) {
             Text(
-                text = "Continue as a guest",
+                text = "By continuing, you agree to our ",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
-                fontWeight = FontWeight.Medium,
-                color = OnboardingMutedText,
-                modifier = Modifier.padding(horizontal = 18.dp, vertical = 8.dp)
+                fontSize = 11.5.sp,
+                color = Color(0xFF94A3B8)
+            )
+            Text(
+                text = "Terms",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = OnboardingLimeGreenButton,
+                modifier = Modifier
+                    .clickable { showTermsDialog = true }
+                    .padding(vertical = 2.dp)
+            )
+            Text(
+                text = " & ",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                color = Color(0xFF94A3B8)
+            )
+            Text(
+                text = "Privacy Policy",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = OnboardingLimeGreenButton,
+                modifier = Modifier
+                    .clickable { showPrivacyDialog = true }
+                    .padding(vertical = 2.dp)
             )
         }
+    }
+}
 
-        Spacer(modifier = Modifier.height(14.dp))
+    // Interactive Terms of Service dialog
+    if (showTermsDialog) {
+        AlertDialog(
+            onDismissRequest = { showTermsDialog = false },
+            title = {
+                Text(
+                    text = "Terms of Service",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Welcome to TheStudent! By accessing our app, you agree to use the educational past papers, marking schemes, and AI tools for personal academic study and exam preparation. All materials are curated to support Sri Lankan students.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = OnboardingDarkText
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showTermsDialog = false }) {
+                    Text("Close", fontFamily = MaisonNeueFontFamily, fontWeight = FontWeight.Bold, color = OnboardingLimeGreenButton)
+                }
+            }
+        )
+    }
+
+    // Interactive Privacy Policy dialog
+    if (showPrivacyDialog) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyDialog = false },
+            title = {
+                Text(
+                    text = "Privacy Policy",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Your privacy is our priority. TheStudent does not sell or share your personal data. Your study progress, saved papers, and AI conversation history are kept secure and encrypted.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 14.sp,
+                    lineHeight = 20.sp,
+                    color = OnboardingDarkText
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = { showPrivacyDialog = false }) {
+                    Text("Close", fontFamily = MaisonNeueFontFamily, fontWeight = FontWeight.Bold, color = OnboardingLimeGreenButton)
+                }
+            }
+        )
     }
 }

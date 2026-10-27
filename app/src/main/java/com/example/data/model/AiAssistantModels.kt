@@ -41,7 +41,7 @@ data class AiPromptSuggestion(
 )
 
 /**
- * Available AI Model Providers for DZD AI Study Assistant.
+ * Available AI Model Providers for TheStudent AI Study Assistant.
  */
 enum class AiModelChoice(
     val id: String,
@@ -58,10 +58,10 @@ enum class AiModelChoice(
         supportsTools = true
     ),
     HUGGING_FACE(
-        id = "dzd-learn-ai",
+        id = "the-student-ai",
         displayName = "Hugging Face Space",
         providerBadge = "HF Space",
-        description = "danuka21/dzd-learn-ai (GPT-OSS 20B with deep reasoning)",
+        description = "TheStudent AI (GPT-OSS 20B with deep reasoning)",
         supportsTools = false
     ),
     GEMINI_FLASH(

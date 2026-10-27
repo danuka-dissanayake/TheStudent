@@ -1,29 +1,32 @@
 <?php
 /**
- * DZD Learn - InfinityFree MySQL Configuration
+ * TheStudent - DirectAdmin MySQL Database Configuration
  * 
- * Instructions for InfinityFree:
- * 1. Log in to your InfinityFree Control Panel (cPanel / vPanel).
- * 2. Click on "MySQL Databases".
- * 3. Copy your MySQL Host (e.g., sql108.infinityfree.com or sql202.epizy.com).
- * 4. Copy your MySQL Username (e.g., epiz_12345678).
- * 5. Use your vPanel account password.
- * 6. Copy your Database Name (e.g., epiz_12345678_dzdlearn).
- * 7. Update the variables below.
+ * Configured with live DirectAdmin database and Gmail SMTP credentials.
  */
 
-// Enable error reporting during setup (turn off in production if desired)
+// Error reporting (0 for production)
 error_reporting(E_ALL);
 ini_set('display_errors', 0);
 
-// --- INFINITYFREE DATABASE CREDENTIALS ---
-$DB_HOST = 'sql108.infinityfree.com'; // Replace with your InfinityFree MySQL Host
-$DB_NAME = 'epiz_xxxxxxx_dzdlearn';    // Replace with your Database Name
-$DB_USER = 'epiz_xxxxxxx';            // Replace with your MySQL Username
-$DB_PASS = 'your_infinityfree_password'; // Replace with your Account Password
+// --- DIRECTADMIN DATABASE CREDENTIALS ---
+$DB_HOST = 'localhost';             // In DirectAdmin, this is usually 'localhost' or '127.0.0.1'
+$DB_NAME = 'quizontalcloud_app';     // DirectAdmin database name
+$DB_USER = 'quizontalcloud_app';     // DirectAdmin database user
+$DB_PASS = 'GrjSmXMjva7mseBA3CG4'; // Password created when making the database user
 $DB_CHARSET = 'utf8mb4';
 
-// Allowed origins for CORS (allowing mobile app & web requests)
+// --- GOOGLE OAUTH CREDENTIALS ---
+define('GOOGLE_WEB_CLIENT_ID', '849765952531-7bnroph62m0homvnpfa3nngkmcorb4mf.apps.googleusercontent.com');
+
+// --- SMTP EMAIL CREDENTIALS (GMAIL SMTP) ---
+define('SMTP_HOST', 'ssl://smtp.gmail.com');
+define('SMTP_PORT', 465);
+define('SMTP_USER', 'yourownwpbot@gmail.com');
+define('SMTP_PASS', 'tllmuempbiotaltb');
+define('SMTP_FROM_NAME', 'TheStudent Security');
+
+// Allowed origins for CORS (enabling Android mobile app & web dashboard requests)
 header("Access-Control-Allow-Origin: *");
 header("Access-Control-Allow-Methods: GET, POST, PUT, DELETE, OPTIONS");
 header("Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With");
@@ -50,13 +53,12 @@ function getDbConnection() {
     try {
         return new PDO($dsn, $DB_USER, $DB_PASS, $options);
     } catch (PDOException $e) {
-        // Return a clean JSON response if connection fails
         http_response_code(500);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
-            'status' => 'error',
+            'status'  => 'error',
             'message' => 'Database connection failed: ' . $e->getMessage(),
-            'hint' => 'Check your database host, name, username, and password in config.php'
+            'hint'    => 'Check your database host, name, username, and password in config.php'
         ]);
         exit();
     }

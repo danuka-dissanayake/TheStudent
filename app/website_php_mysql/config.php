@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Database & System Configuration
+ * TheStudent - Database & System Configuration
  * Compatible with InfinityFree, standard cPanel, and local development.
  */
 
@@ -18,7 +18,7 @@ if (session_status() === PHP_SESSION_NONE) {
 // --------------------------------------------------------------------------
 // On InfinityFree: Find these under 'MySQL Databases' in your account panel
 define('DB_HOST', 'sql300.infinityfree.com'); // e.g. sql300.infinityfree.com or localhost
-define('DB_NAME', 'if0_38000000_dzdlearn');  // e.g. if0_38000000_dzdlearn
+define('DB_NAME', 'if0_38000000_thestudent');  // e.g. if0_38000000_thestudent
 define('DB_USER', 'if0_38000000');           // e.g. if0_38000000
 define('DB_PASS', 'your_vpanel_password');   // your vPanel account password
 define('DB_CHARSET', 'utf8mb4');

@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Admin Login Screen
+ * TheStudent - Admin Login Screen
  */
 require_once __DIR__ . '/../config.php';
 

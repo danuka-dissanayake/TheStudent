@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Past Papers Retrieval API Endpoint
+ * TheStudent - Past Papers Retrieval API Endpoint
  * 
  * URL: /api/get_papers.php
  * Methods: GET

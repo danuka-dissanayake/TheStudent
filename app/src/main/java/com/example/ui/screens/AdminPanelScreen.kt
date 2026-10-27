@@ -1,6 +1,7 @@
 package com.example.ui.screens
 
 import android.net.Uri
+import android.provider.OpenableColumns
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
@@ -10,6 +11,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
@@ -27,6 +29,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
@@ -86,6 +89,12 @@ fun AdminPanelScreen(
     var tempServerUrl by remember { mutableStateOf(serverUrl) }
 
     // Activity Result Launchers for file and image selection
+    val context = LocalContext.current
+    var detectedFileSize by remember { mutableStateOf("3.5 MB") }
+    var detectedFileName by remember { mutableStateOf<String?>(null) }
+    var detectedSchemeSize by remember { mutableStateOf<String?>(null) }
+    var detectedSchemeName by remember { mutableStateOf<String?>(null) }
+
     val thumbnailPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.PickVisualMedia()
     ) { uri ->
@@ -99,6 +108,27 @@ fun AdminPanelScreen(
     ) { uri ->
         if (uri != null) {
             selectedPdfUri = uri
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (cursor.moveToFirst()) {
+                        if (nameIndex != -1) {
+                            detectedFileName = cursor.getString(nameIndex)
+                        }
+                        if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                            val sizeBytes = cursor.getLong(sizeIndex)
+                            detectedFileSize = if (sizeBytes >= 1048576) {
+                                String.format(java.util.Locale.US, "%.2f MB", sizeBytes / 1048576.0)
+                            } else {
+                                String.format(java.util.Locale.US, "%.0f KB", sizeBytes / 1024.0)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                detectedFileSize = "3.5 MB"
+            }
         }
     }
 
@@ -107,6 +137,27 @@ fun AdminPanelScreen(
     ) { uri ->
         if (uri != null) {
             selectedMarkingSchemeUri = uri
+            try {
+                context.contentResolver.query(uri, null, null, null, null)?.use { cursor ->
+                    val nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME)
+                    val sizeIndex = cursor.getColumnIndex(OpenableColumns.SIZE)
+                    if (cursor.moveToFirst()) {
+                        if (nameIndex != -1) {
+                            detectedSchemeName = cursor.getString(nameIndex)
+                        }
+                        if (sizeIndex != -1 && !cursor.isNull(sizeIndex)) {
+                            val sizeBytes = cursor.getLong(sizeIndex)
+                            detectedSchemeSize = if (sizeBytes >= 1048576) {
+                                String.format(java.util.Locale.US, "%.2f MB", sizeBytes / 1048576.0)
+                            } else {
+                                String.format(java.util.Locale.US, "%.0f KB", sizeBytes / 1024.0)
+                            }
+                        }
+                    }
+                }
+            } catch (e: Exception) {
+                // Ignore
+            }
         }
     }
 
@@ -288,53 +339,171 @@ fun AdminPanelScreen(
                                     }
                                 }
 
-                                // 1. Paper Title (Multiline supported)
-                                ModernFormField(
-                                    label = "Paper Title *",
-                                    value = title,
-                                    placeholder = "e.g., G.C.E. A/L Combined Mathematics Paper I & II",
-                                    singleLine = false,
-                                    minLines = 2,
-                                    onValueChange = { title = it; formError = null }
-                                )
+                                // 1. Sri Lankan Category Selector Chips
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("Examination Category *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        listOf("A/L", "O/L", "Scholarship", "Junior").forEach { cat ->
+                                            val isSelected = category.equals(cat, ignoreCase = true)
+                                            FilterChip(
+                                                selected = isSelected,
+                                                onClick = {
+                                                    category = cat
+                                                    grade = when (cat) {
+                                                        "A/L" -> "Grade 13"
+                                                        "O/L" -> "Grade 11"
+                                                        "Scholarship" -> "Grade 5"
+                                                        else -> "Grade 9"
+                                                    }
+                                                },
+                                                label = { Text(if (cat == "A/L") "A/L (උසස් පෙළ)" else if (cat == "O/L") "O/L (සා/පෙළ)" else if (cat == "Scholarship") "Grade 5" else "Grades 6-9", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                                                colors = FilterChipDefaults.filterChipColors(
+                                                    selectedContainerColor = PureLightGreenButton,
+                                                    selectedLabelColor = Color.White
+                                                ),
+                                                modifier = Modifier.weight(1f)
+                                            )
+                                        }
+                                    }
+                                }
 
-                                // 2. Subject Name (Multiline supported for long names)
+                                // 2. A/L Stream Selector (Visible when A/L is active)
+                                if (category.contains("A/L", ignoreCase = true)) {
+                                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                        Text("A/L Stream (විෂය ධාරාව)", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                        LazyRow(
+                                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            val streams = listOf("Physical Science", "Biological Science", "Commerce", "Technology", "Arts", "Common")
+                                            items(streams) { s ->
+                                                FilterChip(
+                                                    selected = stream == s,
+                                                    onClick = { stream = s },
+                                                    label = { Text(s, fontSize = 12.sp) },
+                                                    colors = FilterChipDefaults.filterChipColors(
+                                                        selectedContainerColor = PureLightGreenButton,
+                                                        selectedLabelColor = Color.White
+                                                    )
+                                                )
+                                            }
+                                        }
+                                    }
+                                }
+
+                                // 3. Quick Sri Lankan Subject Presets
+                                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                                    Text("Quick Select Subject", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    val quickSubjects = when {
+                                        category.contains("A/L") && stream.contains("Phys") -> listOf("Combined Mathematics", "Physics", "Chemistry", "ICT")
+                                        category.contains("A/L") && stream.contains("Bio") -> listOf("Biology", "Chemistry", "Physics", "Agricultural Science")
+                                        category.contains("A/L") && stream.contains("Comm") -> listOf("Accounting", "Business Studies", "Economics", "ICT")
+                                        category.contains("A/L") && stream.contains("Tech") -> listOf("Science for Technology", "Engineering Tech", "Bio Systems Tech", "ICT")
+                                        category.contains("A/L") && stream.contains("Art") -> listOf("Sinhala", "English", "Logic", "Political Science", "History")
+                                        category.contains("O/L") -> listOf("Mathematics", "Science", "English", "Sinhala", "History", "Buddhism", "Commerce", "ICT")
+                                        category.contains("Scholar") -> listOf("Scholarship Paper I", "Scholarship Paper II")
+                                        else -> listOf("Mathematics", "Science", "English", "Sinhala", "History")
+                                    }
+                                    LazyRow(
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        items(quickSubjects) { subj ->
+                                            SuggestionChip(
+                                                onClick = {
+                                                    subject = subj
+                                                    title = "$yearText G.C.E. $category $subj ($medium Medium)"
+                                                    formError = null
+                                                },
+                                                label = { Text(subj, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                                                colors = SuggestionChipDefaults.suggestionChipColors(
+                                                    containerColor = if (subject == subj) PureLightGreenButton.copy(alpha = 0.15f) else Color(0xFFF1F5F9),
+                                                    labelColor = if (subject == subj) EmeraldDark else Color(0xFF334155)
+                                                )
+                                            )
+                                        }
+                                    }
+                                }
+
+                                // 4. Subject Name
                                 ModernFormField(
                                     label = "Subject Name *",
                                     value = subject,
                                     placeholder = "e.g., Combined Mathematics / Physics / Chemistry / ICT",
                                     singleLine = false,
-                                    minLines = 2,
+                                    minLines = 1,
                                     onValueChange = { subject = it; formError = null }
                                 )
 
-                                // 3. Year
+                                // 5. Paper Title with Auto-Generate Helper
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Text("Paper Title *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                                    TextButton(
+                                        onClick = {
+                                            if (subject.isNotBlank()) {
+                                                title = "$yearText G.C.E. $category $subject ($medium Medium)"
+                                            } else {
+                                                title = "$yearText G.C.E. $category Examination Paper ($medium Medium)"
+                                            }
+                                        },
+                                        contentPadding = PaddingValues(horizontal = 6.dp, vertical = 0.dp)
+                                    ) {
+                                        Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp), tint = EmeraldDark)
+                                        Spacer(modifier = Modifier.width(3.dp))
+                                        Text("Auto Title", fontSize = 11.sp, color = EmeraldDark, fontWeight = FontWeight.Bold)
+                                    }
+                                }
+
                                 ModernFormField(
-                                    label = "Examination Year *",
-                                    value = yearText,
-                                    placeholder = "2024",
-                                    keyboardType = KeyboardType.Number,
-                                    onValueChange = { yearText = it }
+                                    label = "",
+                                    value = title,
+                                    placeholder = "e.g., 2024 G.C.E. A/L Combined Mathematics Paper I & II (Sinhala Medium)",
+                                    singleLine = false,
+                                    minLines = 2,
+                                    onValueChange = { title = it; formError = null }
                                 )
 
-                                // 4. Duration
-                                ModernFormField(
-                                    label = "Duration",
-                                    value = durationText,
-                                    placeholder = "e.g., 3 Hours 00 Mins",
-                                    onValueChange = { durationText = it }
-                                )
+                                // 6. Year, Duration, Pages Row
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        ModernFormField(
+                                            label = "Year *",
+                                            value = yearText,
+                                            placeholder = "2024",
+                                            keyboardType = KeyboardType.Number,
+                                            onValueChange = { yearText = it }
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        ModernFormField(
+                                            label = "Duration",
+                                            value = durationText,
+                                            placeholder = "3 Hours",
+                                            onValueChange = { durationText = it }
+                                        )
+                                    }
+                                    Box(modifier = Modifier.weight(1f)) {
+                                        ModernFormField(
+                                            label = "Pages",
+                                            value = pagesText,
+                                            placeholder = "16",
+                                            keyboardType = KeyboardType.Number,
+                                            onValueChange = { pagesText = it }
+                                        )
+                                    }
+                                }
 
-                                // 5. Pages Count
-                                ModernFormField(
-                                    label = "Total Pages Count",
-                                    value = pagesText,
-                                    placeholder = "16",
-                                    keyboardType = KeyboardType.Number,
-                                    onValueChange = { pagesText = it }
-                                )
-
-                                // 6. Medium Selector
+                                // 7. Medium Selector
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                     Text("Medium Language *", style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.SemiBold, color = MaterialTheme.colorScheme.onSurfaceVariant)
                                     Row(
@@ -356,30 +525,6 @@ fun AdminPanelScreen(
                                         }
                                     }
                                 }
-
-                                // 7. Category
-                                ModernFormField(
-                                    label = "Category",
-                                    value = category,
-                                    placeholder = "A/L, O/L, Scholarship, Term Test",
-                                    onValueChange = { category = it }
-                                )
-
-                                // 8. Grade
-                                ModernFormField(
-                                    label = "Grade",
-                                    value = grade,
-                                    placeholder = "Grade 13, Grade 11, Grade 5",
-                                    onValueChange = { grade = it }
-                                )
-
-                                // 9. Stream / Department
-                                ModernFormField(
-                                    label = "Stream / Department",
-                                    value = stream,
-                                    placeholder = "Physical Science / Biological Science / Commerce / Arts / Tech",
-                                    onValueChange = { stream = it }
-                                )
 
                                 // 10. Thumbnail Image Upload Card
                                 Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -485,11 +630,26 @@ fun AdminPanelScreen(
                                                     color = if (selectedPdfUri != null) EmeraldDark else MaterialTheme.colorScheme.onSurface
                                                 )
                                                 Text(
-                                                    text = selectedPdfUri?.path ?: "Tap to select past paper PDF file",
+                                                    text = if (selectedPdfUri != null) (detectedFileName ?: (selectedPdfUri?.lastPathSegment ?: "PDF Selected")) else "Tap to select past paper PDF file",
                                                     fontSize = 11.sp,
                                                     color = Color.Gray,
                                                     maxLines = 1
                                                 )
+                                                if (selectedPdfUri != null) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = PureLightGreenButton.copy(alpha = 0.12f),
+                                                        modifier = Modifier.padding(top = 4.dp)
+                                                    ) {
+                                                        Text(
+                                                            text = "Real Size: $detectedFileSize (Auto detected)",
+                                                            fontSize = 10.sp,
+                                                            fontWeight = FontWeight.Bold,
+                                                            color = EmeraldDark,
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                        )
+                                                    }
+                                                }
                                             }
                                             if (selectedPdfUri != null) {
                                                 IconButton(onClick = { selectedPdfUri = null }) {
@@ -557,11 +717,26 @@ fun AdminPanelScreen(
                                                         fontSize = 13.sp
                                                     )
                                                     Text(
-                                                        text = selectedMarkingSchemeUri?.path ?: "Tap to select answer guide PDF",
+                                                        text = if (selectedMarkingSchemeUri != null) (detectedSchemeName ?: (selectedMarkingSchemeUri?.lastPathSegment ?: "Scheme Selected")) else "Tap to select answer guide PDF",
                                                         fontSize = 11.sp,
                                                         color = Color.Gray,
                                                         maxLines = 1
                                                     )
+                                                    if (selectedMarkingSchemeUri != null && detectedSchemeSize != null) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(6.dp),
+                                                            color = PureLightGreenButton.copy(alpha = 0.12f),
+                                                            modifier = Modifier.padding(top = 4.dp)
+                                                        ) {
+                                                            Text(
+                                                                text = "Real Size: $detectedSchemeSize (Auto detected)",
+                                                                fontSize = 10.sp,
+                                                                fontWeight = FontWeight.Bold,
+                                                                color = EmeraldDark,
+                                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                                 if (selectedMarkingSchemeUri != null) {
                                                     IconButton(onClick = { selectedMarkingSchemeUri = null }) {
@@ -623,7 +798,7 @@ fun AdminPanelScreen(
                                             thumbnailUrl = selectedThumbnailUri?.toString() ?: "",
                                             description = description.trim(),
                                             pages = parsedPages,
-                                            fileSize = "4.2 MB",
+                                            fileSize = detectedFileSize,
                                             hasMarkingScheme = includeMarkingScheme
                                         )
 
@@ -870,7 +1045,7 @@ fun AdminPanelScreen(
 
                                 Text(
                                     text = "1. Log into your DirectAdmin control panel.\n" +
-                                            "2. Go to 'MySQL Management' and create a database (e.g., `dzd_papers_db`).\n" +
+                                            "2. Go to 'MySQL Management' and create a database (e.g., `thestudent_papers_db`).\n" +
                                             "3. Open phpMyAdmin, import the SQL schema provided by the assistant.\n" +
                                             "4. Upload `upload_paper.php`, `get_papers.php`, and `db_config.php` to your `public_html/api/` folder.\n" +
                                             "5. Enter your website URL above (e.g. `https://yourdomain.com/`).",

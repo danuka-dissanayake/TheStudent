@@ -31,7 +31,7 @@ import com.example.data.model.Course
 import com.example.data.model.PastPaper
 import com.example.data.model.StudyNote
 import com.example.data.model.UserProfile
-import com.example.ui.components.DzdNavTab
+import com.example.ui.components.TheStudentNavTab
 import com.example.ui.components.HomeSkeletonLoading
 import com.example.ui.theme.*
 
@@ -47,7 +47,7 @@ fun HomeScreen(
     onPaperClick: (PastPaper) -> Unit,
     onOpenAiAssistant: () -> Unit,
     onOpenLanguageLab: () -> Unit,
-    onNavigateTab: (DzdNavTab) -> Unit,
+    onNavigateTab: (TheStudentNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
     if (isLoading) {
@@ -542,7 +542,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    TextButton(onClick = { onNavigateTab(DzdNavTab.PAPERS) }) {
+                    TextButton(onClick = { onNavigateTab(TheStudentNavTab.PAPERS) }) {
                         Text("View All", color = EmeraldPrimary, fontWeight = FontWeight.Bold)
                     }
                 }
@@ -570,7 +570,7 @@ fun HomeScreen(
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
-                    TextButton(onClick = { onNavigateTab(DzdNavTab.PAPERS) }) {
+                    TextButton(onClick = { onNavigateTab(TheStudentNavTab.PAPERS) }) {
                         Text("Browse All", color = EmeraldPrimary, fontWeight = FontWeight.Bold)
                     }
                 }

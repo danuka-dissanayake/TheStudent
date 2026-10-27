@@ -55,7 +55,7 @@ fun AuthDialog(
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    DzdLogo(size = 32.dp)
+                    TheStudentLogo(size = 32.dp)
                     IconButton(onClick = onDismiss) {
                         Icon(Icons.Default.Close, contentDescription = "Close")
                     }

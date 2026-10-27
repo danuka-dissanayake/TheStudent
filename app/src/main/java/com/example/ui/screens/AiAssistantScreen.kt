@@ -148,7 +148,7 @@ fun AiAssistantScreen(
     // Dynamic animated placeholder rotation (cycles every 3 seconds)
     val dynamicPlaceholders = remember {
         listOf(
-            "Ask dzd ai anything...",
+            "Ask TheStudent AI anything...",
             "Solve math, physics & chem problems...",
             "Explain concepts in Sinhala or English...",
             "Draft summaries from uploaded notes...",
@@ -1933,7 +1933,7 @@ private fun ChatGptDocumentCard(
                                 val sanitizedFileName = title.replace(Regex("[^a-zA-Z0-9_ -]"), "_").trim().take(40).ifBlank { "Study_Document" } + ".pdf"
 
                                 val success = if (localFile != null && localFile.exists()) {
-                                    val (saved, _) = com.example.data.remote.DzdDocumentHandler.savePdfToPublicDownloads(
+                                    val (saved, _) = com.example.data.remote.TheStudentDocumentHandler.savePdfToPublicDownloads(
                                         context = context,
                                         sourceFile = localFile,
                                         sourceBytes = null,
@@ -1941,7 +1941,7 @@ private fun ChatGptDocumentCard(
                                     )
                                     saved
                                 } else {
-                                    val artifact = com.example.data.remote.DzdDocumentHandler.downloadOrRetrieveDocument(
+                                    val artifact = com.example.data.remote.TheStudentDocumentHandler.downloadOrRetrieveDocument(
                                         context = context,
                                         queryOrTitle = title,
                                         directUrl = if (url.startsWith("http")) url else null,
@@ -3263,7 +3263,7 @@ private fun buildFormattedAnnotatedString(
         .replace(Regex("""\[([^\]]+)\]\((/[^\)]+)\)"""), "📄 $1")
         .replace(Regex("""/storage/emulated/0/Android/data/[^/\s\)]+/files/documents/studypapers/"""), "Download/TheStudent/")
         .replace(Regex("""/storage/emulated/0/[^\s\)]+"""), "")
-        .replace(Regex("""com\.aistudio\.[a-zA-Z0-9_\.]*"""), "")
+        .replace(Regex("""com\.(?:aistudio|thestudent)\.[a-zA-Z0-9_\.]*"""), "")
         .replace(Regex("""(^|\s)#{1,6}\s*"""), "$1")
         .replace(Regex("""\s*#{1,6}\s*$"""), "")
         .replace(Regex("""#{1,6}"""), "")
@@ -3583,7 +3583,6 @@ fun parseChainOfThoughtSteps(rawText: String, isThinking: Boolean): List<ChainOf
 
     // Check if rawText contains tool calling markers
     val hasToolCalls = rawText.contains("[TheStudent AI Live Tool Calling]") ||
-            rawText.contains("[DZD AI Live Tool Calling]") ||
             rawText.contains("Searching Web") ||
             rawText.contains("Searching the web") ||
             rawText.contains("Tools_Web_Search") ||
@@ -3602,7 +3601,6 @@ fun parseChainOfThoughtSteps(rawText: String, isThinking: Boolean): List<ChainOf
             rawText.indexOf("• 🔍") >= 0 -> rawText.indexOf("• 🔍")
             rawText.indexOf("• Searching") >= 0 -> rawText.indexOf("• Searching")
             rawText.indexOf("[TheStudent AI") >= 0 -> rawText.indexOf("[TheStudent AI")
-            rawText.indexOf("[DZD AI") >= 0 -> rawText.indexOf("[DZD AI")
             else -> -1
         }
 
@@ -4249,7 +4247,7 @@ private fun queryFileName(context: Context, uri: Uri): String? {
  * AI Model Selection and API Key configuration dialog.
  * Enables switching between:
  * 1. GLM-4.7-Flash (Z.AI Free Tier) with tool calling
- * 2. Hugging Face Space (dzd-learn-ai / GPT-OSS 20B with reasoning)
+ * 2. Hugging Face Space (TheStudent AI / GPT-OSS 20B with reasoning)
  * 3. Google Gemini 3.8 Flash (Multimodal vision)
  */
 @Composable

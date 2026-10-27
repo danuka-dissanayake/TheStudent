@@ -1,5 +1,5 @@
 -- ====================================================================
--- DZD Learn - Past Papers MySQL Database Schema (InfinityFree Compatible)
+-- TheStudent - Past Papers MySQL Database Schema (InfinityFree Compatible)
 -- Table: past_papers
 -- ====================================================================
 

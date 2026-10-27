@@ -38,10 +38,10 @@ class ExampleRobolectricTest {
 
   @Test
   fun `verify AI tutor responses for A L physics and mathematics`() {
-    val bernoulliResponse = com.example.data.repository.DzdRepository.generateAiTutorResponse("Explain Bernoulli principle")
+    val bernoulliResponse = com.example.data.repository.TheStudentRepository.generateAiTutorResponse("Explain Bernoulli principle")
     org.junit.Assert.assertTrue(bernoulliResponse.content.contains("Bernoulli", ignoreCase = true))
 
-    val calculusResponse = com.example.data.repository.DzdRepository.generateAiTutorResponse("Integration formulas in calculus")
+    val calculusResponse = com.example.data.repository.TheStudentRepository.generateAiTutorResponse("Integration formulas in calculus")
     org.junit.Assert.assertTrue(calculusResponse.content.contains("LIATE", ignoreCase = true))
   }
 

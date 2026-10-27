@@ -1,4 +1,4 @@
--- DZD Learn Past Papers Database Schema (MySQL 5.7 / 8.0 Compatible)
+-- TheStudent Past Papers Database Schema (MySQL 5.7 / 8.0 Compatible)
 -- Designed for InfinityFree & standard cPanel / PHP hosting
 
 SET NAMES utf8mb4;
@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS `admins` (
 -- Default admin account (Username: admin, Password: admin123password)
 -- Password hash generated with password_hash('admin123password', PASSWORD_DEFAULT)
 INSERT INTO `admins` (`username`, `password_hash`, `email`) VALUES
-('admin', '$2y$10$O0.cQjFm.l1E0.xZ8P23Q.d2y0yQyT56Q8e.rE8y7b7j9z9a8b1qK', 'admin@dzdlearn.lk')
+('admin', '$2y$10$O0.cQjFm.l1E0.xZ8P23Q.d2y0yQyT56Q8e.rE8y7b7j9z9a8b1qK', 'admin@thestudent.lk')
 ON DUPLICATE KEY UPDATE `username`=`username`;
 
 -- Seed starter papers matching Grade 6 to Grade 13

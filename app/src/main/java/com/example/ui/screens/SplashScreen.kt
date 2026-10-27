@@ -252,7 +252,7 @@ fun CyclingWordLoader(
 }
 
 /**
- * Feature chip representing one of the core pillars of DZD Learn.
+ * Feature chip representing one of the core pillars of TheStudent.
  */
 @Composable
 private fun SplashFeatureChip(
@@ -291,7 +291,7 @@ private fun SplashFeatureChip(
 /**
  * Redesigned Whole Splash Screen:
  * - Roboto typography across the entire screen.
- * - Crisp white canvas with glowing halo and real DZD Learn emblem.
+ * - Crisp white canvas with glowing halo and real TheStudent emblem.
  * - Structured, aesthetic 3-pillar feature badge layout replacing the plain single-line dot text.
  * - Pure, borderless/backgroundless Tri-spinner + smooth cycling word loader in emerald green.
  * - Seamless transition into onboarding flow.
@@ -363,7 +363,7 @@ fun SplashScreen(
                 .scale(scaleAnim.value)
                 .alpha(alphaAnim.value)
         ) {
-            // Real DZD Learn Logo centered inside an elegant circular frame
+            // Real TheStudent Logo centered inside an elegant circular frame
             Box(
                 contentAlignment = Alignment.Center,
                 modifier = Modifier
@@ -400,10 +400,10 @@ fun SplashScreen(
                         contentAlignment = Alignment.Center,
                         modifier = Modifier
                             .fillMaxSize()
-                            .padding(horizontal = 24.dp, vertical = 20.dp)
+                            .padding(18.dp)
                     ) {
                         Image(
-                            painter = painterResource(id = R.drawable.the_student_logo),
+                            painter = painterResource(id = R.drawable.the_student_icon),
                             contentDescription = "TheStudent Logo",
                             contentScale = ContentScale.Fit,
                             modifier = Modifier.fillMaxSize()

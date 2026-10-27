@@ -14,10 +14,12 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.coerceAtLeast
 import androidx.compose.ui.unit.dp
@@ -27,7 +29,7 @@ import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
 import com.example.viewmodel.AppScreenFlow
-import com.example.viewmodel.DzdViewModel
+import com.example.viewmodel.TheStudentViewModel
 import kotlinx.coroutines.launch
 
 class MainActivity : ComponentActivity() {
@@ -35,7 +37,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         setContent {
-            val viewModel: DzdViewModel = viewModel()
+            val viewModel: TheStudentViewModel = viewModel()
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val savedPapers by viewModel.savedPapers.collectAsStateWithLifecycle()
             val savedCourses by viewModel.savedCourses.collectAsStateWithLifecycle()
@@ -52,11 +54,11 @@ class MainActivity : ComponentActivity() {
                 coroutineScope.launch { drawerState.close() }
             }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != DzdNavTab.HOME || uiState.activeChatConversation != null)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.activeChatConversation != null)) {
                 if (uiState.activeChatConversation != null) {
                     viewModel.closeChat()
                 } else {
-                    viewModel.setTab(DzdNavTab.HOME)
+                    viewModel.setTab(TheStudentNavTab.HOME)
                 }
             }
 
@@ -68,6 +70,38 @@ class MainActivity : ComponentActivity() {
             }
 
             MyApplicationTheme(darkTheme = uiState.isDarkTheme) {
+                // ── Cross-flow navigation shimmer ───────────────────────────────────────
+                // Shows NavigationTransitionShimmer for ~1050ms when navigating from any
+                // auth/onboarding flow into the main dashboard.
+                var showNavShimmer by remember { mutableStateOf(false) }
+                val prevScreenFlow = remember { mutableStateOf(uiState.screenFlow) }
+
+                LaunchedEffect(uiState.screenFlow) {
+                    val from = prevScreenFlow.value
+                    val to = uiState.screenFlow
+                    if ((from == AppScreenFlow.AUTH || from == AppScreenFlow.ONBOARDING) &&
+                        to == AppScreenFlow.MAIN
+                    ) {
+                        showNavShimmer = true
+                        kotlinx.coroutines.delay(1050)
+                        showNavShimmer = false
+                    }
+                    prevScreenFlow.value = to
+                }
+
+                // Outer animated switch: shimmer overlay vs. real screen tree
+                AnimatedContent(
+                    targetState = showNavShimmer,
+                    transitionSpec = {
+                        fadeIn(animationSpec = tween(200)).togetherWith(
+                            fadeOut(animationSpec = tween(200))
+                        )
+                    },
+                    label = "nav_shimmer_overlay"
+                ) { shimmerActive ->
+                    if (shimmerActive) {
+                        NavigationTransitionShimmer(modifier = Modifier.fillMaxSize())
+                    } else {
                 AnimatedContent(
                     targetState = uiState.screenFlow,
                     transitionSpec = {
@@ -91,7 +125,10 @@ class MainActivity : ComponentActivity() {
                                 onContinueAsGuest = {
                                     viewModel.continueAsGuest()
                                 },
-                                onSocialLoginSuccess = { profile ->
+                                onStartGoogleVerification = { profile, otp ->
+                                    viewModel.startGoogleVerification(profile, otp)
+                                },
+                                onAuthSuccess = { profile ->
                                     viewModel.handleAuthSuccess(profile)
                                 }
                             )
@@ -117,13 +154,18 @@ class MainActivity : ComponentActivity() {
                                     onBack = { viewModel.closeAdminPanel() }
                                 )
                             } else {
+                                val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
                                 AuthScreen(
                                     initialIsRegister = uiState.isRegisterAuthMode,
+                                    initialIsOtp = uiState.isOtpAuthMode,
+                                    initialPendingProfile = uiState.pendingAuthProfile,
+                                    initialOtpCode = uiState.pendingAuthOtp,
+                                    backendBaseUrl = serverUrl,
                                     onAuthSuccess = { profile ->
                                         viewModel.handleAuthSuccess(profile)
                                     },
-                                    onContinueAsGuest = {
-                                        viewModel.continueAsGuest()
+                                    onBack = {
+                                        viewModel.handleAuthBack()
                                     },
                                     onOpenAdminPanel = {
                                         viewModel.openAdminPanel()
@@ -132,7 +174,16 @@ class MainActivity : ComponentActivity() {
                             }
                         }
                         AppScreenFlow.MAIN -> {
-                            if (uiState.isAdminPanelOpen) {
+                            if (!uiState.isAuthenticated && !viewModel.preferences.isLoggedIn) {
+                                LaunchedEffect(Unit) {
+                                    viewModel.openAuthScreen()
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxSize()
+                                        .background(Color.White)
+                                )
+                            } else if (uiState.isAdminPanelOpen) {
                                 val dynamicPapers by viewModel.dynamicPapers.collectAsStateWithLifecycle()
                                 val isLiveDb by viewModel.isLiveDatabaseConnected.collectAsStateWithLifecycle()
                                 val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
@@ -202,7 +253,7 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ModalNavigationDrawer(
                                     drawerState = drawerState,
-                                    gesturesEnabled = uiState.currentTab == DzdNavTab.HOME,
+                                    gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME,
                                     drawerContent = {
                                         ModernSidebarDrawer(
                                             userProfile = userProfile,
@@ -221,6 +272,10 @@ class MainActivity : ComponentActivity() {
                                             },
                                             onCloseDrawer = {
                                                 coroutineScope.launch { drawerState.close() }
+                                            },
+                                            onOpenAdminPanel = {
+                                                viewModel.openAdminPanel()
+                                                coroutineScope.launch { drawerState.close() }
                                             }
                                         )
                                     }
@@ -231,25 +286,25 @@ class MainActivity : ComponentActivity() {
                                             .fillMaxSize()
                                             .testTag("main_scaffold"),
                                          topBar = {
-                                             if (uiState.currentTab != DzdNavTab.CHAT) {
-                                                 DzdTopAppBar(
+                                             if (uiState.currentTab != TheStudentNavTab.CHAT) {
+                                                 TheStudentTopAppBar(
                                                      currentTab = uiState.currentTab,
                                                      streakDays = userProfile.streakDays,
                                                      onNavigationClick = {
-                                                         if (uiState.currentTab == DzdNavTab.HOME) {
+                                                         if (uiState.currentTab == TheStudentNavTab.HOME) {
                                                              coroutineScope.launch { drawerState.open() }
                                                          } else {
-                                                             viewModel.setTab(DzdNavTab.HOME)
+                                                             viewModel.setTab(TheStudentNavTab.HOME)
                                                          }
                                                      },
                                                      onLanguageLabClick = { viewModel.openLanguageLab(0) },
-                                                     onSearchClick = { viewModel.setTab(DzdNavTab.PAPERS) }
+                                                     onSearchClick = { viewModel.setTab(TheStudentNavTab.PAPERS) }
                                                  )
                                              }
                                          },
                                             bottomBar = {
-                                                if (uiState.currentTab != DzdNavTab.CHAT || uiState.activeChatConversation == null) {
-                                                    DzdBottomNavigationBar(
+                                                if (uiState.currentTab != TheStudentNavTab.CHAT || uiState.activeChatConversation == null) {
+                                                    TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
                                                     )
@@ -273,7 +328,7 @@ class MainActivity : ComponentActivity() {
                                                 label = "tab_transition"
                                             ) { tab ->
                                                 when (tab) {
-                                                    DzdNavTab.HOME -> {
+                                                    TheStudentNavTab.HOME -> {
                                                         HomeScreen(
                                                             userProfile = userProfile,
                                                             popularCourses = viewModel.allCourses,
@@ -288,12 +343,12 @@ class MainActivity : ComponentActivity() {
                                                             onNavigateTab = { viewModel.setTab(it) }
                                                         )
                                                     }
-                                                    DzdNavTab.CHAT -> {
+                                                    TheStudentNavTab.CHAT -> {
                                                          ChatScreen(
                                                              viewModel = viewModel
                                                          )
                                                      }
-                                                     DzdNavTab.PAPERS -> {
+                                                     TheStudentNavTab.PAPERS -> {
                                                         val dynamicPapers by viewModel.dynamicPapers.collectAsStateWithLifecycle()
                                                         val isLiveDb by viewModel.isLiveDatabaseConnected.collectAsStateWithLifecycle()
                                                         val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
@@ -316,7 +371,7 @@ class MainActivity : ComponentActivity() {
                                                             onUpdateServerUrl = { viewModel.updateBackendUrl(it) }
                                                         )
                                                     }
-                                                    DzdNavTab.AI_TUTOR -> {
+                                                    TheStudentNavTab.AI_TUTOR -> {
                                                         AiTutorScreen(
                                                             voiceState = uiState.voiceAssistantState,
                                                             micRmsDb = uiState.micRmsDb,
@@ -347,7 +402,7 @@ class MainActivity : ComponentActivity() {
                                                             onShowSnackbar = { viewModel.showSnackbar(it) }
                                                         )
                                                     }
-                                                    DzdNavTab.PROFILE -> {
+                                                    TheStudentNavTab.PROFILE -> {
                                                         ProfileScreen(
                                                             userProfile = userProfile,
                                                             savedPapers = savedPapers,
@@ -413,6 +468,8 @@ class MainActivity : ComponentActivity() {
                         }
                     }
                 }
+                    } // end else (not shimmerActive)
+                } // end outer AnimatedContent (nav shimmer)
             }
         }
     }

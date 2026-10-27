@@ -22,16 +22,19 @@ import java.util.concurrent.TimeUnit
 
 class PastPapersRemoteRepository(private val context: Context) {
 
-    private val prefs = context.getSharedPreferences("dzd_backend_prefs", Context.MODE_PRIVATE)
+    private val prefs = context.getSharedPreferences("thestudent_backend_prefs", Context.MODE_PRIVATE)
 
     companion object {
         private const val TAG = "PastPapersRemoteRepo"
         const val KEY_BACKEND_URL = "custom_database_api_url"
-        const val DEFAULT_BACKEND_URL = "https://api.thestudent.lk/"
+        const val DEFAULT_BACKEND_URL = "https://app.quizontal.site/"
     }
 
     var backendBaseUrl: String
-        get() = prefs.getString(KEY_BACKEND_URL, DEFAULT_BACKEND_URL) ?: DEFAULT_BACKEND_URL
+        get() {
+            val stored = prefs.getString(KEY_BACKEND_URL, DEFAULT_BACKEND_URL) ?: DEFAULT_BACKEND_URL
+            return if (stored == "https://api.thestudent.lk/") DEFAULT_BACKEND_URL else stored
+        }
         set(value) {
             var sanitized = value.trim()
             if (sanitized.contains(".php")) {

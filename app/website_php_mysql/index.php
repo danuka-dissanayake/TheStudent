@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Past Papers Portal (Public Facing Web Application)
+ * TheStudent - Past Papers Portal (Public Facing Web Application)
  * Modern, responsive, card-based interface with Grade -> Subject -> Filtered Papers flow.
  */
 require_once __DIR__ . '/config.php';

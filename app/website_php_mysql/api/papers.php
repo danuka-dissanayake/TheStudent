@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Past Papers Dynamic REST API
+ * TheStudent - Past Papers Dynamic REST API
  * Returns dynamic grades, subjects, and papers for web & mobile clients.
  */
 

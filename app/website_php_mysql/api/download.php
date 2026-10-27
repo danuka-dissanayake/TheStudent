@@ -1,6 +1,6 @@
 <?php
 /**
- * DZD Learn - Secure PDF Download & View Handler
+ * TheStudent - Secure PDF Download & View Handler
  * Increments download counters and serves files with proper headers.
  */
 

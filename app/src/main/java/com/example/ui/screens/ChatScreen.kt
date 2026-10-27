@@ -27,7 +27,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.theme.EmeraldDark
 import com.example.ui.theme.PureLightGreenButton
-import com.example.viewmodel.DzdViewModel
+import com.example.viewmodel.TheStudentViewModel
 import com.example.data.model.ChatConversation
 import com.example.data.model.ChatMessageItem
 
@@ -42,7 +42,7 @@ data class OnlineStudent(
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun ChatScreen(
-    viewModel: DzdViewModel,
+    viewModel: TheStudentViewModel,
     modifier: Modifier = Modifier
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
