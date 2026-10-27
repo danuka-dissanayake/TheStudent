@@ -2905,12 +2905,23 @@ private fun ChatBubble(
                         color = if (isMine) Color.White.copy(alpha = 0.82f) else ChatFaint
                     )
                     if (isMine && message.isPending) {
+                        // Waiting for the relay — which is where a message typed
+                        // without a connection sits until it can be delivered.
                         Spacer(Modifier.width(3.dp))
                         Icon(
                             imageVector = Icons.Default.Schedule,
-                            contentDescription = "Sending",
+                            contentDescription = "Waiting to send",
                             tint = Color.White.copy(alpha = 0.82f),
                             modifier = Modifier.size(12.dp)
+                        )
+                    } else if (isMine && message.serverId == 0L) {
+                        // The server refused it outright (never a network drop).
+                        Spacer(Modifier.width(3.dp))
+                        Icon(
+                            imageVector = Icons.Default.ErrorOutline,
+                            contentDescription = "Not sent",
+                            tint = Color(0xFFFCA5A5),
+                            modifier = Modifier.size(13.dp)
                         )
                     } else if (isMine) {
                         Spacer(Modifier.width(3.dp))

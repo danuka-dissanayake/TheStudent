@@ -96,6 +96,19 @@ interface TheStudentDao {
     suspend fun markChatMessageFailed(localId: String)
 
     /**
+     * My messages that are still waiting for the relay, oldest first.
+     *
+     * They keep their clock in the conversation and are re-sent when the
+     * connection comes back, so a message typed offline is never lost and never
+     * shown as an error.
+     */
+    @Query(
+        "SELECT * FROM chat_messages WHERE isMine = 1 AND isPending = 1 " +
+            "ORDER BY sentAtEpoch ASC, serverId ASC"
+    )
+    suspend fun pendingOutgoingMessages(): List<ChatMessageEntity>
+
+    /**
      * Read receipt from [peerId]: they have read MY messages up to
      * [upToServerId]. The ids in a receipt are ids of messages **I** sent, so
      * only `isMine = 1` rows may be touched — filtering on the incoming rows

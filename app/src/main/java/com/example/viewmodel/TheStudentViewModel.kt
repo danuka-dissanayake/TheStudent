@@ -491,6 +491,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatTypingJob: Job? = null
     private var chatBackgroundJob: Job? = null
     private var chatIsDirectoryVisible = false
+    /** Guards the pending-message drain against overlapping runs. */
+    private var pendingRetryInFlight = false
+    /** Last time the drain ran, so an offline phone does not retry every 2 s. */
+    private var lastPendingRetryAt = 0L
     /** True between MainActivity.onStart and onStop. */
     private var appInForeground = false
 
@@ -717,6 +721,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private suspend fun fetchChatInbox() {
         val session = chatSession() ?: return
+        // Anything typed while offline goes out before new mail is collected.
+        retryPendingChatMessages()
         val (baseUrl, token) = session
 
         val inbox = TheStudentChatClient.fetchInbox(
@@ -958,14 +964,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 )
                 val attachmentId = uploaded.dataOrNull()
                 if (attachmentId == null) {
-                    // Keep the draft so "send" can simply be tapped again.
+                    // Keep the draft so "send" can simply be tapped again. Offline
+                    // is not an error the student has to read: the file stays in
+                    // the composer and can be sent with one tap once there is data.
                     _chatState.update {
-                        it.copy(
-                            isSending = false,
-                            isUploadingAttachment = false,
-                            errorMessage = uploaded.failureMessage
-                                ?: "The file could not be sent. Please try again."
-                        )
+                        if (uploaded.isNetworkError) {
+                            it.copy(isSending = false, isUploadingAttachment = false)
+                        } else {
+                            it.copy(
+                                isSending = false,
+                                isUploadingAttachment = false,
+                                errorMessage = uploaded.failureMessage
+                                    ?: "The file could not be sent. Please try again."
+                            )
+                        }
                     }
                     return@launch
                 }
@@ -1025,14 +1037,93 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             if (serverId != null) {
                 chatDao.markChatMessageSent(localId, serverId, sentAt)
                 _chatState.update { it.copy(isSending = false, pendingReply = null) }
+            } else if (result.isNetworkError) {
+                // No connection: this is not an error the student has to act on.
+                // The bubble stays in the conversation marked pending (clock
+                // icon) and is re-sent automatically once the network is back —
+                // and on the next app start, because the row is in the database.
+                _chatState.update { it.copy(isSending = false, pendingReply = null) }
             } else {
-                // Keep the bubble (marked pending) so nothing the student typed
-                // is ever lost, and show why it did not go out.
+                // The server actually refused it (peer unavailable, throttled,
+                // message too long…): that is worth saying out loud.
                 chatDao.markChatMessageFailed(localId)
                 _chatState.update {
                     it.copy(isSending = false, errorMessage = result.failureMessage)
                 }
             }
+        }
+    }
+
+    /**
+     * Re-send messages that are still marked pending.
+     *
+     * Pending means "written here, not accepted by the relay yet" — normally
+     * because the phone was offline. Nothing is deleted or flagged: the bubble
+     * keeps its clock until the relay takes it, then it becomes a normal ✓.
+     *
+     * Runs on every inbox poll, so reconnecting (or reopening the app) drains the
+     * queue without the student doing anything. Stops at the first network
+     * failure, since the rest would fail the same way, and a short throttle keeps
+     * an offline phone from hammering connect timeouts every couple of seconds.
+     */
+    private suspend fun retryPendingChatMessages() {
+        if (pendingRetryInFlight) return
+        val now = System.currentTimeMillis()
+        if (now - lastPendingRetryAt < CHAT_PENDING_RETRY_MS) return
+        lastPendingRetryAt = now
+
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        val pending = runCatching { chatDao.pendingOutgoingMessages() }.getOrNull() ?: return
+        if (pending.isEmpty()) return
+
+        pendingRetryInFlight = true
+        try {
+            for (row in pending) {
+                val peer = chatPeers.firstOrNull { it.id == row.peerId } ?: continue
+                val attachment = row.attachmentId?.let { id ->
+                    ChatAttachment(
+                        id = id,
+                        name = row.attachmentName ?: "attachment",
+                        mime = row.attachmentMime ?: "application/octet-stream",
+                        size = row.attachmentSize,
+                        kind = row.attachmentKind ?: ChatAttachment.FILE,
+                        durationMs = row.attachmentDurationMs
+                    )
+                }
+                val reply = row.replyToPreview?.takeIf { it.isNotBlank() }?.let { preview ->
+                    ChatReply(
+                        serverId = row.replyToServerId,
+                        isMine = row.replyToIsMine,
+                        preview = preview
+                    )
+                }
+
+                val result = TheStudentChatClient.sendMessage(
+                    context = appContext,
+                    accountKey = chatAccountKey,
+                    backendBaseUrl = baseUrl,
+                    token = token,
+                    peer = peer,
+                    plaintext = ChatEnvelope.encode(row.body, attachment, reply)
+                )
+                val serverId = result.dataOrNull()
+                if (serverId != null) {
+                    // Keep the original timestamp so the bubble does not jump.
+                    chatDao.markChatMessageSent(row.localId, serverId, row.sentAtEpoch)
+                    continue
+                }
+                if (result.isNetworkError) return // still offline
+
+                // The server refused it: stop showing a clock that will never
+                // clear, and say why — but only in the conversation it belongs to.
+                chatDao.markChatMessageFailed(row.localId)
+                if (_chatState.value.activePeer?.id == row.peerId) {
+                    _chatState.update { it.copy(errorMessage = result.failureMessage) }
+                }
+            }
+        } finally {
+            pendingRetryInFlight = false
         }
     }
 
@@ -1532,6 +1623,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         /** Same loop while the app is on screen: notifications feel instant. */
         const val CHAT_FOREGROUND_POLL_MS = 3_000L
         const val CHAT_TYPING_THROTTLE_MS = 3_000L
+        /** How often queued (offline) messages are offered to the relay again. */
+        const val CHAT_PENDING_RETRY_MS = 5_000L
         /** Shortest time the conversation loading animation stays on screen. */
         const val CHAT_LOADER_MIN_MS = 420L
         /** Uploaded bytes per file. Photos are re-encoded well below this. */
