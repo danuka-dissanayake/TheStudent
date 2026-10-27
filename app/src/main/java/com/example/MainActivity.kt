@@ -31,6 +31,7 @@ import androidx.compose.ui.unit.dp
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -561,8 +562,6 @@ class MainActivity : ComponentActivity() {
                 } // end outer AnimatedContent (nav shimmer)
             }
         }
-    }
-    
     // ── notifications & deep links ────────────────────────────────────────────
 
     override fun onStart() {
@@ -614,6 +613,8 @@ class MainActivity : ComponentActivity() {
         const val REQUEST_POST_NOTIFICATIONS = 4_201
     }
 
+    }
+    
     @Composable
     fun Greeting(name: String, modifier: Modifier = Modifier) {
         Text(text = "TheStudent - $name", modifier = modifier)
