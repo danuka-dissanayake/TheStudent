@@ -42,6 +42,17 @@ Splash → Onboarding → Auth ──(success, profile_completed=false)──►
 
 The photo is required if the account has no picture yet (a Google avatar counts).
 
+**Nothing is pre-filled.** Only the full name is seeded (from Google / the e-mail
+address). Phone, curriculum, institution and stream start empty so their
+placeholders are visible and the student makes a real choice — an unset value is
+never rendered as invented text such as "Physical Science" or a literal `null`.
+`UserProfile` defaults are empty strings for the same reason, and
+`TheStudentAuthClient` maps JSON `null` (which `org.json` would otherwise turn
+into the string `"null"`) to `""`.
+
+The empty avatar shows "Upload your profile pic" **inside** the disc, so the call
+to action occupies the space that will hold the photo.
+
 ## 3. API
 
 ```
@@ -180,3 +191,24 @@ client defaults to `true` when the field is absent).
 | `data/local/TheStudentEntities.kt` + `TheStudentDatabase.kt` + repository | cache the new fields (Room v2 migration) |
 | `MainActivity.kt` | route + back-gesture block |
 | `ui/screens/ProfileScreen.kt` | shows the uploaded photo |
+
+## 8. Branding
+
+The header uses the real artwork, `res/drawable-nodpi/thestudent_logo_full.png`
+(generated from the repository-root `TheStudent_logo_2.png`, 1959×541, trimmed and
+resized to 1080 px wide). The logo already contains the wordmark and the
+"Everything a Student Needs" tagline, so the screen draws **no text or icon**
+beside it — just the image at a fixed height with `ContentScale.Fit`.
+`TheStudentLogo` (the old icon + typed text composable) is untouched and still
+used by the other screens.
+
+## 9. Layout rules for this screen
+
+* One column owns the horizontal padding (16 dp) and the vertical rhythm
+  (14 dp via `Arrangement.spacedBy`); cards never add outer margins.
+* No `animateContentSize` on cards and no height-animating `Spacer` between
+  sections — animating a card's height inside a scrollable column makes the next
+  section overlap for a frame, which is what caused the dirty edges.
+* The error ring on the avatar is drawn inside the disc so it can never paint
+  over the camera badge.
+* The last card keeps 20 dp of clearance above the sticky action bar.

@@ -6,13 +6,13 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -23,9 +23,11 @@ import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.imePadding
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
@@ -79,6 +81,7 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.input.KeyboardType
@@ -88,11 +91,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import com.example.R
 import com.example.data.model.ProfileSetupSubmission
 import com.example.data.model.UserProfile
 import com.example.data.remote.AvatarPreparer
 import com.example.ui.components.StudentLoadingSpinner
-import com.example.ui.components.TheStudentLogo
 import com.example.ui.theme.EmeraldContainer
 import com.example.ui.theme.EmeraldDark
 import com.example.ui.theme.EmeraldPrimary
@@ -100,26 +103,32 @@ import com.example.ui.theme.LimeAccent
 import com.example.ui.theme.RedError
 import kotlinx.coroutines.launch
 
+/** Aspect ratio of `res/drawable-nodpi/thestudent_logo_full.png` (1959 × 541). */
+private const val BRAND_LOGO_ASPECT = 3.6211f
+
+/** Spacing used by every card so the column reads as one rhythm. */
+private val SectionGap = 14.dp
+
 /**
  * Mandatory profile-setup screen.
  * ==============================
  *
  * Shown straight after a successful sign-up / sign-in and on every cold start
- * until the server reports `profile_completed: true`. Its whole job is to
- * collect the details an email sign-up or a Google account cannot provide:
+ * until the server reports `profile_completed: true`. It collects what an email
+ * sign-up or a Google account cannot provide: phone number, curriculum,
+ * school/stream, a profile photo, and (for Google-only accounts) a password.
  *
- *   • full name           (pre-filled, still editable)
- *   • phone number        (normalised to +94… by the server)
- *   • curriculum          (O/L, A/L, University, Professional)
- *   • school / institution
- *   • stream, degree or programme
- *   • profile photo       (validated + re-encoded, never trusted as sent)
- *   • password            (Google-only accounts, so email sign-in also works)
- *
- * Everything is validated twice: here for instant feedback, and again on the
- * server, which is the only source of truth. The screen is deliberately the
- * only way forward — there is no skip button — but signing out is always one tap
- * away so nobody is trapped.
+ * Layout notes
+ * ------------
+ * • Every card is `fillMaxWidth()` inside ONE column that owns the horizontal
+ *   padding (16 dp) and the vertical rhythm ([SectionGap]). Cards never add
+ *   their own outer margins, which is what stopped edges from bleeding into the
+ *   neighbouring section.
+ * • No `animateContentSize` on the cards: animating a card's height inside a
+ *   scrollable column makes the next section overlap for a frame.
+ * • Nothing is pre-filled. Values the server does not have are shown as
+ *   placeholders, never as defaults such as "Physical Science" or a literal
+ *   "null" — this screen asks, it does not assume.
  */
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
@@ -136,21 +145,22 @@ fun ProfileSetupScreen(
     val scope = rememberCoroutineScope()
 
     // ── form state ────────────────────────────────────────────────────────────
+    // Only the full name (from Google / the e-mail address) is pre-filled: it is
+    // the one value we genuinely know. Everything else starts empty so the
+    // placeholder is visible and the student makes a real choice.
     var fullName by remember(initialProfile.email) {
-        mutableStateOf(initialProfile.name.takeUnless { it == "Student" || it == "Student </>" }.orEmpty())
+        // "Student" is the server's placeholder for an account without a name
+        // (rare, Google always sends one) - treat it as "no value".
+        mutableStateOf(
+            initialProfile.name.cleanValue()
+                .takeUnless { it.equals("Student", ignoreCase = true) }
+                .orEmpty()
+        )
     }
-    // Stored as E.164 (+94…). Shown as-is: the field accepts a local
-    // 07X XXX XXXX number or the full +94 form, and the server normalises it.
-    //
-    // Every field is keyed on the account e-mail so a cached profile that
-    // arrives a moment later (Room emits asynchronously) fills the form once,
-    // without ever overwriting what the student has typed since.
-    var phone by remember(initialProfile.email) { mutableStateOf(initialProfile.phone) }
-    var targetExam by remember(initialProfile.email) {
-        mutableStateOf(initialProfile.targetExam.ifBlank { "G.C.E. A/L" })
-    }
-    var institution by remember(initialProfile.email) { mutableStateOf(initialProfile.institution) }
-    var streamOrDegree by remember(initialProfile.email) { mutableStateOf(initialProfile.streamOrDegree) }
+    var phone by remember(initialProfile.email) { mutableStateOf("") }
+    var targetExam by remember(initialProfile.email) { mutableStateOf("") }
+    var institution by remember(initialProfile.email) { mutableStateOf("") }
+    var streamOrDegree by remember(initialProfile.email) { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -162,7 +172,7 @@ fun ProfileSetupScreen(
     var submitted by remember { mutableStateOf(false) }
 
     val needsPassword = !initialProfile.hasPassword
-    val existingAvatarUrl = initialProfile.avatarUrl
+    val existingAvatarUrl = initialProfile.avatarUrl.cleanValue()
 
     // ── photo picker (system Photo Picker; no storage permission needed) ─────
     val pickImage = rememberLauncherForActivityResult(
@@ -210,6 +220,8 @@ fun ProfileSetupScreen(
         else -> "Enter a valid number, e.g. 071 234 5678."
     }
 
+    val examError = if (targetExam.isBlank()) "Please choose your curriculum." else null
+
     val institutionError = when {
         institution.isBlank() -> "Please enter your school or institution."
         institution.trim().length < 2 -> "That looks too short."
@@ -239,11 +251,10 @@ fun ProfileSetupScreen(
         else -> null
     }
 
-    val photoErrorShown = photoError ?: if (avatarBytes == null && existingAvatarUrl.isBlank()) {
-        "Add a profile photo to continue."
-    } else null
+    val hasPhoto = avatarBytes != null || existingAvatarUrl.isNotBlank()
+    val photoErrorShown = photoError ?: if (!hasPhoto) "Add a profile photo to continue." else null
 
-    val isFormValid = nameError == null && phoneError == null &&
+    val isFormValid = nameError == null && phoneError == null && examError == null &&
         institutionError == null && streamError == null &&
         passwordError == null && confirmError == null &&
         photoErrorShown == null
@@ -252,9 +263,10 @@ fun ProfileSetupScreen(
     val checks = listOf(
         nameError == null,
         phoneError == null,
+        examError == null,
         institutionError == null,
         streamError == null,
-        avatarBytes != null || existingAvatarUrl.isNotBlank(),
+        hasPhoto,
         !needsPassword || passwordError == null
     )
     val completed = checks.count { it }
@@ -289,16 +301,16 @@ fun ProfileSetupScreen(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.background)
     ) {
-        // Ambient emerald glow (subtle, keeps the screen from feeling flat).
+        // Ambient emerald glow behind the header.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(260.dp)
+                .height(240.dp)
                 .background(
                     Brush.verticalGradient(
                         listOf(
-                            EmeraldPrimary.copy(alpha = 0.16f),
-                            EmeraldPrimary.copy(alpha = 0.04f),
+                            EmeraldPrimary.copy(alpha = 0.14f),
+                            EmeraldPrimary.copy(alpha = 0.03f),
                             Color.Transparent
                         )
                     )
@@ -307,37 +319,50 @@ fun ProfileSetupScreen(
 
         Column(modifier = Modifier.fillMaxSize()) {
 
-            // ── top bar ──────────────────────────────────────────────────────
+            // ── brand bar: the real logo artwork, no text drawn by the app ────
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .statusBarsPadding()
-                    .padding(horizontal = 18.dp, vertical = 10.dp),
+                    .padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                TheStudentLogo(size = 32.dp)
+                Image(
+                    painter = painterResource(id = R.drawable.thestudent_logo_full),
+                    contentDescription = "TheStudent — Everything a Student Needs",
+                    contentScale = ContentScale.Fit,
+                    modifier = Modifier
+                        .height(38.dp)
+                        .aspectRatio(BRAND_LOGO_ASPECT)
+                        .testTag("profile_brand_logo")
+                )
                 Spacer(Modifier.weight(1f))
                 if (onSignOut != null) {
                     TextButton(onClick = onSignOut, enabled = !isSaving) {
                         Text(
                             "Sign out",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            fontWeight = FontWeight.Medium
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 13.sp
                         )
                     }
                 }
             }
 
+            // ── scrollable form ──────────────────────────────────────────────
             Column(
                 modifier = Modifier
                     .weight(1f)
                     .verticalScroll(rememberScrollState())
-                    .padding(horizontal = 18.dp)
-                    .imePadding()
+                    .padding(horizontal = 16.dp)
+                    .imePadding(),
+                verticalArrangement = Arrangement.spacedBy(SectionGap)
             ) {
-                // ── avatar + headline ────────────────────────────────────────
+                // avatar + heading
                 Column(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
                     AvatarPicker(
@@ -352,7 +377,7 @@ fun ProfileSetupScreen(
                         }
                     )
 
-                    Spacer(Modifier.height(18.dp))
+                    Spacer(Modifier.height(16.dp))
                     Text(
                         text = "Finish setting up",
                         style = MaterialTheme.typography.headlineSmall,
@@ -362,38 +387,47 @@ fun ProfileSetupScreen(
                     )
                     Spacer(Modifier.height(6.dp))
                     Text(
-                        text = "Just a few details so we can personalise your papers, " +
+                        text = "A few details so we can personalise your papers, " +
                             "progress and study plan.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,
-                        modifier = Modifier.padding(horizontal = 14.dp)
+                        modifier = Modifier.padding(horizontal = 12.dp)
                     )
-                    Spacer(Modifier.height(14.dp))
 
-                    // progress pill
+                    if (submitted && photoErrorShown != null) {
+                        Spacer(Modifier.height(8.dp))
+                        Text(
+                            text = photoErrorShown,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = RedError,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+
+                    Spacer(Modifier.height(12.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
-                            .background(EmeraldContainer.copy(alpha = if (completed == checks.size) 0.9f else 0.45f))
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
+                            .background(
+                                if (completed == checks.size) EmeraldContainer
+                                else EmeraldPrimary.copy(alpha = 0.10f)
+                            )
+                            .padding(horizontal = 13.dp, vertical = 6.dp)
                     ) {
                         if (completed == checks.size) {
                             Icon(
                                 Icons.Filled.CheckCircle,
                                 contentDescription = null,
                                 tint = EmeraldDark,
-                                modifier = Modifier.size(16.dp)
+                                modifier = Modifier.size(15.dp)
                             )
                         }
                         Text(
-                            text = if (completed == checks.size) {
-                                "Everything looks good"
-                            } else {
-                                "$completed of ${checks.size} details added"
-                            },
+                            text = if (completed == checks.size) "Everything looks good"
+                            else "$completed of ${checks.size} details added",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
                             color = EmeraldDark
@@ -401,9 +435,7 @@ fun ProfileSetupScreen(
                     }
                 }
 
-                Spacer(Modifier.height(20.dp))
-
-                // ── server error banner ──────────────────────────────────────
+                // server error banner
                 AnimatedVisibility(
                     visible = errorMessage != null,
                     enter = fadeIn() + expandVertically(),
@@ -411,14 +443,11 @@ fun ProfileSetupScreen(
                 ) {
                     ErrorBanner(text = errorMessage.orEmpty())
                 }
-                AnimatedVisibility(visible = errorMessage != null) {
-                    Spacer(Modifier.height(12.dp))
-                }
 
                 // ── personal details ─────────────────────────────────────────
                 ProfileSectionCard(
                     title = "Personal details",
-                    subtitle = "Shown on your certificates and progress reports",
+                    subtitle = "Shown on your progress reports",
                     icon = Icons.Filled.Badge
                 ) {
                     ProfileField(
@@ -444,8 +473,6 @@ fun ProfileSetupScreen(
                     )
                 }
 
-                Spacer(Modifier.height(14.dp))
-
                 // ── study details ────────────────────────────────────────────
                 ProfileSectionCard(
                     title = "Where you study",
@@ -463,12 +490,17 @@ fun ProfileSetupScreen(
                         selected = targetExam,
                         onSelect = { exam ->
                             targetExam = exam
-                            // Reset the stream when it does not belong to the new curriculum.
-                            if (streamOrDegree !in streamsFor(exam) && streamOrDegree.isNotBlank()) {
+                            // Clear a stream that does not belong to the new
+                            // curriculum instead of silently keeping it.
+                            if (streamOrDegree.isNotBlank() && streamOrDegree !in streamsFor(exam)) {
                                 streamOrDegree = ""
                             }
                         }
                     )
+                    if (submitted && examError != null) {
+                        Spacer(Modifier.height(6.dp))
+                        Text(examError, style = MaterialTheme.typography.bodySmall, color = RedError)
+                    }
 
                     Spacer(Modifier.height(16.dp))
                     ProfileField(
@@ -493,27 +525,42 @@ fun ProfileSetupScreen(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Spacer(Modifier.height(8.dp))
-                    FlowRow(
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        streamsFor(targetExam).forEach { option ->
-                            FilterChip(
-                                selected = streamOrDegree == option,
-                                onClick = { streamOrDegree = option },
-                                label = { Text(option, fontSize = 12.5.sp) },
-                                shape = RoundedCornerShape(50),
-                                colors = FilterChipDefaults.filterChipColors(
-                                    selectedContainerColor = EmeraldPrimary,
-                                    selectedLabelColor = Color.White
-                                ),
-                                border = FilterChipDefaults.filterChipBorder(
-                                    enabled = true,
+                    if (targetExam.isBlank()) {
+                        Text(
+                            text = "Choose a curriculum above to see the options.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    } else {
+                        FlowRow(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            streamsFor(targetExam).forEach { option ->
+                                FilterChip(
                                     selected = streamOrDegree == option,
-                                    borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                                    selectedBorderColor = EmeraldPrimary
+                                    onClick = { streamOrDegree = option },
+                                    label = {
+                                        Text(
+                                            option,
+                                            fontSize = 12.sp,
+                                            maxLines = 1
+                                        )
+                                    },
+                                    shape = RoundedCornerShape(50),
+                                    colors = FilterChipDefaults.filterChipColors(
+                                        selectedContainerColor = EmeraldPrimary,
+                                        selectedLabelColor = Color.White
+                                    ),
+                                    border = FilterChipDefaults.filterChipBorder(
+                                        enabled = true,
+                                        selected = streamOrDegree == option,
+                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
+                                        selectedBorderColor = EmeraldPrimary
+                                    )
                                 )
-                            )
+                            }
                         }
                     }
                     Spacer(Modifier.height(12.dp))
@@ -529,79 +576,47 @@ fun ProfileSetupScreen(
                 }
 
                 // ── password (Google-only accounts) ──────────────────────────
-                AnimatedVisibility(visible = needsPassword) {
-                    Column {
-                        Spacer(Modifier.height(14.dp))
-                        ProfileSectionCard(
-                            title = "Create a password",
-                            subtitle = "You signed in with Google. Add a password so you can also " +
-                                "sign in with your email if you ever lose access.",
-                            icon = Icons.Filled.Lock
-                        ) {
-                            ProfileField(
-                                value = password,
-                                onValueChange = { password = it.take(72) },
-                                label = "Password",
-                                placeholder = "At least 8 characters",
-                                error = if (submitted) passwordError else null,
-                                keyboardType = KeyboardType.Password,
-                                isPassword = true,
-                                passwordVisible = passwordVisible,
-                                onTogglePasswordVisibility = { passwordVisible = !passwordVisible },
-                                testTag = "profile_password"
-                            )
-                            if (password.isNotEmpty()) {
-                                Spacer(Modifier.height(8.dp))
-                                PasswordStrengthBar(password)
-                            }
-                            Spacer(Modifier.height(12.dp))
-                            ProfileField(
-                                value = confirmPassword,
-                                onValueChange = { confirmPassword = it.take(72) },
-                                label = "Confirm password",
-                                placeholder = "Repeat the password",
-                                error = if (submitted) confirmError else null,
-                                keyboardType = KeyboardType.Password,
-                                isPassword = true,
-                                passwordVisible = passwordVisible,
-                                onTogglePasswordVisibility = { passwordVisible = !passwordVisible },
-                                testTag = "profile_confirm_password"
-                            )
-                        }
-                    }
-                }
-
-                Spacer(Modifier.height(14.dp))
-
-                // ── photo hint + privacy note ────────────────────────────────
-                Card(
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 0.dp)
-                ) {
-                    Row(
-                        modifier = Modifier.padding(14.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                if (needsPassword) {
+                    ProfileSectionCard(
+                        title = "Create a password",
+                        subtitle = "You signed in with Google — add a password so you can also " +
+                            "sign in with your email if you ever lose access.",
+                        icon = Icons.Filled.Lock
                     ) {
-                        Icon(
-                            Icons.Filled.CheckCircle,
-                            contentDescription = null,
-                            tint = EmeraldPrimary,
-                            modifier = Modifier.size(18.dp)
+                        ProfileField(
+                            value = password,
+                            onValueChange = { password = it.take(72) },
+                            label = "Password",
+                            placeholder = "At least 8 characters",
+                            error = if (submitted) passwordError else null,
+                            keyboardType = KeyboardType.Password,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onTogglePasswordVisibility = { passwordVisible = !passwordVisible },
+                            testTag = "profile_password"
                         )
-                        Text(
-                            text = "Your photo is checked and resized on your phone before upload, " +
-                                "and only JPG, PNG or WEBP images under 5 MB are accepted. " +
-                                "We never share your phone number.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        if (password.isNotEmpty()) {
+                            Spacer(Modifier.height(8.dp))
+                            PasswordStrengthBar(password)
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        ProfileField(
+                            value = confirmPassword,
+                            onValueChange = { confirmPassword = it.take(72) },
+                            label = "Confirm password",
+                            placeholder = "Repeat the password",
+                            error = if (submitted) confirmError else null,
+                            keyboardType = KeyboardType.Password,
+                            isPassword = true,
+                            passwordVisible = passwordVisible,
+                            onTogglePasswordVisibility = { passwordVisible = !passwordVisible },
+                            testTag = "profile_confirm_password"
                         )
                     }
                 }
 
-                Spacer(Modifier.height(28.dp))
+                // Breathing room so the last card clears the sticky action bar.
+                Spacer(Modifier.height(20.dp))
             }
 
             // ── sticky action bar ────────────────────────────────────────────
@@ -614,9 +629,9 @@ fun ProfileSetupScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .navigationBarsPadding()
-                        .padding(horizontal = 18.dp, vertical = 14.dp)
+                        .padding(horizontal = 16.dp, vertical = 12.dp)
                 ) {
-                    AnimatedVisibility(visible = submitted && !isFormValid && !isSaving) {
+                    if (submitted && !isFormValid && !isSaving) {
                         Text(
                             text = "Please fix the highlighted fields above.",
                             style = MaterialTheme.typography.bodySmall,
@@ -629,7 +644,7 @@ fun ProfileSetupScreen(
                         enabled = !isSaving && !isProcessingPhoto,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .height(54.dp)
+                            .height(52.dp)
                             .testTag("profile_finish_button"),
                         shape = RoundedCornerShape(16.dp),
                         colors = ButtonDefaults.buttonColors(
@@ -649,29 +664,19 @@ fun ProfileSetupScreen(
                         } else if (isProcessingPhoto) {
                             Text("Preparing photo…", fontWeight = FontWeight.SemiBold)
                         } else {
-                            Text(
-                                "Finish setup",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 16.sp
-                            )
+                            Text("Finish setup", fontWeight = FontWeight.Bold, fontSize = 16.sp)
                         }
                     }
-                    Spacer(Modifier.height(8.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        LinearProgressIndicator(
-                            progress = { progress },
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(5.dp)
-                                .clip(CircleShape),
-                            color = EmeraldPrimary,
-                            trackColor = EmeraldPrimary.copy(alpha = 0.15f)
-                        )
-                    }
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(
+                        progress = { progress },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(5.dp)
+                            .clip(CircleShape),
+                        color = EmeraldPrimary,
+                        trackColor = EmeraldPrimary.copy(alpha = 0.15f)
+                    )
                 }
             }
         }
@@ -682,12 +687,20 @@ fun ProfileSetupScreen(
 // Pieces
 // ---------------------------------------------------------------------------
 
+/**
+ * `null`, "null" and blank all mean "the server has no value". Showing them is
+ * how a field ended up printing the word "null" — never let that reach the UI.
+ */
+private fun String?.cleanValue(): String {
+    val value = this?.trim().orEmpty()
+    return if (value.isEmpty() || value.equals("null", ignoreCase = true)) "" else value
+}
+
 private fun streamsFor(exam: String): List<String> = when (exam) {
     "G.C.E. O/L" -> listOf("Grade 10", "Grade 11", "Commerce", "Arts", "Science")
-    "Primary" -> listOf("Grade 1-5", "Grade 6-9")
     "University" -> listOf(
         "Engineering", "IT / Computing", "Medicine", "Science",
-        "Business / Management", "Arts", "Law", "Other"
+        "Business", "Arts", "Law", "Other"
     )
     "Professional" -> listOf("BIT", "BCS", "CIMA", "ACCA", "Other")
     else -> listOf(
@@ -714,10 +727,11 @@ private fun AvatarPicker(
     val ringBrush = remember {
         Brush.linearGradient(listOf(EmeraldPrimary, LimeAccent, EmeraldDark))
     }
+
     Box(contentAlignment = Alignment.BottomEnd) {
         Box(
             modifier = Modifier
-                .size(132.dp)
+                .size(136.dp)
                 .clip(CircleShape)
                 .background(ringBrush)
                 .clickable(enabled = !isProcessing, onClick = onClick)
@@ -726,20 +740,25 @@ private fun AvatarPicker(
         ) {
             Box(
                 modifier = Modifier
-                    .size(120.dp)
+                    .size(126.dp)
                     .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.surface),
+                    .background(MaterialTheme.colorScheme.surface)
+                    .then(
+                        // Error ring drawn *inside* the disc so it can never
+                        // repaint over the camera badge.
+                        if (hasError) Modifier.border(2.dp, RedError, CircleShape) else Modifier
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 when {
-                    isProcessing -> StudentLoadingSpinner(size = 34.dp)
+                    isProcessing -> StudentLoadingSpinner(size = 32.dp)
 
                     previewUri != null -> AsyncImage(
                         model = previewUri,
                         contentDescription = "Selected profile photo",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(112.dp)
+                            .size(118.dp)
                             .clip(CircleShape)
                     )
 
@@ -748,52 +767,48 @@ private fun AvatarPicker(
                         contentDescription = "Current profile photo",
                         contentScale = ContentScale.Crop,
                         modifier = Modifier
-                            .size(112.dp)
+                            .size(118.dp)
                             .clip(CircleShape)
                     )
 
-                    else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    // Empty state: the call to action lives *inside* the disc.
+                    else -> Column(
+                        modifier = Modifier.padding(horizontal = 16.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.Center
+                    ) {
                         Icon(
                             Icons.Filled.PhotoCamera,
                             contentDescription = null,
                             tint = EmeraldPrimary,
-                            modifier = Modifier.size(30.dp)
+                            modifier = Modifier.size(28.dp)
                         )
                         Spacer(Modifier.height(6.dp))
                         Text(
-                            "Add photo",
+                            text = "Upload your\nprofile pic",
                             style = MaterialTheme.typography.labelMedium,
                             fontWeight = FontWeight.SemiBold,
-                            color = EmeraldPrimary
+                            color = EmeraldPrimary,
+                            textAlign = TextAlign.Center,
+                            lineHeight = 15.sp
                         )
                     }
                 }
             }
-
-            if (hasError) {
-                // Thin red ring communicates the error without hiding the avatar.
-                Box(
-                    modifier = Modifier
-                        .size(132.dp)
-                        .clip(CircleShape)
-                        .border(3.dp, RedError, CircleShape)
-                )
-            }
         }
 
-        // camera badge
         Surface(
             shape = CircleShape,
             color = EmeraldPrimary,
             shadowElevation = 6.dp,
-            modifier = Modifier.size(38.dp)
+            modifier = Modifier.size(36.dp)
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Icon(
                     Icons.Filled.PhotoCamera,
                     contentDescription = "Change photo",
                     tint = Color.White,
-                    modifier = Modifier.size(20.dp)
+                    modifier = Modifier.size(19.dp)
                 )
             }
         }
@@ -834,28 +849,26 @@ private fun ProfileSectionCard(
     content: @Composable () -> Unit
 ) {
     Card(
-        shape = RoundedCornerShape(22.dp),
+        modifier = Modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
-        modifier = Modifier
-            .fillMaxWidth()
-            .animateContentSize()
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
     ) {
-        Column(modifier = Modifier.padding(18.dp)) {
+        Column(modifier = Modifier.padding(16.dp)) {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Box(
                     modifier = Modifier
-                        .size(36.dp)
-                        .clip(RoundedCornerShape(11.dp))
+                        .size(34.dp)
+                        .clip(RoundedCornerShape(10.dp))
                         .background(EmeraldPrimary.copy(alpha = 0.12f)),
                     contentAlignment = Alignment.Center
                 ) {
-                    Icon(icon, contentDescription = null, tint = EmeraldDark, modifier = Modifier.size(19.dp))
+                    Icon(icon, contentDescription = null, tint = EmeraldDark, modifier = Modifier.size(18.dp))
                 }
-                Column {
+                Column(modifier = Modifier.weight(1f)) {
                     Text(
                         text = title,
                         style = MaterialTheme.typography.titleSmall,
@@ -871,7 +884,7 @@ private fun ProfileSectionCard(
                     }
                 }
             }
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(14.dp))
             content()
         }
     }
@@ -887,20 +900,16 @@ private fun ProfileField(
     error: String?,
     keyboardType: KeyboardType,
     testTag: String,
-    leadingText: String? = null,
     isPassword: Boolean = false,
     passwordVisible: Boolean = false,
     onTogglePasswordVisibility: (() -> Unit)? = null
 ) {
-    val showError = error != null
-
-    val leadingLabel = leadingText
-    val leadingContent: (@Composable () -> Unit)? = if (leadingLabel != null) {
-        @Composable { Text(leadingLabel, fontWeight = FontWeight.SemiBold, color = EmeraldDark) }
+    val errorText = error
+    val supportingContent: (@Composable () -> Unit)? = if (errorText != null) {
+        @Composable { Text(errorText, color = RedError) }
     } else {
         null
     }
-
     val trailingContent: (@Composable () -> Unit)? = if (isPassword && onTogglePasswordVisibility != null) {
         @Composable {
             Icon(
@@ -916,13 +925,6 @@ private fun ProfileField(
         null
     }
 
-    val errorText = error
-    val supportingContent: (@Composable () -> Unit)? = if (showError && errorText != null) {
-        @Composable { Text(errorText, color = RedError) }
-    } else {
-        null
-    }
-
     OutlinedTextField(
         value = value,
         onValueChange = onValueChange,
@@ -930,9 +932,14 @@ private fun ProfileField(
             .fillMaxWidth()
             .testTag(testTag),
         label = { Text(label) },
-        placeholder = { Text(placeholder, color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f)) },
+        placeholder = {
+            Text(
+                placeholder,
+                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f)
+            )
+        },
         singleLine = true,
-        isError = showError,
+        isError = errorText != null,
         shape = RoundedCornerShape(14.dp),
         keyboardOptions = KeyboardOptions(
             keyboardType = keyboardType,
@@ -943,7 +950,6 @@ private fun ProfileField(
         } else {
             VisualTransformation.None
         },
-        leadingIcon = leadingContent,
         trailingIcon = trailingContent,
         supportingText = supportingContent,
         colors = OutlinedTextFieldDefaults.colors(
@@ -957,15 +963,18 @@ private fun ProfileField(
 
 @Composable
 private fun ExamSelector(selected: String, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
         examOptions.chunked(2).forEach { rowItems ->
-            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
                 rowItems.forEach { (exam, hint, icon) ->
                     val isSelected = selected == exam
                     Column(
                         modifier = Modifier
                             .weight(1f)
-                            .clip(RoundedCornerShape(16.dp))
+                            .clip(RoundedCornerShape(14.dp))
                             .background(
                                 if (isSelected) EmeraldPrimary.copy(alpha = 0.10f)
                                 else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
@@ -974,34 +983,36 @@ private fun ExamSelector(selected: String, onSelect: (String) -> Unit) {
                                 width = if (isSelected) 1.5.dp else 1.dp,
                                 color = if (isSelected) EmeraldPrimary
                                 else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                                shape = RoundedCornerShape(16.dp)
+                                shape = RoundedCornerShape(14.dp)
                             )
                             .clickable { onSelect(exam) }
-                            .padding(horizontal = 12.dp, vertical = 12.dp)
+                            .padding(horizontal = 10.dp, vertical = 10.dp)
                     ) {
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(5.dp)
                         ) {
                             Icon(
                                 imageVector = if (isSelected) Icons.Filled.Check else icon,
                                 contentDescription = null,
-                                tint = if (isSelected) EmeraldDark else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(16.dp)
+                                tint = if (isSelected) EmeraldDark
+                                else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
                             )
                             Text(
                                 text = exam,
-                                style = MaterialTheme.typography.labelLarge,
+                                style = MaterialTheme.typography.labelMedium,
                                 fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (isSelected) EmeraldDark else MaterialTheme.colorScheme.onSurface,
                                 maxLines = 1
                             )
                         }
-                        Spacer(Modifier.height(2.dp))
+                        Spacer(Modifier.height(1.dp))
                         Text(
                             text = hint,
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1
                         )
                     }
                 }
@@ -1028,6 +1039,9 @@ private fun PasswordStrengthBar(password: String) {
     }
 
     Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -1038,7 +1052,8 @@ private fun PasswordStrengthBar(password: String) {
                     .height(5.dp)
                     .clip(CircleShape)
                     .background(
-                        if (index < score) color else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                        if (index < score) color
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
                     )
             )
         }

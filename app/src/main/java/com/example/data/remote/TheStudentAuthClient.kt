@@ -550,23 +550,38 @@ object TheStudentAuthClient {
         return header?.toIntOrNull()?.takeIf { it > 0 }
     }
 
+    /**
+     * Read a string, mapping "missing", JSON null and the literal "null" to "".
+     */
+    private fun JSONObject.textOrEmpty(key: String): String {
+        if (!has(key) || isNull(key)) return ""
+        val value = optString(key, "").trim()
+        return if (value.isEmpty() || value.equals("null", ignoreCase = true)) "" else value
+    }
+
     private fun parseUserProfile(userObj: JSONObject?): UserProfile {
         if (userObj == null) {
             return UserProfile(isLoggedIn = true)
         }
+        // IMPORTANT: org.json's optString() renders a JSON null as the literal
+        // string "null", which is how the phone field once displayed "null".
+        // `textOrEmpty()` treats absent / null / "null" as an empty string so the
+        // UI can show a placeholder instead.
+        val displayName = userObj.textOrEmpty("name")
+            .ifBlank { userObj.textOrEmpty("full_name") }
+            .ifBlank { "Student" }
+
         return UserProfile(
-            name = userObj.optString("name", userObj.optString("full_name", "Student")),
-            email = userObj.optString("email", ""),
+            name = displayName,
+            email = userObj.textOrEmpty("email"),
             academicLevel = "G.C.E. Advanced Level",
-            streamOrDegree = userObj.optString("stream_or_degree", ""),
-            institution = userObj.optString("institution", ""),
-            targetExam = userObj.optString("target_exam", "G.C.E. A/L"),
+            streamOrDegree = userObj.textOrEmpty("stream_or_degree"),
+            institution = userObj.textOrEmpty("institution"),
+            targetExam = userObj.textOrEmpty("target_exam"),
             isLoggedIn = true,
-            phone = userObj.optString("phone", ""),
-            avatarUrl = userObj.optString(
-                "avatar_url",
-                userObj.optString("profile_picture", "")
-            ),
+            phone = userObj.textOrEmpty("phone"),
+            avatarUrl = userObj.textOrEmpty("avatar_url")
+                .ifBlank { userObj.textOrEmpty("profile_picture") },
             // Absent on older server builds -> treat as complete so a rolling
             // deploy can never trap a signed-in student on the setup screen.
             profileCompleted = if (userObj.has("profile_completed")) {

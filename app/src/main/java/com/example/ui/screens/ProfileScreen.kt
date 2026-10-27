@@ -126,7 +126,7 @@ fun ProfileScreen(
                                     modifier = Modifier.padding(top = 4.dp)
                                 ) {
                                     Text(
-                                        text = userProfile.institution,
+                                        text = userProfile.institution.ifBlank { "Add your school" },
                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                         style = MaterialTheme.typography.labelSmall,
                                         fontWeight = FontWeight.Bold,
@@ -152,13 +152,17 @@ fun ProfileScreen(
                         ) {
                             Column(modifier = Modifier.padding(12.dp)) {
                                 Text(
-                                    text = "Target Exam: ${userProfile.targetExam}",
+                                    text = if (userProfile.targetExam.isBlank()) {
+                                        "Curriculum not set"
+                                    } else {
+                                        "Target Exam: ${userProfile.targetExam}"
+                                    },
                                     style = MaterialTheme.typography.labelMedium,
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldPrimary
                                 )
                                 Text(
-                                    text = userProfile.streamOrDegree,
+                                    text = userProfile.streamOrDegree.ifBlank { "Stream not set" },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )

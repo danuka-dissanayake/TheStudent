@@ -136,9 +136,11 @@ data class UserProfile(
     val name: String = "",
     val email: String = "",
     val academicLevel: String = "G.C.E. Advanced Level",
-    val streamOrDegree: String = "Physical Science",
-    val institution: String = "Sri Lanka Education System",
-    val targetExam: String = "G.C.E. A/L",
+    // Empty by default: an unset value must render as a placeholder, never as
+    // invented text like "Physical Science" / "Sri Lanka Education System".
+    val streamOrDegree: String = "",
+    val institution: String = "",
+    val targetExam: String = "",
     val streakDays: Int = 0,
     val studyHoursThisWeek: Float = 0f,
     val totalPapersSolved: Int = 0,
