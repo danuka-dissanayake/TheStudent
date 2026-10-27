@@ -79,12 +79,18 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
                     .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
-                    // Last resort only: if a device reports a version this build
-                    // has no migration path for (an interrupted update, a build
-                    // from another branch), recreate the file instead of throwing
-                    // at launch. That loses the local cache and the local chat
-                    // history, which is still better than an app that cannot start.
-                    .fallbackToDestructiveMigrationFrom(1, 2)
+                    // Last resort only: if the file on the device cannot be
+                    // migrated for any reason (interrupted update, a build from
+                    // another branch), recreate it instead of throwing during the
+                    // ViewModel constructor. That loses the local cache and the
+                    // local chat history, which is still better than an app that
+                    // cannot start at all.
+                    //
+                    // Note: this must be the version-less overload. Passing start
+                    // versions here (e.g. fallbackToDestructiveMigrationFrom(1, 2))
+                    // throws IllegalArgumentException as soon as a migration for
+                    // one of those start versions is also registered above.
+                    .fallbackToDestructiveMigration()
                     .build()
                 INSTANCE = instance
                 instance
