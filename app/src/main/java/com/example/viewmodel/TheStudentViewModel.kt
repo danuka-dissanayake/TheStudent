@@ -22,6 +22,7 @@ import com.example.data.remote.TheStudentAiStudyResponse
 import com.example.data.remote.TheStudentOcrEngine
 import com.example.data.remote.TheStudentStudyAiClient
 import com.example.data.remote.TheStudentAuthClient
+import com.example.data.remote.AuthApiResult
 import com.example.data.remote.SessionValidation
 import com.example.data.remote.EnglishVoiceTutorEngine
 import com.example.data.remote.HfApiResponse
