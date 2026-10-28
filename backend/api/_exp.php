@@ -13,11 +13,13 @@
  *      earned it ("help:41:helper", "rating:17:ratee"), so a double tap, a
  *      retried request or two devices racing cannot pay twice. `INSERT IGNORE`
  *      makes the DB — not the app — the judge.
- *   2. **A daily ceiling.** `TS_EXP_DAILY_CAP` is checked against today's rows
- *      before every insert, so a bad day of farming cannot run away with the
- *      leaderboard. When a single award would cross the cap it is trimmed to what
- *      is left, and a trimmed award is still recorded (as the real, smaller
- *      number) so the ledger never lies about what was paid.
+ *   2. **A daily ceiling.** A cap is checked against today's rows before every
+ *      insert, so a bad day of farming cannot run away with the leaderboard. When
+ *      a single award would cross the cap it is trimmed to what is left, and a
+ *      trimmed award is still recorded (as the real, smaller number) so the
+ *      ledger never lies about what was paid. The ceiling rises with the tier:
+ *      that is the concrete reward for climbing, and it is the only one the app
+ *      is allowed to promise.
  *
  * Missing table, older database, read-only account: every function here returns a
  * neutral value instead of throwing. EXP is a nice-to-have, never a reason for a
@@ -26,7 +28,12 @@
 
 declare(strict_types=1);
 
-/** Most EXP one student can earn in a single day (server-local date). */
+/**
+ * Most EXP a Learner can earn in a single day (server-local date).
+ *
+ * Each tier raises it — see `cap` in `TS_EXP_TIERS`. Kept as a constant so
+ * anything that only knows about "the base cap" still has a sane number.
+ */
 const TS_EXP_DAILY_CAP = 120;
 
 /**
@@ -58,12 +65,29 @@ const TS_EXP_RULES = [
  * Names are things a student would say about a classmate, not RPG ranks.
  */
 const TS_EXP_TIERS = [
-    ['code' => 'learner', 'name' => 'Learner', 'min' => 0],
-    ['code' => 'helper',  'name' => 'Helper',  'min' => 200],
-    ['code' => 'guide',   'name' => 'Guide',   'min' => 600],
-    ['code' => 'mentor',  'name' => 'Mentor',  'min' => 1500],
-    ['code' => 'legend',  'name' => 'Legend',  'min' => 3000],
+    ['code' => 'learner', 'name' => 'Learner', 'min' => 0,    'cap' => 120],
+    ['code' => 'helper',  'name' => 'Helper',  'min' => 200,  'cap' => 160],
+    ['code' => 'guide',   'name' => 'Guide',   'min' => 600,  'cap' => 200],
+    ['code' => 'mentor',  'name' => 'Mentor',  'min' => 1500, 'cap' => 260],
+    ['code' => 'legend',  'name' => 'Legend',  'min' => 3000, 'cap' => 320],
 ];
+
+/**
+ * The daily ceiling for a student whose lifetime total is `$total`.
+ *
+ * Read off the tier table, so climbing a tier is felt the same day: the ceiling
+ * itself goes up.
+ */
+function ts_exp_cap_for_total(int $total): int
+{
+    $cap = TS_EXP_DAILY_CAP;
+    foreach (TS_EXP_TIERS as $tier) {
+        if ($total >= $tier['min']) {
+            $cap = (int) $tier['cap'];
+        }
+    }
+    return $cap;
+}
 
 /** Has the ledger table been created on this database yet? Cached per request. */
 function ts_exp_table_ready(PDO $pdo): bool
@@ -140,7 +164,9 @@ function ts_exp_award(
         return 0;
     }
 
-    $remaining = TS_EXP_DAILY_CAP - ts_exp_today($pdo, $userId);
+    // The ceiling is the *current* tier's, read from the lifetime total.
+    $cap = ts_exp_cap_for_total(ts_exp_total($pdo, $userId));
+    $remaining = $cap - ts_exp_today($pdo, $userId);
     if ($remaining <= 0) {
         return 0;
     }
@@ -184,13 +210,26 @@ function ts_exp_tier(int $total): array
     $span = $next !== null ? max(1, $next['min'] - $current['min']) : 0;
     $into = $total - $current['min'];
 
+    // Levels are the ladder read top-down: Learner is 1, Legend is 5. The app
+    // shows "Level N" so a climb reads like progress rather than jargon.
+    $level = 1;
+    foreach (TS_EXP_TIERS as $index => $tier) {
+        if ($tier['code'] === $current['code']) {
+            $level = $index + 1;
+        }
+    }
+
     return [
         'code'          => $current['code'],
         'name'          => $current['name'],
+        'level'         => $level,
         'min'           => $current['min'],
+        'cap'           => (int) $current['cap'],
         'next_code'     => $next['code'] ?? null,
         'next_name'     => $next['name'] ?? null,
         'next_min'      => $next['min'] ?? null,
+        'next_cap'      => isset($next['cap']) ? (int) $next['cap'] : null,
+        'next_level'    => $next !== null ? $level + 1 : null,
         'to_next'       => $next !== null ? max(0, $next['min'] - $total) : 0,
         'progress'      => $next !== null ? min(1.0, round($into / $span, 4)) : 1.0,
     ];
@@ -232,7 +271,7 @@ function ts_exp_summary(PDO $pdo, int $userId, bool $withRecent = true): array
     return [
         'total'     => $total,
         'today'     => ts_exp_today($pdo, $userId),
-        'daily_cap' => TS_EXP_DAILY_CAP,
+        'daily_cap' => ts_exp_cap_for_total($total),
         'tier'      => ts_exp_tier($total),
         'rules'     => TS_EXP_RULES,
         'recent'    => $withRecent ? ts_exp_recent($pdo, $userId) : [],

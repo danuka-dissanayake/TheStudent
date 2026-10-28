@@ -45,22 +45,29 @@ own id is the ref key.
 
 ## 3. Tiers
 
-| Tier | From |
-| --- | --- |
-| Learner | 0 |
-| Helper | 200 |
-| Guide | 600 |
-| Mentor | 1500 |
-| Legend | 3000 |
+| Level | Tier | From | Daily EXP ceiling |
+| --- | --- | --- | --- |
+| 1 | Learner | 0 | 120 |
+| 2 | Helper | 200 | 160 |
+| 3 | Guide | 600 | 200 |
+| 4 | Mentor | 1500 | 260 |
+| 5 | Legend | 3000 | 320 |
 
-`ts_exp_tier()` returns the current tier plus `next_min`, `to_next` and a 0…1
-`progress` for the bar, so no client has to re-derive thresholds. The app keeps a
+The ceiling is itself the reward: climbing a tier is felt the same day, because
+`ts_exp_cap_for_total()` reads the cap off the tier table before every award. It
+is the only reward the UI promises, so nothing on the EXP screen is aspirational
+copy.
+
+`ts_exp_tier()` returns the current tier plus `level`, `cap`, `next_min`,
+`next_name`, `next_cap`, `next_level`, `to_next` and a 0…1 `progress` for the
+bar, so no client has to re-derive thresholds. The app keeps a
 read-only mirror of the ladder (`ExpTier.forTotal`) purely so the home screen can
 name a tier before the first network call lands — it never awards anything.
 
 ## 4. The daily ceiling
 
-`TS_EXP_DAILY_CAP = 120` per student per server-local day. Before each insert the
+`TS_EXP_DAILY_CAP` is the Learner ceiling (120) per student per server-local day;
+each tier raises it (see the table in §3). Before each insert the
 award is trimmed to what is left of the allowance (and skipped entirely at 0).
 A trimmed award is still written down — as the real, smaller number — so the
 ledger never claims more than was paid.
@@ -87,8 +94,11 @@ an error.
 
 - The XP pill on the home screen shows `exp_total` (cached in `UserProfile.points`)
   and opens **Your EXP**.
-- That screen shows the total, the tier bar with "N EXP to Guide", today's
-  allowance bar with "N EXP still available today", and the newest awards with a
-  relative time — all straight from the ledger, never summed on the phone.
+- The screen is the reward page: a hexagon tier medallion + total on an emerald
+  hero, "Level N" with a progress bar to "Level N+1", today's allowance, a
+  "Next level rewards" card (higher daily ceiling, the next badge, the Legend
+  badge), the five-badge ladder with earned/locked states, and the newest awards
+  with their own coloured tile and relative time. Everything comes straight from
+  the ledger — never summed on the phone.
 - `TheStudentViewModel.refreshExp()` is the only writer of the client total; there
   is no optimistic "+25" anywhere.
