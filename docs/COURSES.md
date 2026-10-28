@@ -275,5 +275,7 @@ mark is for; it is never used as TheStudent's own branding.
 | Filter sheet opened at nearly full height | default handle + uncapped content | fixed header and button, chips scroll inside 356dp, slim handle |
 | YouTube error 152-4 | embed arrived without a `Referer`; the library could not set it either | WebView embed with a `Referer` header and a matching `origin=`, spinner + fallback |
 | Editor's picks snapped back at the end | `(index + 1) % size` animated backwards from the last card | three copies, start in the middle, eased `animateScrollBy`, silent recentre |
-| Video played but painted white | dialog window + clipped WebView + no explicit hardware acceleration | inline overlay, no clip, `hardwareAccelerated=true` and `LAYER_TYPE_HARDWARE` |
+| Video played but painted white | dialog window + clipped WebView | inline overlay, no clip |
+| Video *still* white, with sound and controls | **the web core's video view was never attached** — Chromium hands it back through `WebChromeClient.onShowCustomView`, and if nobody adds it to the hierarchy the page keeps rendering over a blank rectangle | the WebView lives in a `FrameLayout` host that attaches the custom view on `onShowCustomView` and removes it on `onHideCustomView` (also gives fullscreen for free) |
+| — | `android:hardwareAccelerated="true"` on `<application>` kept, so the window can composite video at all | an explicit `WebView.setLayerType(LAYER_TYPE_HARDWARE)` was removed again: on some Samsung builds it decouples the compositing layer and produces a solid black screen |
 | Detail skeleton vanished twice | both player rewrites replaced the *end* of the file, where it lived | moved above the player section, with a note saying why |

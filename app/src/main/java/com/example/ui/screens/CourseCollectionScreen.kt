@@ -1,5 +1,7 @@
 package com.example.ui.screens
 
+import android.view.View
+import android.widget.FrameLayout
 import androidx.activity.compose.BackHandler
 import android.annotation.SuppressLint
 import android.graphics.Color as AndroidColor
@@ -2260,11 +2262,15 @@ private fun YouTubePlayerOverlay(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { ctx ->
-                            WebView(ctx).apply {
+                            // A FrameLayout, not a bare WebView: the web core hands
+                            // the video surface back through
+                            // WebChromeClient.onShowCustomView, and if nobody
+                            // attaches that view the player runs — sound, controls,
+                            // scrubbing — over a white rectangle. This host is where
+                            // it gets attached.
+                            val host = FrameLayout(ctx)
+                            val webView = WebView(ctx).apply {
                                 setBackgroundColor(AndroidColor.BLACK)
-                                // Hardware rendering: software layers cannot
-                                // paint decoded video frames.
-                                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
                                 settings.apply {
                                     javaScriptEnabled = true
                                     domStorageEnabled = true
@@ -2275,7 +2281,7 @@ private fun YouTubePlayerOverlay(
                                     mixedContentMode =
                                         WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
                                 }
-                                webChromeClient = WebChromeClient()
+                                webChromeClient = VideoChromeClient(host)
                                 webViewClient = object : WebViewClient() {
                                     override fun onPageFinished(view: WebView, url: String?) {
                                         loading = false
@@ -2300,11 +2306,24 @@ private fun YouTubePlayerOverlay(
                                     mapOf("Referer" to origin)
                                 )
                             }
+                            host.addView(
+                                webView,
+                                FrameLayout.LayoutParams(
+                                    FrameLayout.LayoutParams.MATCH_PARENT,
+                                    FrameLayout.LayoutParams.MATCH_PARENT
+                                )
+                            )
+                            host
                         },
-                        onRelease = { webView ->
-                            webView.stopLoading()
-                            webView.loadUrl("about:blank")
-                            webView.destroy()
+                        onRelease = { host ->
+                            host.getChildAt(0)?.let { child ->
+                                if (child is WebView) {
+                                    child.stopLoading()
+                                    child.loadUrl("about:blank")
+                                    child.destroy()
+                                }
+                            }
+                            host.removeAllViews()
                         }
                     )
 
@@ -2389,5 +2408,47 @@ private fun YouTubePlayerOverlay(
                 }
             }
         }
+    }
+}
+
+/**
+ * Attaches the view the web core hands back for video output.
+ *
+ * Chromium renders `<video>` into a view of its own and delivers it through
+ * `onShowCustomView`. Every embed sample that "works but shows a white box" is
+ * missing this: the page, the audio and the controls are all rendered by the
+ * WebView, while the picture is a view nobody added to the hierarchy. Adding it
+ * to the same `FrameLayout` as the WebView — and removing it again on
+ * `onHideCustomView` — is the whole fix, and it also gives fullscreen for free.
+ */
+private class VideoChromeClient(
+    private val host: FrameLayout
+) : WebChromeClient() {
+
+    private var customView: View? = null
+    private var callback: CustomViewCallback? = null
+
+    override fun onShowCustomView(view: View, callback: CustomViewCallback) {
+        if (customView != null) {
+            // A second request replaces the first rather than stacking.
+            onHideCustomView()
+        }
+        this.customView = view
+        this.callback = callback
+        view.setBackgroundColor(AndroidColor.BLACK)
+        host.addView(
+            view,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT
+            )
+        )
+    }
+
+    override fun onHideCustomView() {
+        customView?.let { host.removeView(it) }
+        customView = null
+        callback?.onCustomViewHidden()
+        callback = null
     }
 }
