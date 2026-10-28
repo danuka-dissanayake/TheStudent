@@ -101,6 +101,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  // YouTube player (courses collection videos)
+  implementation(libs.android.youtube.player)
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Real-time chat notifications (FCM data messages).

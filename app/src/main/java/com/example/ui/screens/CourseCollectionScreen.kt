@@ -1,10 +1,11 @@
 package com.example.ui.screens
 
-import android.graphics.Color as AndroidColor
-import android.webkit.WebChromeClient
-import android.webkit.WebView
-import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -13,6 +14,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -21,6 +24,7 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -32,19 +36,25 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.OpenInNew
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
+import androidx.compose.material3.ModalBottomSheet
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
@@ -54,6 +64,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
@@ -68,6 +79,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.SubcomposeAsyncImage
 import com.example.data.model.CatalogCertificate
 import com.example.data.model.CatalogCourse
@@ -76,6 +88,9 @@ import com.example.data.model.CatalogVideo
 import com.example.data.model.CourseCatalog
 import com.example.ui.components.paperCoverTint
 import com.example.ui.theme.MaisonNeueFontFamily
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
+import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 import kotlinx.coroutines.delay
 
 private val CcInk = Color(0xFF0F172A)
@@ -93,8 +108,7 @@ private val CcBlueSoft = Color(0xFFEEF2FF)
 /**
  * One type scale for the whole screen, so nothing is left at 9sp because it
  * "fit". The floor is [micro] (11sp) — anything smaller is unreadable on a
- * 5-inch phone in daylight. These are the Material 3 body/label steps, rounded
- * to what this screen actually needs.
+ * 5-inch phone in daylight.
  */
 private object CT {
     val screen: TextUnit = 21.sp
@@ -108,7 +122,6 @@ private object CT {
 
     val bodyHeight: TextUnit = 19.sp
     val metaHeight: TextUnit = 17.sp
-    val microHeight: TextUnit = 15.sp
 }
 
 private val STAGES = listOf("A/L", "Undergraduate", "Postgraduate")
@@ -174,6 +187,7 @@ fun CourseCollectionScreen(
 //  Browse
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun CourseCatalogBrowse(
     onBack: () -> Unit,
@@ -186,12 +200,19 @@ private fun CourseCatalogBrowse(
     var level by remember { mutableStateOf<String?>(null) }
     var subject by remember { mutableStateOf<String?>(null) }
     var provider by remember { mutableStateOf<String?>(null) }
+    var sheetOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
     val featured = remember { CourseCatalog.courses.filter { it.featured } }
-
-    val filtering = query.isNotBlank() || certificate != null || stage != null ||
-        level != null || subject != null || provider != null
+    val activeFilters = listOfNotNull(
+        certificate?.short,
+        stage,
+        level,
+        subject,
+        provider,
+        if (query.isNotBlank()) "“$query”" else null
+    )
+    val filtering = activeFilters.isNotEmpty()
 
     val visible = remember(query, certificate, stage, level, subject, provider) {
         CourseCatalog.courses.filter { course ->
@@ -210,10 +231,34 @@ private fun CourseCatalogBrowse(
         }
     }
 
+    // Shimmer whenever the visible set changes — on arrival and after any filter.
+    // Nothing here is fetched, so this is a deliberate ~half-second of feedback
+    // rather than a spinner for a render that already happened.
+    val filterKey = "$query|$certificate|$stage|$level|$subject|$provider"
+    val facetKey = "$certificate|$stage|$level|$subject|$provider"
+    var isLoading by remember { mutableStateOf(true) }
+    var booted by remember { mutableStateOf(false) }
+
+    // First arrival: let the layout settle behind a shimmer instead of popping in.
+    LaunchedEffect(Unit) {
+        delay(700)
+        booted = true
+        isLoading = false
+    }
+
+    // Facet changes re-shimmer. Typing does not: flashing the list on every
+    // keystroke would be worse than no animation at all.
+    LaunchedEffect(facetKey) {
+        if (booted) {
+            isLoading = true
+            delay(420)
+            isLoading = false
+        }
+    }
+
     // A filter changes what is above the list, so the old scroll offset can land
-    // the student at the bottom of a much shorter page. Reset to the top when
-    // anything changes — that is what makes tapping a provider feel responsive.
-    LaunchedEffect(query, certificate, stage, level, subject, provider) {
+    // the student at the bottom of a much shorter page: go back to the top.
+    LaunchedEffect(filterKey) {
         if (listState.firstVisibleItemIndex > 0) {
             listState.animateScrollToItem(0)
         }
@@ -228,86 +273,14 @@ private fun CourseCatalogBrowse(
         provider = null
     }
 
+    val shimmer = rememberShimmerBrush()
+
     Column(modifier = Modifier.fillMaxSize()) {
-        // ── fixed top bar: title, search and filters never scroll away ───────
+        // ── the only fixed thing: the title bar ──────────────────────────────
         CatalogHeader(
             courseCount = CourseCatalog.courses.size,
             providerCount = CourseCatalog.usedProviders.size,
             onBack = onBack
-        )
-
-        OutlinedTextField(
-            value = query,
-            onValueChange = { query = it },
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 16.dp)
-                .padding(top = 10.dp, bottom = 8.dp)
-                .height(50.dp)
-                .testTag("courses_search"),
-            placeholder = {
-                Text(
-                    text = "Search courses, subjects, providers",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = CT.body,
-                    color = CcFaint
-                )
-            },
-            leadingIcon = {
-                Icon(
-                    Icons.Default.Search,
-                    contentDescription = null,
-                    tint = CcMuted,
-                    modifier = Modifier.size(20.dp)
-                )
-            },
-            trailingIcon = {
-                if (query.isNotEmpty()) {
-                    Icon(
-                        Icons.Default.Close,
-                        contentDescription = "Clear search",
-                        tint = CcMuted,
-                        modifier = Modifier
-                            .size(18.dp)
-                            .clickable { query = "" }
-                    )
-                }
-            },
-            singleLine = true,
-            shape = RoundedCornerShape(26.dp),
-            textStyle = TextStyle(
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = CT.body,
-                color = CcInk
-            ),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = CcGreen,
-                unfocusedBorderColor = CcHairline,
-                focusedContainerColor = Color.White,
-                unfocusedContainerColor = Color.White
-            )
-        )
-
-        FilterBar(
-            certificate = certificate,
-            stage = stage,
-            level = level,
-            subject = subject,
-            provider = provider,
-            filtering = filtering,
-            onCertificate = { certificate = if (certificate == it) null else it },
-            onStage = { stage = if (stage == it) null else it },
-            onLevel = { level = if (level == it) null else it },
-            onSubject = { subject = if (subject == it) null else it },
-            onProvider = { provider = if (provider == it) null else it },
-            onClear = clearAll
-        )
-
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(CcHairline)
         )
 
         LazyColumn(
@@ -317,73 +290,168 @@ private fun CourseCatalogBrowse(
                 .testTag("courses_collection_content"),
             contentPadding = PaddingValues(bottom = 28.dp)
         ) {
-            if (!filtering && featured.isNotEmpty()) {
-                item(key = "featured") {
-                    Column(modifier = Modifier.padding(top = 14.dp)) {
-                        SectionTitle("Editor's picks", "Hand-checked · auto-advancing")
-                        FeaturedSlider(featured = featured, onOpenCourse = onOpenCourse)
-                    }
-                }
+            // Search scrolls with the page, not pinned above it.
+            item(key = "search") {
+                OutlinedTextField(
+                    value = query,
+                    onValueChange = { query = it },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp)
+                        .padding(top = 12.dp)
+                        .height(50.dp)
+                        .testTag("courses_search"),
+                    placeholder = {
+                        Text(
+                            text = "Search courses, subjects, providers",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.body,
+                            color = CcFaint
+                        )
+                    },
+                    leadingIcon = {
+                        Icon(
+                            Icons.Default.Search,
+                            contentDescription = null,
+                            tint = CcMuted,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    },
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            Icon(
+                                Icons.Default.Close,
+                                contentDescription = "Clear search",
+                                tint = CcMuted,
+                                modifier = Modifier
+                                    .size(18.dp)
+                                    .clickable { query = "" }
+                            )
+                        }
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(26.dp),
+                    textStyle = TextStyle(
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.body,
+                        color = CcInk
+                    ),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = CcGreen,
+                        unfocusedBorderColor = CcHairline,
+                        focusedContainerColor = Color.White,
+                        unfocusedContainerColor = Color.White
+                    )
+                )
             }
 
-            if (!filtering) {
-                item(key = "videos") {
-                    Column(modifier = Modifier.padding(top = 22.dp)) {
-                        SectionTitle("Watch first", "Plays in the app · credited to each channel")
-                        VideoRail(videos = CourseCatalog.videos, onPlayVideo = onPlayVideo)
+            item(key = "filter_row") {
+                FilterSummaryRow(
+                    filterCount = activeFilters.size,
+                    activeFilters = activeFilters,
+                    onOpenFilters = { sheetOpen = true },
+                    onClear = clearAll
+                )
+            }
+
+            if (isLoading) {
+                item(key = "skeleton") {
+                    CatalogSkeleton(shimmer = shimmer, showRails = !filtering)
+                }
+            } else {
+                if (!filtering && featured.isNotEmpty()) {
+                    item(key = "featured") {
+                        Column(modifier = Modifier.padding(top = 14.dp)) {
+                            SectionTitle("Editor's picks", "Hand-checked · auto-advancing")
+                            FeaturedSlider(featured = featured, onOpenCourse = onOpenCourse)
+                        }
                     }
                 }
 
-                item(key = "providers") {
-                    Column(modifier = Modifier.padding(top = 22.dp)) {
-                        SectionTitle("Where these come from", "Tap a provider to filter")
-                        ProviderRail(
-                            selected = provider,
-                            onSelect = { name -> provider = if (provider == name) null else name }
+                if (!filtering) {
+                    item(key = "videos") {
+                        Column(modifier = Modifier.padding(top = 22.dp)) {
+                            SectionTitle(
+                                "Watch first",
+                                "Plays in the app · credited to each channel"
+                            )
+                            VideoRail(videos = CourseCatalog.videos, onPlayVideo = onPlayVideo)
+                        }
+                    }
+
+                    item(key = "providers") {
+                        Column(modifier = Modifier.padding(top = 22.dp)) {
+                            SectionTitle("Where these come from", "Tap a provider to filter")
+                            ProviderRail(
+                                selected = provider,
+                                onSelect = { name ->
+                                    provider = if (provider == name) null else name
+                                }
+                            )
+                        }
+                    }
+                }
+
+                item(key = "list_title") {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 18.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = if (filtering) "Results" else "All courses",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.section,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = CcInk,
+                            modifier = Modifier.weight(1f)
+                        )
+                        Text(
+                            text = "${visible.size} " +
+                                if (visible.size == 1) "course" else "courses",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.meta,
+                            color = CcMuted
                         )
                     }
                 }
-            }
 
-            item(key = "list_title") {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(start = 18.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        text = if (filtering) "Results" else "All courses",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = CT.section,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = CcInk,
-                        modifier = Modifier.weight(1f)
-                    )
-                    Text(
-                        text = "${visible.size} " + if (visible.size == 1) "course" else "courses",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = CT.meta,
-                        color = CcMuted
-                    )
+                if (visible.isEmpty()) {
+                    item(key = "empty") {
+                        NoCoursesState(onClear = clearAll)
+                    }
+                } else {
+                    items(visible, key = { it.id }) { course ->
+                        CourseRow(course = course, onClick = { onOpenCourse(course) })
+                        Spacer(Modifier.height(8.dp))
+                    }
                 }
-            }
 
-            if (visible.isEmpty()) {
-                item(key = "empty") {
-                    NoCoursesState(onClear = clearAll)
+                item(key = "credit") {
+                    CreditBlock()
                 }
-            } else {
-                items(visible, key = { it.id }) { course ->
-                    CourseRow(course = course, onClick = { onOpenCourse(course) })
-                    Spacer(Modifier.height(8.dp))
-                }
-            }
-
-            item(key = "credit") {
-                CreditBlock()
             }
         }
+    }
+
+    if (sheetOpen) {
+        FiltersSheet(
+            total = CourseCatalog.courses.size,
+            resultCount = visible.size,
+            certificate = certificate,
+            stage = stage,
+            level = level,
+            subject = subject,
+            provider = provider,
+            onCertificate = { certificate = if (certificate == it) null else it },
+            onStage = { stage = if (stage == it) null else it },
+            onLevel = { level = if (level == it) null else it },
+            onSubject = { subject = if (subject == it) null else it },
+            onProvider = { provider = if (provider == it) null else it },
+            onClear = clearAll,
+            onDismiss = { sheetOpen = false }
+        )
     }
 }
 
@@ -437,155 +505,317 @@ private fun CatalogHeader(courseCount: Int, providerCount: Int, onBack: () -> Un
                 )
             }
         }
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(CcHairline)
+        )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Filters
+//  Filter bar + sheet
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** One row: the Filters button, then whatever is currently applied. */
 @Composable
-private fun FilterBar(
+private fun FilterSummaryRow(
+    filterCount: Int,
+    activeFilters: List<String>,
+    onOpenFilters: () -> Unit,
+    onClear: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .horizontalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(top = 2.dp, bottom = 10.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Surface(
+            onClick = onOpenFilters,
+            shape = RoundedCornerShape(50),
+            color = if (filterCount > 0) CcInk else Color.White,
+            border = BorderStroke(1.dp, if (filterCount > 0) CcInk else CcHairline),
+            modifier = Modifier
+                .height(36.dp)
+                .testTag("courses_filters_button")
+        ) {
+            Row(
+                modifier = Modifier.padding(horizontal = 13.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                Icon(
+                    Icons.Default.Tune,
+                    contentDescription = null,
+                    tint = if (filterCount > 0) Color.White else CcInk,
+                    modifier = Modifier.size(15.dp)
+                )
+                Text(
+                    text = if (filterCount > 0) "Filters ($filterCount)" else "Filters",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = CT.chip,
+                    fontWeight = FontWeight.Bold,
+                    color = if (filterCount > 0) Color.White else CcInk,
+                    maxLines = 1
+                )
+            }
+        }
+
+        activeFilters.forEach { label ->
+            Box(
+                modifier = Modifier
+                    .height(36.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(CcGreenSoft)
+                    .padding(horizontal = 11.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = label,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = CT.micro,
+                    fontWeight = FontWeight.SemiBold,
+                    color = CcGreen,
+                    maxLines = 1
+                )
+            }
+        }
+
+        if (filterCount > 0) {
+            Text(
+                text = "Clear",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = CT.chip,
+                fontWeight = FontWeight.Bold,
+                color = CcMuted,
+                modifier = Modifier
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onClear)
+                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                    .testTag("courses_clear_filters")
+            )
+        }
+    }
+}
+
+/**
+ * Every filter in one place, pulled up from the bottom.
+ *
+ * Applying live means the count on the button always describes the list behind
+ * the sheet, so nobody has to guess what "Apply" would do.
+ */
+@OptIn(ExperimentalLayoutApi::class, ExperimentalMaterial3Api::class)
+@Composable
+private fun FiltersSheet(
+    total: Int,
+    resultCount: Int,
     certificate: CatalogCertificate?,
     stage: String?,
     level: String?,
     subject: String?,
     provider: String?,
-    filtering: Boolean,
     onCertificate: (CatalogCertificate) -> Unit,
     onStage: (String) -> Unit,
     onLevel: (String) -> Unit,
     onSubject: (String) -> Unit,
     onProvider: (String) -> Unit,
-    onClear: () -> Unit
+    onClear: () -> Unit,
+    onDismiss: () -> Unit
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        // Row 1 — what you get at the end. "Free certificate" and "Certificate is
-        // paid" are first because that is the question students actually ask.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            FilterPill(
-                label = "All",
-                selected = !filtering,
-                tag = "courses_chip_all",
-                onClick = onClear
-            )
-            CatalogCertificate.entries.forEach { option ->
-                FilterPill(
-                    label = option.short,
-                    selected = certificate == option,
-                    tag = "courses_chip_" + option.name.lowercase(),
-                    onClick = { onCertificate(option) }
-                )
-            }
-            FilterPill(
-                label = "Sri Lanka",
-                selected = provider == "University of Moratuwa",
-                tag = "courses_chip_local",
-                onClick = { onProvider("University of Moratuwa") }
-            )
-        }
+    val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
+    val activeCount = listOfNotNull(certificate, stage, level, subject, provider).size
 
-        // Row 2 — who it is for, and how hard it is.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            STAGES.forEach { option ->
-                SubPill(
-                    label = option,
-                    selected = stage == option,
-                    tag = "courses_stage_" + option.lowercase().replace("/", "_"),
-                    onClick = { onStage(option) }
-                )
-            }
-            LEVELS.forEach { option ->
-                SubPill(
-                    label = option,
-                    selected = level == option,
-                    tag = "courses_level_" + option.lowercase(),
-                    onClick = { onLevel(option) }
-                )
-            }
-        }
-
-        // Row 3 — subject.
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .horizontalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(bottom = 8.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            CourseCatalog.subjects.forEach { option ->
-                SubPill(
-                    label = option,
-                    selected = subject == option,
-                    tag = "courses_subject_" + option.lowercase().replace(' ', '_'),
-                    onClick = { onSubject(option) }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun FilterPill(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = RoundedCornerShape(50),
-        color = if (selected) CcInk else Color.White,
-        border = BorderStroke(1.dp, if (selected) CcInk else CcHairline),
-        modifier = Modifier
-            .height(34.dp)
-            .testTag(tag)
+    ModalBottomSheet(
+        onDismissRequest = onDismiss,
+        sheetState = sheetState,
+        containerColor = Color.White,
+        modifier = Modifier.testTag("courses_filter_sheet")
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp)
+                .navigationBarsPadding()
+                .padding(bottom = 18.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = "Filters",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = CcInk,
+                    modifier = Modifier.weight(1f)
+                )
+                if (activeCount > 0) {
+                    Text(
+                        text = "Clear all",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.body,
+                        fontWeight = FontWeight.Bold,
+                        color = CcGreen,
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .clickable(onClick = onClear)
+                            .padding(horizontal = 8.dp, vertical = 6.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(4.dp))
             Text(
-                text = label,
+                text = "$resultCount of $total courses shown",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = CT.chip,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
-                color = if (selected) Color.White else CcMuted,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 12.dp)
+                fontSize = CT.meta,
+                color = CcMuted
             )
+            Spacer(Modifier.height(16.dp))
+
+            FilterSection("Certificate") {
+                CatalogCertificate.entries.forEach { option ->
+                    SheetChip(
+                        label = option.label,
+                        selected = certificate == option,
+                        tag = "courses_chip_" + option.name.lowercase(),
+                        onClick = { onCertificate(option) }
+                    )
+                }
+            }
+
+            FilterSection("Who it's for") {
+                STAGES.forEach { option ->
+                    SheetChip(
+                        label = option,
+                        selected = stage == option,
+                        tag = "courses_stage_" + option.lowercase().replace("/", "_"),
+                        onClick = { onStage(option) }
+                    )
+                }
+            }
+
+            FilterSection("Level") {
+                LEVELS.forEach { option ->
+                    SheetChip(
+                        label = option,
+                        selected = level == option,
+                        tag = "courses_level_" + option.lowercase(),
+                        onClick = { onLevel(option) }
+                    )
+                }
+            }
+
+            FilterSection("Subject") {
+                CourseCatalog.subjects.forEach { option ->
+                    SheetChip(
+                        label = option,
+                        selected = subject == option,
+                        tag = "courses_subject_" + option.lowercase().replace(' ', '_'),
+                        onClick = { onSubject(option) }
+                    )
+                }
+            }
+
+            FilterSection("Provider") {
+                CourseCatalog.usedProviders.forEach { option ->
+                    SheetChip(
+                        label = option.name,
+                        selected = provider == option.name,
+                        tag = "courses_chip_provider_" +
+                            option.name.lowercase().replace(' ', '_'),
+                        onClick = { onProvider(option.name) }
+                    )
+                }
+            }
+
+            Spacer(Modifier.height(20.dp))
+            Surface(
+                onClick = onDismiss,
+                shape = RoundedCornerShape(14.dp),
+                color = CcGreen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(50.dp)
+                    .testTag("courses_filters_apply")
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize(),
+                    horizontalArrangement = Arrangement.Center,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Show $resultCount " + if (resultCount == 1) "course" else "courses",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.cardTitle,
+                        fontWeight = FontWeight.Bold,
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun FilterSection(title: String, content: @Composable () -> Unit) {
+    Column(modifier = Modifier.padding(bottom = 18.dp)) {
+        Text(
+            text = title.uppercase(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = CT.micro,
+            fontWeight = FontWeight.Bold,
+            color = CcFaint,
+            letterSpacing = 0.8.sp
+        )
+        Spacer(Modifier.height(9.dp))
+        FlowRow(
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            content()
         }
     }
 }
 
 @Composable
-private fun SubPill(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+private fun SheetChip(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
         color = if (selected) CcGreenSoft else Color.White,
         border = BorderStroke(
             1.dp,
-            if (selected) CcGreen.copy(alpha = 0.4f) else CcHairline
+            if (selected) CcGreen.copy(alpha = 0.45f) else CcHairline
         ),
         modifier = Modifier
-            .height(31.dp)
+            .heightIn(min = 36.dp)
             .testTag(tag)
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Row(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(5.dp)
+        ) {
+            if (selected) {
+                Icon(
+                    Icons.Default.Check,
+                    contentDescription = null,
+                    tint = CcGreen,
+                    modifier = Modifier.size(13.dp)
+                )
+            }
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = CT.micro,
+                fontSize = CT.chip,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) CcGreen else CcMuted,
-                maxLines = 1,
-                modifier = Modifier.padding(horizontal = 11.dp)
+                maxLines = 1
             )
         }
     }
@@ -610,6 +840,109 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Shimmer
+// ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun rememberShimmerBrush(): Brush {
+    val transition = rememberInfiniteTransition(label = "courses_shimmer")
+    val shift by transition.animateFloat(
+        initialValue = -600f,
+        targetValue = 1400f,
+        animationSpec = infiniteRepeatable(tween(1150, easing = LinearEasing)),
+        label = "courses_shimmer_shift"
+    )
+    return Brush.linearGradient(
+        colors = listOf(Color(0xFFEDF1F6), Color(0xFFF8FAFC), Color(0xFFE9EEF5)),
+        start = Offset(shift, 0f),
+        end = Offset(shift + 600f, 600f)
+    )
+}
+
+@Composable
+private fun ShimmerBlock(
+    brush: Brush,
+    modifier: Modifier,
+    corner: Int = 16
+) {
+    Box(modifier = modifier.clip(RoundedCornerShape(corner.dp)).background(brush))
+}
+
+/**
+ * The loading state. It mirrors the real layout (slider, two video cards, the
+ * provider row, course rows) so the screen does not jump when the content lands.
+ */
+@Composable
+private fun CatalogSkeleton(brush: Brush, showRails: Boolean) {
+    Column(modifier = Modifier.testTag("courses_skeleton")) {
+        if (showRails) {
+            Spacer(Modifier.height(14.dp))
+            ShimmerBlock(brush, Modifier.padding(start = 18.dp).width(120.dp).height(16.dp), 6)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                repeat(2) {
+                    ShimmerBlock(brush, Modifier.width(276.dp).height(186.dp), 20)
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            ShimmerBlock(brush, Modifier.padding(start = 18.dp).width(100.dp).height(16.dp), 6)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                repeat(3) {
+                    Column(modifier = Modifier.width(232.dp)) {
+                        ShimmerBlock(brush, Modifier.fillMaxWidth().aspectRatio(16f / 9f), 16)
+                        Spacer(Modifier.height(8.dp))
+                        ShimmerBlock(brush, Modifier.width(180.dp).height(12.dp), 5)
+                        Spacer(Modifier.height(5.dp))
+                        ShimmerBlock(brush, Modifier.width(110.dp).height(10.dp), 5)
+                    }
+                }
+            }
+            Spacer(Modifier.height(24.dp))
+            ShimmerBlock(brush, Modifier.padding(start = 18.dp).width(160.dp).height(16.dp), 6)
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                repeat(3) {
+                    ShimmerBlock(brush, Modifier.width(168.dp).height(154.dp), 18)
+                }
+            }
+        }
+        Spacer(Modifier.height(24.dp))
+        ShimmerBlock(brush, Modifier.padding(start = 18.dp).width(130.dp).height(16.dp), 6)
+        Spacer(Modifier.height(12.dp))
+        repeat(5) {
+            ShimmerBlock(
+                brush,
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(104.dp),
+                18
+            )
+            Spacer(Modifier.height(8.dp))
         }
     }
 }
@@ -959,7 +1292,7 @@ private fun ProviderRail(selected: String?, onSelect: (String) -> Unit) {
                         text = provider.kind,
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = CT.micro,
-                        lineHeight = CT.microHeight,
+                        lineHeight = 15.sp,
                         color = CcMuted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -1148,7 +1481,7 @@ private fun NoCoursesState(onClear: () -> Unit) {
             color = CcInk,
             modifier = Modifier
                 .height(42.dp)
-                .testTag("courses_clear_filters")
+                .testTag("courses_empty_clear")
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
@@ -1549,9 +1882,8 @@ private fun SectionHeading(text: String) {
 }
 
 /**
- * Level, time and audience. Laid out as two columns *plus* a full-width row for
- * "For", so a long audience list wraps instead of being clipped — on a 320dp
- * phone this used to squeeze three columns into a third of the width each.
+ * Level, time and audience. Two columns *plus* a full-width row for "For", so a
+ * long audience list wraps instead of being clipped on a narrow phone.
  */
 @Composable
 private fun FactsCard(course: CatalogCourse) {
@@ -1621,14 +1953,15 @@ private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * A real embed, not a thumbnail that leaves the app.
+ * A real player, not a thumbnail that leaves the app.
  *
- * YouTube rejects a bare `loadUrl("…/embed/…")` from an app WebView with a
- * "video player configuration" error because the request arrives without a
- * referer. Loading the same iframe from an HTML page with
- * `https://www.youtube.com/` as its base URL gives the WebView that referer, so
- * playback works; `youtube-nocookie.com` keeps tracking cookies away until the
- * student presses play, and the channel stays credited underneath.
+ * The previous WebView embed rendered an empty black box: YouTube refuses to
+ * configure a player for an iframe whose page has no proper origin/referer, and
+ * a `loadUrl("…/embed/…")` from an app WebView has none. `YouTubePlayerView`
+ * exists precisely to own that plumbing — it builds the iframe with the rights
+ * origin, handles fullscreen and cleanup — so playback is its job, not ours.
+ * The channel stays credited underneath, and "Watch on YouTube" is still there
+ * for anyone who wants the original page.
  */
 @Composable
 private fun YouTubeEmbedDialog(
@@ -1636,6 +1969,8 @@ private fun YouTubeEmbedDialog(
     onDismiss: () -> Unit,
     onOpenYouTube: () -> Unit
 ) {
+    val lifecycleOwner = LocalLifecycleOwner.current
+
     Dialog(
         onDismissRequest = onDismiss,
         properties = DialogProperties(usePlatformDefaultWidth = false)
@@ -1657,49 +1992,19 @@ private fun YouTubeEmbedDialog(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { context ->
-                            val embedHtml = """
-                                <!DOCTYPE html>
-                                <html>
-                                  <head>
-                                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
-                                    <style>
-                                      html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
-                                      iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:0; }
-                                    </style>
-                                  </head>
-                                  <body>
-                                    <iframe
-                                      src="https://www.youtube-nocookie.com/embed/${video.videoId}?playsinline=1&rel=0&modestbranding=1"
-                                      title="${video.title}"
-                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
-                                      allowfullscreen></iframe>
-                                  </body>
-                                </html>
-                            """.trimIndent()
-
-                            WebView(context).apply {
-                                setBackgroundColor(AndroidColor.BLACK)
-                                settings.javaScriptEnabled = true
-                                settings.domStorageEnabled = true
-                                settings.mediaPlaybackRequiresUserGesture = false
-                                settings.loadWithOverviewMode = true
-                                settings.useWideViewPort = true
-                                settings.setSupportMultipleWindows(false)
-                                webViewClient = WebViewClient()
-                                webChromeClient = WebChromeClient()
-                                loadDataWithBaseURL(
-                                    "https://www.youtube.com/",
-                                    embedHtml,
-                                    "text/html",
-                                    "UTF-8",
-                                    null
+                            YouTubePlayerView(context).apply {
+                                lifecycleOwner.lifecycle.addObserver(this)
+                                addYouTubePlayerListener(
+                                    object : AbstractYouTubePlayerListener() {
+                                        override fun onReady(youTubePlayer: YouTubePlayer) {
+                                            youTubePlayer.loadVideo(video.videoId, 0f)
+                                        }
+                                    }
                                 )
                             }
                         },
-                        onRelease = { webView ->
-                            webView.stopLoading()
-                            webView.loadUrl("about:blank")
-                            webView.destroy()
+                        onRelease = { playerView ->
+                            playerView.release()
                         }
                     )
                 }

@@ -88,25 +88,17 @@ freeCodeCamp full courses, one StatQuest video.
 opened from the **Courses collection** card on Home. No bottom bar, no app header,
 own back button, system back closes the detail before the screen.
 
-**The top bar is fixed.** Header, search and every filter row sit in a `Column`
-above the list, so nothing you need disappears when you scroll. Only the
-content — slider, video rail, provider rail, course rows, credit block — scrolls.
+**Only the title bar is fixed.** Header (back, title, counts) stays put; search
+and filters scroll with the page, so content gets the screen back.
 
 Sections, top to bottom:
 
-1. header — back, title, course and provider counts, "credited to their owners";
-2. search — title, subject, provider and skills;
-3. **filters** (three fixed rows):
-   - *certificate*: All · Free cert · Paid cert · Participation · No cert ·
-     Sri Lanka;
-   - *stage and level*: A/L, Undergraduate, Postgraduate, Beginner,
-     Intermediate, Advanced;
-   - *subject*: every subject in the catalog, derived from the courses.
-   Selecting a filter resets the list to the top, which is what stops the old
-   scroll offset from dropping you at the bottom of a suddenly shorter page;
+1. **fixed header** — back, title, course and provider counts;
+2. search (scrolls) — title, subject, provider and skills;
+3. a single **filter row** (scrolls): a `Filters (n)` button plus the currently
+   applied filters as chips, with a **Clear** action;
 4. **Editor's picks** — a sliding rail that advances itself every 4.5s, pausing
-   while a finger is on it (`isScrollInProgress`), with a dot indicator that
-   follows the first visible card;
+   while a finger is on it, dots following the visible card;
 5. **Watch first** — YouTube rail: real thumbnails, runtime badge, channel name;
 6. **Where these come from** — provider tiles with their own logo, name, kind
    and course count; tapping one filters the list;
@@ -114,9 +106,31 @@ Sections, top to bottom:
    pill, level and hours;
 8. the credit block.
 
+### Filters, pulled up from the bottom
+
+Everything lives in one `ModalBottomSheet` opened by the filter button, grouped
+into **Certificate** (free, paid, statement of participation, none), **Who it's
+for** (A/L, Undergraduate, Postgraduate), **Level** (beginner → advanced),
+**Subject** and **Provider** — all 16. Chips apply immediately and the button at
+the bottom reads "Show N courses", so the count always describes the list behind
+the sheet. Tapping a selected chip removes it; **Clear all** empties everything.
+
 Slider, video rail and provider rail hide while a filter is active, so results
-are never pushed below three screens of browsing furniture. Any filter adds a
-**Clear filters** action and a "No courses match that" state.
+are never pushed below three screens of browsing furniture.
+
+### Shimmer
+
+The catalog is bundled, so nothing is actually fetched — but a screen that pops
+in fully formed feels unfinished, and a filter that changes instantly feels like
+nothing happened. So:
+
+- **on arrival**, ~0.7s of shimmer that mirrors the real layout (slider, video
+  cards, provider tiles, course rows), so the content lands without a jump;
+- **on a filter change**, ~0.4s of shimmer over the results.
+
+Typing in the search field does **not** shimmer — flashing the list on every
+keystroke would be worse than no animation. The shimmer is one animated
+`Brush.linearGradient` shared by every placeholder (tag `courses_skeleton`).
 
 ### Typography
 
@@ -136,17 +150,25 @@ with no browser cannot crash the screen).
 
 ### Video player
 
-`YouTubeEmbedDialog` is a real embed: a `WebView` loading an HTML page whose
-base URL is `https://www.youtube.com/`, with a `youtube-nocookie.com` iframe.
+`YouTubeEmbedDialog` uses **`android-youtube-player`**
+(`com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.2`, in
+`libs.versions.toml`) via `YouTubePlayerView`.
 
-The base URL is the fix for the "video player configuration" error: a bare
-`loadUrl("…/embed/…")` reaches YouTube **without a referer**, and the embed
-refuses to configure a player. Serving the iframe from a page based at
-youtube.com gives the WebView that referer.
+The first attempt was a hand-rolled `WebView` + `loadDataWithBaseURL` embed: it
+rendered an empty black box, because YouTube will not configure a player for an
+iframe whose page has no proper origin/referer, and an app WebView has none.
+`YouTubePlayerView` exists to own exactly that plumbing (iframe, origin,
+fullscreen, cleanup), so playback is its job now.
 
-`onRelease` stops loading, blanks the page and destroys the `WebView`, so audio
-stops when the dialog closes. Under the player: the title, the channel ("… on
-YouTube") and a **Watch on YouTube** exit.
+Details that matter: the view is registered as a **lifecycle observer** of the
+current owner (it pauses when the app backgrounds), `onReady` calls
+`loadVideo(id, 0f)`, and `onRelease` calls `release()` so the player and its
+WebView are torn down when the dialog closes. Under the player: the title, the
+channel ("… on YouTube") and a **Watch on YouTube** fallback for the original
+page.
+
+**Build note:** this added a dependency — Gradle needs one sync before the next
+build. It is on Maven Central, which `settings.gradle.kts` already includes.
 
 ### Provider logos
 
@@ -160,15 +182,16 @@ mark is for; it is never used as TheStudent's own branding.
 ## 5. Test tags
 
 `courses_collection_content`, `courses_back`, `courses_search`,
+`courses_filters_button`, `courses_filter_sheet`, `courses_filters_apply`,
 `courses_chip_all`, `courses_chip_free`, `courses_chip_paid`,
-`courses_chip_participation`, `courses_chip_none`, `courses_chip_local`,
-`courses_stage_*`, `courses_level_*`, `courses_subject_*`,
-`courses_featured_{id}`, `courses_video_{videoId}`,
+`courses_chip_participation`, `courses_chip_none`,
+`courses_chip_provider_{name}`, `courses_stage_*`, `courses_level_*`,
+`courses_subject_*`, `courses_featured_{id}`, `courses_video_{videoId}`,
 `courses_provider_{name}`, `courses_card_{id}`, `courses_clear_filters`,
-`courses_empty`, `courses_credit_block`, `course_detail_{id}`,
-`course_detail_back`, `course_detail_video`, `course_detail_open`,
-`course_video_player`, `course_video_close`, `course_video_open_youtube`,
-`home_course_collection_card`.
+`courses_empty`, `courses_empty_clear`, `courses_skeleton`,
+`courses_credit_block`, `course_detail_{id}`, `course_detail_back`,
+`course_detail_video`, `course_detail_open`, `course_video_player`,
+`course_video_close`, `course_video_open_youtube`, `home_course_collection_card`.
 
 ## 6. Adding a course
 
@@ -195,3 +218,12 @@ mark is for; it is never used as TheStudent's own branding.
 | Provider cards felt empty | initials avatar, small | real provider favicon at 46dp, name, kind, course count, taller card |
 | Wanted free/paid and more filters | only four certificate chips | certificate + stage + level + subject + provider filters, with a clear action |
 | Some text too small | sizes drifted to 9–10.5sp | single `CT` type scale with an 11sp floor |
+
+## 8. Second review (2026-10-28)
+
+| Report | Cause | Fix |
+| --- | --- | --- |
+| Search and filters should scroll too | everything above the list was pinned | only the title bar is fixed now |
+| All filters in one place | three fixed chip rows ate the screen | one `Filters` button + a bottom sheet with grouped chips, applied live |
+| Video showed an empty black card | WebView embed without a proper origin/referer | replaced with `YouTubePlayerView` (android-youtube-player 12.1.2) |
+| Wanted shimmer on filters and entry | no loading state | animated shimmer on arrival (0.7s) and on facet changes (0.4s) |
