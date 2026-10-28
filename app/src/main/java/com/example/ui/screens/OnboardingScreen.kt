@@ -74,6 +74,7 @@ import com.example.data.remote.AuthApiResult
 import com.example.data.local.TheStudentPreferences
 import com.example.ui.components.StudentLoadingSpinner
 import com.example.ui.components.TheStudentAppBackground
+import com.example.ui.components.TheStudentSnackbarHost
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.EmeraldDark
@@ -157,28 +158,12 @@ fun OnboardingScreen(
             .fillMaxSize()
             .testTag("onboarding_screen"),
         snackbarHost = {
-            SnackbarHost(
+            TheStudentSnackbarHost(
                 hostState = snackbarHostState,
                 modifier = Modifier
                     .padding(bottom = 16.dp)
                     .imePadding()
-            ) { data ->
-                Surface(
-                    shape = RoundedCornerShape(22.dp),
-                    color = Color(0xFF1E293B),
-                    shadowElevation = 6.dp,
-                    border = BorderStroke(1.dp, Color(0xFF334155))
-                ) {
-                    Text(
-                        text = data.visuals.message,
-                        fontFamily = MaisonNeueFontFamily,
-                        color = Color.White,
-                        fontSize = 13.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp)
-                    )
-                }
-            }
+            )
         },
         // Transparent on purpose: the background below is drawn edge-to-edge, so
         // the status and navigation bars show the same colour as the screen

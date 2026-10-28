@@ -67,7 +67,14 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 
 Components (`ui/components`): logo, top bar, bottom nav, sidebar drawer, auth dialog, paper/course dialogs,
 audio visualizers (`CentralizedAudioVisualizer`, `PlasmaVisualizer`, `UiverseLoaderVisualizer`),
-`AnimatedVoiceButton`, `ModernVoiceIcons`, `RevealingSpeechCard`, `ShimmerEffect`, `StudentLoadingSpinner`.
+`AnimatedVoiceButton`, `ModernVoiceIcons`, `RevealingSpeechCard`, `ShimmerEffect`, `StudentLoadingSpinner`,
+`TheStudentSnackbarHost`.
+
+**Messages (`TheStudentSnackbarHost`)** — every snackbar in the app renders through this one composable:
+a floating **pill** (fully rounded, soft shadow, max 460 dp) with a tinted icon disc — emerald tick when
+something worked, amber mark when it did not (the sentence is checked for words like *offline*, *failed*,
+*could not*). The stock Material snackbar (full-width dark rectangle) is never used: it read as a system
+alert pasted over the design. In an open conversation the pill floats above the composer.
 
 Theme (`ui/theme`): emerald/teal/lime brand palette, light + dark schemes, custom fonts
 (Plus Jakarta Sans, Outfit, DM Sans, Roboto) bundled in `res/font`.

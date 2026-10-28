@@ -401,7 +401,18 @@ class MainActivity : ComponentActivity() {
                                                 }
                                             },
                                             snackbarHost = {
-                                                SnackbarHost(hostState = snackbarHostState)
+                                                // One app-wide message style: a rounded
+                                                // pill, never the stock dark rectangle.
+                                                // In a conversation it floats above the
+                                                // composer so no text is ever covered.
+                                                TheStudentSnackbarHost(
+                                                    hostState = snackbarHostState,
+                                                    modifier = if (uiState.isChatConversationOpen) {
+                                                        Modifier.padding(bottom = 76.dp)
+                                                    } else {
+                                                        Modifier
+                                                    }
+                                                )
                                             }
                                         ) { innerPadding ->
                                         val bottomNavTopLinePadding = (innerPadding.calculateBottomPadding() - 18.dp).coerceAtLeast(0.dp)
