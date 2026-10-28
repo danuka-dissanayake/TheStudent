@@ -49,16 +49,18 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 ### Top bar and sidebar
 
 `TheStudentTopAppBar` is one white bar with a hairline rule: the hamburger (which opens the sidebar from
-every tab that shows the bar), a brand lockup — emerald mark, "TheStudent", and the destination underneath —
-then the streak capsule, the language-lab shortcut, search and the avatar. Screens with their own header
-(Chat, Papers, Profile, EXP, Account, Progress, Courses) hide it.
+every tab that shows the bar), the `thestudent_wordmark` drawable (the real logo artwork, kept in
+`res/drawable-nodpi`), then the streak capsule and the avatar, which opens the profile. Search lives in the
+Papers header and the language lab in the sidebar, so the bar carries only what is used on every screen.
+Screens with their own header (Chat, Papers, Profile, EXP, Account, Progress, Courses) hide it.
 
 `ModernSidebarDrawer` is organised around the student instead of around a link list: a deep-emerald
 identity header (avatar, name, stage, streak/XP/accuracy pills), a floating "This week" mini chart that
 straddles the header edge, then grouped navigation — **MENU** (Dashboard, Student chats, AI Voice Tutor,
 Past papers, My profile), **STUDY** (Quizzes, My progress, Free courses, AI Study Assistant, Language lab) —
-and a separated footer for Account & security and Sign out. Every row carries its own pastel icon chip; the
-active destination is marked by a bar on its leading edge.
+and a separated footer for Account & security and Sign out. Every row uses the same graphite icon colour on
+a neutral chip — colour is spent only on the active destination, which gets an emerald wash, an emerald bar
+on its leading edge, an emerald chip and emerald text.
 
 ---
 

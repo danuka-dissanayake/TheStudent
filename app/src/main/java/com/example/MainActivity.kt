@@ -509,8 +509,6 @@ class MainActivity : ComponentActivity() {
                                                      onNavigationClick = {
                                                          coroutineScope.launch { drawerState.open() }
                                                      },
-                                                     onLanguageLabClick = { viewModel.openLanguageLab(0) },
-                                                     onSearchClick = { viewModel.setTab(TheStudentNavTab.PAPERS) },
                                                      onProfileClick = { viewModel.setTab(TheStudentNavTab.PROFILE) }
                                                  )
                                              }

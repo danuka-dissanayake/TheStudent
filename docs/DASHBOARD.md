@@ -18,9 +18,9 @@ with dots, paper codes, quizzes rail) and `designs/23-sidebar-new.png` (drawer).
 | This week | up to four subject accuracy bars, seven weekday bars on pale tracks, `best` / `attempts` / `time` chips | `QuizProgress.subjects[].accuracy`, `QuizProgress.recent[].submittedAt`, `summary.bestPercent / attempts` |
 | Practise next | subject **code** chip, quiz title, accuracy bar, attempts left, Practise button | `QuizProgress.practice` (server picks it); the button calls `onContinueLearning` |
 | Promos | dark `N free courses` card with three provider logos · Language lab card | `CourseCatalog.courses.size`, `CourseCatalog.provider()` |
-| Popular courses | 178dp cards in a self-paging `LazyRow` (one card every 4.2s, frozen while the student scrolls) with page dots; the cover shows the **provider** and the level, never the course initial | `popularCourses`, `Course.institution`, `Course.level` |
-| Past papers | 112dp `PaperCover` thumbnails printed with the subject **short code** (`CM`, `SFT`, `ICT`, `AGRI`), the year pill, then `CODE · Subject` | `recentPapers`, `SubjectCodes.of()` |
-| Quizzes | 184dp cards: subject code chip, title, `12 Qs` / `20m` / `+20 XP` pills, best score and a Start/Done pill | `quizzes` (`QuizSummary`), `onQuizClick` |
+| Popular courses | 178dp cards in a self-paging `LazyRow` (one card every 4.2s, frozen while the student scrolls) with page dots; the cover prints the **category** in white with the level chip beside it | `popularCourses`, `Course.category`, `Course.level` |
+| Past papers | 112dp `PaperCover` thumbnails — the coloured band carries the **subject name**, the body the **short code** (`CM`, `SFT`, `ICT`, `AGRI`) — then the paper title at 11.5sp and `CODE · Examination` | `recentPapers`, `SubjectCodes.of()` |
+| Quizzes | 206dp cards: subject code chip, a 13.5sp title, three equal-width pills (`12 Qs` / `20m` / `+20 XP`) and a best-score line with a Start/Done pill | `quizzes` (`QuizSummary`), `onQuizClick` |
 | Notes / saved | compact note rows with the subject code, saved-course chips | `recentNotes`, `savedCourses` |
 | Footer | `Last attempt 27 Oct` | `QuizProgress.recent.first().submittedAt` |
 
@@ -52,6 +52,10 @@ under any subject name and still get a readable cover.
   rails are `LazyRow`s with `key =` on every item, no `SubcomposeAsyncImage`, no
   per-row infinite animations, and all palettes / catalogue lookups are hoisted
   to top level or `by lazy`. See `docs/PERFORMANCE.md`.
+- **Text scale.** Body copy never drops below 10sp and headings use one scale
+  (`HT`): 34sp greeting, 16sp section, 14sp card title, 13sp body, 12sp meta,
+  11sp micro. Cover chips are the only 9.5sp labels, and every card row uses
+  weights rather than fixed widths so nothing clips on a narrow screen.
 - **Skeleton parity.** `HomeSkeletonLoading` (in `ui/components/ShimmerEffect.kt`)
   mirrors this layout block for block — greeting, 232dp hero, four 86dp tiles,
   the report card and the first rail — so the shimmer resolves instead of jumping.

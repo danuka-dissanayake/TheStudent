@@ -45,8 +45,10 @@ private val SMuted = Color(0xFF64748B)
 private val SFaint = Color(0xFF94A3B8)
 private val SHairline = Color(0xFFE8EDF3)
 private val SDeep = Color(0xFF06281F)
-private val SGreenSoft = Color(0xFFECFDF5)
 private val SDanger = Color(0xFFDC2626)
+private val SIcon = Color(0xFF475569)
+private val SIconChip = Color(0xFFF1F5F9)
+private val SActive = Color(0xFFD7F2E4)
 private val SDangerSoft = Color(0xFFFEF2F2)
 
 /**
@@ -120,21 +122,18 @@ fun ModernSidebarDrawer(
             DrawerNavTile(
                 title = "Dashboard",
                 icon = Icons.Filled.Home,
-                accent = EmeraldPrimary,
                 isSelected = currentTab == TheStudentNavTab.HOME,
                 onClick = { onSelectTab(TheStudentNavTab.HOME) }
             )
             DrawerNavTile(
                 title = "Student chats",
                 icon = Icons.Filled.Chat,
-                accent = Color(0xFF2563EB),
                 isSelected = currentTab == TheStudentNavTab.CHAT,
                 onClick = { onSelectTab(TheStudentNavTab.CHAT) }
             )
             DrawerNavTile(
                 title = "AI Voice Tutor",
                 icon = Icons.Filled.AutoAwesome,
-                accent = Color(0xFF7C3AED),
                 isSelected = currentTab == TheStudentNavTab.AI_TUTOR,
                 badge = "AI",
                 onClick = { onSelectTab(TheStudentNavTab.AI_TUTOR) }
@@ -142,14 +141,12 @@ fun ModernSidebarDrawer(
             DrawerNavTile(
                 title = "Past papers",
                 icon = Icons.Filled.Description,
-                accent = Color(0xFFB45309),
                 isSelected = currentTab == TheStudentNavTab.PAPERS,
                 onClick = { onSelectTab(TheStudentNavTab.PAPERS) }
             )
             DrawerNavTile(
                 title = "My profile",
                 icon = Icons.Filled.Person,
-                accent = Color(0xFF475569),
                 isSelected = currentTab == TheStudentNavTab.PROFILE,
                 onClick = { onSelectTab(TheStudentNavTab.PROFILE) }
             )
@@ -160,7 +157,6 @@ fun ModernSidebarDrawer(
                 DrawerNavTile(
                     title = "Quizzes",
                     icon = Icons.Filled.Quiz,
-                    accent = Color(0xFF0D9488),
                     isSelected = false,
                     onClick = onOpenQuizzes
                 )
@@ -169,7 +165,6 @@ fun ModernSidebarDrawer(
                 DrawerNavTile(
                     title = "My progress",
                     icon = Icons.Filled.Insights,
-                    accent = EmeraldPrimary,
                     isSelected = false,
                     onClick = onOpenProgress
                 )
@@ -178,7 +173,6 @@ fun ModernSidebarDrawer(
                 DrawerNavTile(
                     title = "Free courses",
                     icon = Icons.Filled.School,
-                    accent = Color(0xFF2563EB),
                     isSelected = false,
                     onClick = onOpenCourseCollection
                 )
@@ -186,7 +180,6 @@ fun ModernSidebarDrawer(
             DrawerNavTile(
                 title = "AI Study Assistant",
                 icon = Icons.Filled.Psychology,
-                accent = Color(0xFF7C3AED),
                 isSelected = false,
                 badge = "Multimodal",
                 onClick = onOpenAiAssistant
@@ -194,7 +187,6 @@ fun ModernSidebarDrawer(
             DrawerNavTile(
                 title = "Language lab",
                 icon = Icons.Filled.Translate,
-                accent = Color(0xFF0D9488),
                 isSelected = false,
                 badge = "CEFR B2",
                 onClick = onOpenLanguageLab
@@ -205,7 +197,6 @@ fun ModernSidebarDrawer(
                 DrawerNavTile(
                     title = "Admin panel",
                     icon = Icons.Filled.AdminPanelSettings,
-                    accent = Color(0xFFDC2626),
                     isSelected = false,
                     badge = "Admin",
                     onClick = onOpenAdminPanel
@@ -486,7 +477,7 @@ private fun WeeklyStrip(
 @Composable
 private fun DrawerSectionLabel(
     text: String,
-    topPadding: androidx.compose.ui.unit.Dp = 18.dp,
+    topPadding: androidx.compose.ui.unit.Dp = 22.dp,
     accent: Color = SFaint
 ) {
     Text(
@@ -496,7 +487,7 @@ private fun DrawerSectionLabel(
         fontWeight = FontWeight.ExtraBold,
         letterSpacing = 1.1.sp,
         color = accent,
-        modifier = Modifier.padding(start = 22.dp, top = topPadding, bottom = 8.dp)
+        modifier = Modifier.padding(start = 22.dp, top = topPadding, bottom = 10.dp)
     )
 }
 
@@ -504,61 +495,72 @@ private fun DrawerSectionLabel(
 private fun DrawerNavTile(
     title: String,
     icon: ImageVector,
-    accent: Color,
     isSelected: Boolean,
     badge: String? = null,
     onClick: () -> Unit
 ) {
     val isDark = isSystemInDarkTheme()
+    // One icon colour for the whole list — colour is a signal, so only the
+    // current destination spends it. The active row is unmissable: an emerald
+    // wash, a bar on its leading edge, an emerald chip and emerald text.
+    val iconTint = if (isSelected) EmeraldPrimary else SIcon
+    val chipBg = if (isSelected) {
+        EmeraldPrimary.copy(alpha = 0.16f)
+    } else if (isDark) {
+        Color(0x22FFFFFF)
+    } else {
+        SIconChip
+    }
     Surface(
+        onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 2.dp)
+            .padding(horizontal = 12.dp, vertical = 4.dp)
             .clip(RoundedCornerShape(14.dp))
-            .clickable(onClick = onClick),
+            .testTag(if (isSelected) "drawer_item_active" else "drawer_item_$title"),
         shape = RoundedCornerShape(14.dp),
-        color = if (isSelected) {
-            if (isDark) accent.copy(alpha = 0.18f) else SGreenSoft
-        } else {
-            Color.Transparent
+        color = when {
+            isSelected && isDark -> EmeraldPrimary.copy(alpha = 0.22f)
+            isSelected -> SActive
+            else -> Color.Transparent
         }
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(end = 10.dp),
+                .padding(end = 12.dp, top = 7.dp, bottom = 7.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // Leading marker: the selected destination is anchored to the edge.
             Box(
                 modifier = Modifier
                     .width(3.dp)
-                    .height(26.dp)
+                    .height(28.dp)
                     .clip(RoundedCornerShape(50))
-                    .background(if (isSelected) accent else Color.Transparent)
+                    .background(if (isSelected) EmeraldPrimary else Color.Transparent)
             )
-            Spacer(Modifier.width(9.dp))
+            Spacer(Modifier.width(10.dp))
             Box(
                 modifier = Modifier
-                    .size(34.dp)
+                    .size(36.dp)
                     .clip(RoundedCornerShape(11.dp))
-                    .background(accent.copy(alpha = if (isSelected) 0.18f else 0.10f)),
+                    .background(chipBg),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = accent,
+                    tint = iconTint,
                     modifier = Modifier.size(18.dp)
                 )
             }
-            Spacer(Modifier.width(11.dp))
+            Spacer(Modifier.width(12.dp))
             Text(
                 text = title,
                 fontFamily = MaisonNeueFontFamily,
                 fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                fontSize = 14.sp,
-                color = if (isSelected) SInk else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.86f),
+                fontSize = 14.5.sp,
+                color = if (isSelected) Color(0xFF047857) else SInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -567,25 +569,25 @@ private fun DrawerNavTile(
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(7.dp))
-                        .background(accent.copy(alpha = 0.12f))
-                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                        .background(if (isSelected) EmeraldPrimary else SIconChip)
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = badge,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        color = accent,
+                        color = if (isSelected) Color.White else SIcon,
                         maxLines = 1
                     )
                 }
-                Spacer(Modifier.width(4.dp))
+                Spacer(Modifier.width(5.dp))
             }
             Icon(
                 imageVector = Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = SFaint,
-                modifier = Modifier.size(16.dp)
+                tint = if (isSelected) EmeraldPrimary else SFaint,
+                modifier = Modifier.size(17.dp)
             )
         }
     }

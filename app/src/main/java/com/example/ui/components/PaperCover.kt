@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -72,43 +73,46 @@ fun PaperCover(
 }
 
 /**
- * A miniature exam paper: coloured header band, ruled body lines and the year.
- * Deliberately drawn from primitives so it is crisp at any size and costs
- * nothing to load.
+ * A miniature exam paper: a coloured header band carrying the subject name, then
+ * the body with the subject's short code and ruled lines. Deliberately drawn
+ * from primitives so it is crisp at any size and costs nothing to load.
  */
 @Composable
 private fun CoverArt(paper: PastPaper, tint: Color) {
     Column(modifier = Modifier.fillMaxSize()) {
-        // Header band — the examination colour, with a "title" bar in white.
+        // Header band — the subject name, in white on the examination colour.
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(0.34f)
-                .background(tint),
+                .weight(0.38f)
+                .background(tint)
+                .padding(horizontal = 5.dp),
             contentAlignment = Alignment.Center
         ) {
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth(0.5f)
-                    .height(2.dp)
-                    .clip(RoundedCornerShape(1.dp))
-                    .background(Color.White.copy(alpha = 0.9f))
+            Text(
+                text = paper.subject,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 8.5.sp,
+                lineHeight = 10.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = Color.White,
+                textAlign = TextAlign.Center,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
             )
         }
-        // Body — the subject code on the left, ruled lines on the right.
+        // Body — the short code ("SFT", "ICT", "AGRI") plus ruled lines.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .weight(0.66f)
-                .padding(horizontal = 4.dp, vertical = 3.dp),
+                .weight(0.62f)
+                .padding(horizontal = 5.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // The code, not the initial: "SFT", "ET", "ICT", "AGRI" is what a
-            // student reads on the cover in the papers library.
             Text(
                 text = SubjectCodes.of(paper.subject),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.2).sp,
                 color = tint,
@@ -118,7 +122,7 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
             Column(
                 modifier = Modifier
                     .weight(1f)
-                    .padding(start = 3.dp),
+                    .padding(start = 4.dp),
                 verticalArrangement = Arrangement.spacedBy(2.dp)
             ) {
                 MiniLine(1f, tint.copy(alpha = 0.35f))
