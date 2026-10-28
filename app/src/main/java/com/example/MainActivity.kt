@@ -493,20 +493,36 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                     }
                                                     TheStudentNavTab.PROFILE -> {
-                                                        ProfileScreen(
-                                                            userProfile = userProfile,
-                                                            savedPapers = savedPapers,
-                                                            savedCourses = savedCourses,
-                                                            recentActivities = recentActivities,
-                                                            isDarkTheme = uiState.isDarkTheme,
-                                                            onToggleTheme = { viewModel.toggleTheme() },
-                                                            onOpenAuthDialog = { viewModel.openAuthScreen(false) },
-                                                            onPaperClick = { paperId ->
-                                                                viewModel.allPapers.find { it.id == paperId }?.let {
-                                                                    viewModel.openPaperDetail(it)
+                                                        // The academic step is a full-screen page rather
+                                                        // than a dialog: it can be long on O/L, and it is
+                                                        // the data the matching algorithm depends on.
+                                                        if (uiState.isAcademicSetupOpen) {
+                                                            AcademicSetupScreen(
+                                                                initial = userProfile.academic,
+                                                                isSaving = uiState.isSavingAcademic,
+                                                                errorMessage = uiState.academicSetupError,
+                                                                onDismiss = { viewModel.closeAcademicSetup() },
+                                                                onSave = { profile ->
+                                                                    viewModel.saveAcademicProfile(profile)
                                                                 }
-                                                            }
-                                                        )
+                                                            )
+                                                        } else {
+                                                            ProfileScreen(
+                                                                userProfile = userProfile,
+                                                                savedPapers = savedPapers,
+                                                                savedCourses = savedCourses,
+                                                                recentActivities = recentActivities,
+                                                                isDarkTheme = uiState.isDarkTheme,
+                                                                onToggleTheme = { viewModel.toggleTheme() },
+                                                                onOpenAuthDialog = { viewModel.openAuthScreen(false) },
+                                                                onPaperClick = { paperId ->
+                                                                    viewModel.allPapers.find { it.id == paperId }?.let {
+                                                                        viewModel.openPaperDetail(it)
+                                                                    }
+                                                                },
+                                                                onEditAcademic = { viewModel.openAcademicSetup() }
+                                                            )
+                                                        }
                                                     }
                                                 }
                                             }

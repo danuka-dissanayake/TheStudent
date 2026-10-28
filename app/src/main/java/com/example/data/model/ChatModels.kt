@@ -116,6 +116,15 @@ data class ChatPeerProfile(
     val targetExam: String = "",
     val streamOrDegree: String = "",
     val institution: String = "",
+    /** A/L stream label (or O/L) from the structured profile; "" when unset. */
+    val streamCode: String = "",
+    /** "AL" or "OL"; "" when the student has not done the academic step. */
+    val examLevel: String = "",
+    val examYear: Int? = null,
+    /** Sinhala / Tamil / English; "" when unset. */
+    val medium: String = "",
+    /** The three subjects the student actually sits for. */
+    val subjects: List<String> = emptyList(),
     /** Unix seconds, when the account was created; null if unknown. */
     val joinedEpoch: Long? = null,
     /** Unix seconds of the first message between us on this phone; null if none. */
@@ -124,7 +133,15 @@ data class ChatPeerProfile(
     /** True when there is at least one education row worth rendering. */
     val hasEducation: Boolean
         get() = targetExam.isNotBlank() || streamOrDegree.isNotBlank() ||
-            institution.isNotBlank()
+            institution.isNotBlank() || subjects.isNotEmpty() || medium.isNotBlank()
+
+    /** "Technology · 2026" — stream and exam year, when we have them. */
+    val streamLine: String
+        get() = buildList {
+            val stream = streamCode.ifBlank { streamOrDegree }
+            if (stream.isNotBlank()) add(stream)
+            examYear?.let { add(it.toString()) }
+        }.joinToString(" · ")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

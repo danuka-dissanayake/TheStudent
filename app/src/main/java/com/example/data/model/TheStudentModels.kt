@@ -157,6 +157,12 @@ data class UserProfile(
     val profileCompleted: Boolean = true,
     /** False for Google-only accounts: the setup screen must ask for a password. */
     val hasPassword: Boolean = true,
+    /**
+     * Structured academic profile (stream, level, exam year, medium, the three
+     * subjects). Empty until the student completes the academic step; the
+     * help-matching algorithm and the chat profile screen read from it.
+     */
+    val academic: AcademicProfile = AcademicProfile(),
     val authProvider: String = "email"
 )
 

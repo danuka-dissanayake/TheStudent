@@ -1,6 +1,8 @@
 package com.example.data.remote
 
 import android.util.Log
+import com.example.data.model.AcademicProfile
+import com.example.data.model.AcademicSubject
 import com.example.data.model.UserProfile
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -9,6 +11,7 @@ import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.IOException
 import java.net.SocketTimeoutException
@@ -393,6 +396,43 @@ object TheStudentAuthClient {
         )
     }
 
+    /**
+     * Save the structured academic profile (level, stream, exam year, medium
+     * and the three subjects).
+     *
+     * Separate from [completeProfile] so a student can refine their subjects at
+     * any time without re-sending phone, photo or password. The server replaces
+     * the subject list inside a transaction, so a failed call can never leave a
+     * student with two subjects.
+     */
+    suspend fun saveAcademicProfile(
+        backendBaseUrl: String,
+        token: String,
+        profile: AcademicProfile
+    ): AuthApiResult = withContext(Dispatchers.IO) {
+        val subjects = JSONArray()
+        profile.subjects.forEach { subject ->
+            val item = JSONObject()
+                .put("code", subject.code)
+                .put("label", subject.label)
+            subject.bucket?.let { item.put("bucket", it) }
+            subjects.put(item)
+        }
+
+        val payload = JSONObject()
+            .put("exam_level", profile.examLevel)
+            .put("stream_code", profile.streamCode)
+            .put("exam_year", profile.examYear ?: 0)
+            .put("medium", profile.medium)
+            .put("subjects", subjects)
+
+        postAuth(
+            endpointUrl = endpoint(backendBaseUrl, "academic_profile"),
+            payload = payload,
+            bearerToken = token
+        )
+    }
+
     // -----------------------------------------------------------------------
     // Internals
     // -----------------------------------------------------------------------
@@ -594,7 +634,42 @@ object TheStudentAuthClient {
             } else {
                 true
             },
-            authProvider = userObj.optString("auth_provider", "email")
+            authProvider = userObj.optString("auth_provider", "email"),
+            academic = AcademicProfile.from(
+                examLevel = userObj.textOrEmpty("exam_level"),
+                streamCode = userObj.textOrEmpty("stream_code"),
+                examYear = if (userObj.has("exam_year") && !userObj.isNull("exam_year")) {
+                    userObj.optInt("exam_year", 0)
+                } else {
+                    null
+                },
+                medium = userObj.textOrEmpty("medium"),
+                subjects = parseSubjects(userObj.optJSONArray("subjects"))
+            )
         )
+    }
+
+    /**
+     * `subjects` is an array of {code, label, bucket}. Anything unexpected is
+     * skipped rather than crashing the sign-in path.
+     */
+    private fun parseSubjects(array: JSONArray?): List<AcademicSubject> {
+        if (array == null) return emptyList()
+        val out = ArrayList<AcademicSubject>(3)
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val label = item.textOrEmpty("label")
+            if (label.isBlank()) continue
+            val code = item.textOrEmpty("code").ifBlank {
+                com.example.data.model.AcademicCatalog.codeFor(label)
+            }
+            val bucket = if (item.has("bucket") && !item.isNull("bucket")) {
+                item.optInt("bucket", 0).takeIf { it in 1..3 }
+            } else {
+                null
+            }
+            out.add(AcademicSubject(code = code, label = label, bucket = bucket))
+        }
+        return out
     }
 }

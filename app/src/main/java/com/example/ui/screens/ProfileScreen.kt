@@ -40,6 +40,8 @@ fun ProfileScreen(
     onToggleTheme: () -> Unit,
     onOpenAuthDialog: () -> Unit,
     onPaperClick: (String) -> Unit,
+    /** Opens the academic step (stream, 3 subjects, exam year, medium). */
+    onEditAcademic: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableIntStateOf(0) } // 0: Saved Papers, 1: Enrolled Courses, 2: History
@@ -144,28 +146,67 @@ fun ProfileScreen(
                             }
                         }
 
-                        // Academic credentials pill
+                        // Academic credentials + the structured subjects the
+                        // matching algorithm reads. Empty states are prompts,
+                        // never invented values.
+                        val academic = userProfile.academic
                         Surface(
                             shape = RoundedCornerShape(12.dp),
                             color = MaterialTheme.colorScheme.surfaceVariant,
                             modifier = Modifier.fillMaxWidth()
                         ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Text(
-                                    text = if (userProfile.targetExam.isBlank()) {
-                                        "Curriculum not set"
-                                    } else {
-                                        "Target Exam: ${userProfile.targetExam}"
-                                    },
-                                    style = MaterialTheme.typography.labelMedium,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldPrimary
-                                )
-                                Text(
-                                    text = userProfile.streamOrDegree.ifBlank { "Stream not set" },
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
+                            Row(
+                                modifier = Modifier.padding(start = 12.dp, top = 10.dp, bottom = 10.dp, end = 6.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (userProfile.targetExam.isBlank()) {
+                                            "Curriculum not set"
+                                        } else {
+                                            "Target Exam: ${userProfile.targetExam}"
+                                        },
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldPrimary
+                                    )
+                                    Text(
+                                        text = when {
+                                            academic.summary().isNotBlank() -> academic.summary()
+                                            userProfile.streamOrDegree.isNotBlank() ->
+                                                userProfile.streamOrDegree
+                                            else -> "Stream not set"
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Text(
+                                        text = if (academic.subjects.isEmpty()) {
+                                            "Add your 3 subjects so we can match you with the right help."
+                                        } else {
+                                            academic.subjectLabels().joinToString(" · ")
+                                        },
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = if (academic.subjects.isEmpty()) {
+                                            EmeraldPrimary
+                                        } else {
+                                            MaterialTheme.colorScheme.onSurfaceVariant
+                                        },
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                TextButton(
+                                    onClick = onEditAcademic,
+                                    modifier = Modifier.testTag("profile_edit_academic")
+                                ) {
+                                    Text(
+                                        text = if (academic.isComplete) "Edit" else "Add",
+                                        style = MaterialTheme.typography.labelLarge,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldPrimary
+                                    )
+                                }
                             }
                         }
 

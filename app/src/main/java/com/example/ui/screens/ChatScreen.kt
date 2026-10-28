@@ -401,13 +401,33 @@ private fun ChatPeerProfileScreen(
                                 value = profile.targetExam
                             )
                         }
-                        if (profile.streamOrDegree.isNotBlank()) {
+                        if (profile.streamLine.isNotBlank()) {
                             ProfileInfoRow(
                                 icon = Icons.Default.School,
                                 tint = Color(0xFF0EA5E9),
                                 tintSoft = Color(0xFFE0F2FE),
-                                label = "Stream / degree",
-                                value = profile.streamOrDegree
+                                label = "Stream",
+                                value = profile.streamLine
+                            )
+                        }
+                        if (profile.subjects.isNotEmpty()) {
+                            // The three subjects are what actually decide whether
+                            // this student can help with a specific question.
+                            ProfileInfoRow(
+                                icon = Icons.Default.AutoStories,
+                                tint = Color(0xFF8B5CF6),
+                                tintSoft = Color(0xFFF1EAFE),
+                                label = "Subjects",
+                                value = profile.subjects.joinToString(" · ")
+                            )
+                        }
+                        if (profile.medium.isNotBlank()) {
+                            ProfileInfoRow(
+                                icon = Icons.Default.Translate,
+                                tint = Color(0xFF14B8A6),
+                                tintSoft = Color(0xFFD9F7F1),
+                                label = "Medium",
+                                value = profile.medium
                             )
                         }
                         if (profile.institution.isNotBlank()) {

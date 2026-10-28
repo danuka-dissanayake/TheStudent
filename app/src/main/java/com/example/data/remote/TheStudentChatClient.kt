@@ -350,11 +350,25 @@ object TheStudentChatClient {
         get(backendBaseUrl, token, "profile", query = "peer_id=$peerId") { json ->
             val peerJson = json.optJSONObject("peer") ?: JSONObject()
             val education = json.optJSONObject("education") ?: JSONObject()
+            val subjects = ArrayList<String>(3)
+            val subjectsJson = education.optJSONArray("subjects")
+            if (subjectsJson != null) {
+                for (index in 0 until subjectsJson.length()) {
+                    val item = subjectsJson.optJSONObject(index) ?: continue
+                    val label = item.optString("label").trim()
+                    if (label.isNotEmpty()) subjects.add(label)
+                }
+            }
             ChatPeerProfile(
                 peer = parsePeer(peerJson),
                 targetExam = education.optString("target_exam"),
                 streamOrDegree = education.optString("stream_or_degree"),
                 institution = education.optString("institution"),
+                streamCode = education.optString("stream_code"),
+                examLevel = education.optString("exam_level"),
+                examYear = education.optInt("exam_year", 0).takeIf { it > 0 },
+                medium = education.optString("medium"),
+                subjects = subjects,
                 joinedEpoch = if (json.isNull("joined_epoch")) {
                     null
                 } else {

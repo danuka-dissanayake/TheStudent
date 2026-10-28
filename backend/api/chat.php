@@ -65,7 +65,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.4.0';
+const TS_CHAT_API_VERSION          = '2.5.0';
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -796,6 +796,48 @@ switch ($action) {
                 ts_chat_json('error', 'That student is no longer available.', [], 404);
             }
 
+            // Structured academic profile (stream / level / year / medium +
+            // the three subjects). Read in its own guarded query so a relay
+            // deployed before the auth schema migration still returns a profile
+            // instead of a 500.
+            $academic = ['stream_code' => '', 'exam_level' => '', 'exam_year' => 0, 'medium' => ''];
+            $subjects = [];
+            try {
+                $acStmt = $pdo->prepare(
+                    'SELECT stream_code, exam_level, exam_year, medium
+                     FROM users WHERE id = :id LIMIT 1'
+                );
+                $acStmt->execute(['id' => $peerId]);
+                $acRow = $acStmt->fetch();
+                if ($acRow) {
+                    $academic = [
+                        'stream_code' => (string) ($acRow['stream_code'] ?? ''),
+                        'exam_level'  => (string) ($acRow['exam_level'] ?? ''),
+                        'exam_year'   => (int) ($acRow['exam_year'] ?? 0),
+                        'medium'      => (string) ($acRow['medium'] ?? ''),
+                    ];
+                }
+            } catch (Throwable $e) {
+                // Older schema: fall back to the free-text fields only.
+            }
+            try {
+                $subStmt = $pdo->prepare(
+                    'SELECT subject_code, subject_label
+                     FROM user_subjects
+                     WHERE user_id = :id
+                     ORDER BY position ASC, id ASC'
+                );
+                $subStmt->execute(['id' => $peerId]);
+                foreach ($subStmt->fetchAll() as $sub) {
+                    $subjects[] = [
+                        'code'  => (string) $sub['subject_code'],
+                        'label' => (string) $sub['subject_label'],
+                    ];
+                }
+            } catch (Throwable $e) {
+                // No subjects table yet: the client simply shows nothing.
+            }
+
             // Allow-list only: the SELECT above never touches email, phone,
             // password_hash, role, auth_provider or any login metadata.
             $joinedEpoch = (int) ($row['joined_epoch'] ?? 0);
@@ -805,6 +847,11 @@ switch ($action) {
                     'target_exam'      => trim((string) ($row['target_exam'] ?? '')),
                     'stream_or_degree' => trim((string) ($row['stream_or_degree'] ?? '')),
                     'institution'      => trim((string) ($row['institution'] ?? '')),
+                    'stream_code'      => $academic['stream_code'],
+                    'exam_level'       => $academic['exam_level'],
+                    'exam_year'        => $academic['exam_year'],
+                    'medium'           => $academic['medium'],
+                    'subjects'         => $subjects,
                 ],
                 'joined_epoch' => $joinedEpoch > 0 ? $joinedEpoch : null,
                 'server_epoch' => $now,

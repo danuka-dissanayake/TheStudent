@@ -82,8 +82,11 @@ const TS_PROFILE_STREAM_MAX         = 150;
 /** Curricula the profile screen offers. Anything else is rejected. */
 const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Professional'];
 
+/** Mediums the academic step offers. Free text here would split matching later. */
+const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
+
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.2.0';
+const TS_API_VERSION                = '3.3.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -268,6 +271,23 @@ function ensureAuthSchema(PDO $pdo): void
             INDEX `idx_user_token` (`user_id`)
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
 
+        // Structured academic profile (step 1 of the help-matching work).
+        // One row per subject, so the matching query can JOIN on overlap
+        // instead of trying to parse free text.
+        'user_subjects' => "CREATE TABLE IF NOT EXISTS `user_subjects` (
+            `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+            `user_id` INT UNSIGNED NOT NULL,
+            `subject_code` VARCHAR(64) NOT NULL,
+            `subject_label` VARCHAR(120) NOT NULL,
+            `exam_level` VARCHAR(16) NOT NULL DEFAULT 'AL',
+            `bucket_no` TINYINT UNSIGNED NULL DEFAULT NULL,
+            `position` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+            `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE KEY `uniq_user_subject` (`user_id`, `subject_code`),
+            KEY `idx_subject_code` (`subject_code`),
+            KEY `idx_subject_user` (`user_id`)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci",
+
         'login_attempts' => "CREATE TABLE IF NOT EXISTS `login_attempts` (
             `id` INT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
             `ip_address` VARCHAR(45) NOT NULL,
@@ -302,6 +322,12 @@ function ensureAuthSchema(PDO $pdo): void
     // Profile completion (added with the mandatory profile-setup screen).
     ts_ensure_column($pdo, 'users', 'phone', 'VARCHAR(20) NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'profile_completed_at', 'DATETIME NULL DEFAULT NULL');
+    // Structured academic profile: stream / level / exam year / medium.
+    ts_ensure_column($pdo, 'users', 'stream_code', 'VARCHAR(64) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'exam_level', 'VARCHAR(16) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'exam_year', 'SMALLINT UNSIGNED NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'medium', 'VARCHAR(16) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'academic_updated_at', 'DATETIME NULL DEFAULT NULL');
 
     ts_ensure_column($pdo, 'email_verifications', 'attempts', 'TINYINT UNSIGNED NOT NULL DEFAULT 0');
     ts_ensure_column($pdo, 'email_verifications', 'is_used', 'TINYINT(1) NOT NULL DEFAULT 0');
@@ -838,7 +864,48 @@ function revokeAllSessions(PDO $pdo, int $userId): void
 // ---------------------------------------------------------------------------
 // User payload
 // ---------------------------------------------------------------------------
-function publicUser(array $user): array
+/**
+ * The subject list for a student, newest schema first.
+ *
+ * Returns [] instead of throwing when the table is missing, so a half-applied
+ * deploy degrades to "no subjects yet" rather than a 500 on every login.
+ */
+function ts_user_subjects(PDO $pdo, int $userId): array
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT subject_code, subject_label, exam_level, bucket_no
+             FROM user_subjects
+             WHERE user_id = :id
+             ORDER BY position ASC, id ASC'
+        );
+        $stmt->execute(['id' => $userId]);
+        $out = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $out[] = [
+                'code'        => (string) $row['subject_code'],
+                'label'       => (string) $row['subject_label'],
+                'exam_level'  => (string) $row['exam_level'],
+                'bucket'      => $row['bucket_no'] !== null ? (int) $row['bucket_no'] : null,
+            ];
+        }
+        return $out;
+    } catch (Throwable $e) {
+        error_log('[TheStudent][auth] could not read subjects: ' . $e->getMessage());
+        return [];
+    }
+}
+
+/** True once level + year + medium + all three subjects are on file. */
+function ts_academic_complete(array $user, array $subjects): bool
+{
+    return trim((string) ($user['exam_level'] ?? '')) !== ''
+        && trim((string) ($user['medium'] ?? '')) !== ''
+        && (int) ($user['exam_year'] ?? 0) > 0
+        && count($subjects) === 3;
+}
+
+function publicUser(array $user, array $subjects = []): array
 {
     return [
         'id'              => (int) $user['id'],
@@ -856,6 +923,13 @@ function publicUser(array $user): array
         'target_exam'     => $user['target_exam'] ?? 'G.C.E. A/L',
         'institution'     => $user['institution'] ?? null,
         'stream_or_degree' => $user['stream_or_degree'] ?? null,
+        // Structured academic profile used by matching + the chat profile.
+        'exam_level'      => $user['exam_level'] ?? null,
+        'stream_code'     => $user['stream_code'] ?? null,
+        'exam_year'       => isset($user['exam_year']) ? (int) $user['exam_year'] : null,
+        'medium'          => $user['medium'] ?? null,
+        'subjects'        => $subjects,
+        'academic_complete' => ts_academic_complete($user, $subjects),
         'role'            => $user['role'] ?? 'student',
         'auth_provider'   => $user['auth_provider'] ?? 'email',
         'is_verified'     => (bool) ($user['is_email_verified'] ?? false),
@@ -1253,7 +1327,7 @@ if ($action === 'complete_profile') {
 
     $message = $alreadyComplete ? 'Profile updated.' : 'Profile complete. Welcome to TheStudent!';
     sendJsonResponse('success', $message, [
-        'user'       => publicUser($updatedUser),
+        'user'       => publicUser($updatedUser, ts_user_subjects($pdo, (int) $updatedUser['id'])),
         'role'       => $updatedUser['role'] ?? 'student',
         'expires_at' => null,
     ]);
@@ -1261,6 +1335,192 @@ if ($action === 'complete_profile') {
 
 // ===========================================================================
 // 2. LOGIN (email + password)
+// ===========================================================================
+// 5b. STRUCTURED ACADEMIC PROFILE  (?action=academic_profile)
+// ===========================================================================
+/**
+ * Save the stream / level / exam year / medium / three subjects.
+ *
+ * This is the data the help-matching algorithm reads. It lives in its own
+ * endpoint (not complete_profile) for two reasons:
+ *   • a student whose profile is already complete must be able to edit it
+ *     later without re-sending phone, photo or password;
+ *   • replacing the subject list is a transaction (delete + insert), which
+ *     must never be able to leave half a profile behind.
+ *
+ * The subject catalog itself lives in the app (SriLankanCurriculumConfig) so
+ * the syllabus can change without a server deploy. The server enforces the
+ * *shape*: level, year range, medium, exactly three distinct subjects, and —
+ * for O/L — one subject per bucket.
+ */
+if ($action === 'academic_profile') {
+    requirePost('academic_profile');
+
+    [$academicUser] = requireSession($pdo, false);
+    $academicUserId = (int) $academicUser['id'];
+
+    $level = strtoupper(trim((string) ($body['exam_level'] ?? '')));
+    if ($level !== 'AL' && $level !== 'OL') {
+        sendJsonResponse('error', 'Choose A/L or O/L first.', ['field' => 'exam_level'], 400);
+    }
+
+    $medium = trim((string) ($body['medium'] ?? ''));
+    if (!in_array($medium, TS_ALLOWED_MEDIUMS, true)) {
+        sendJsonResponse('error', 'Choose your medium of study.', ['field' => 'medium'], 400);
+    }
+
+    // Two years back (repeating a paper) to six years ahead (Grade 12).
+    $examYear = (int) ($body['exam_year'] ?? 0);
+    $thisYear = (int) date('Y');
+    if ($examYear < $thisYear - 2 || $examYear > $thisYear + 6) {
+        sendJsonResponse('error', 'Choose a valid exam year.', ['field' => 'exam_year'], 400);
+    }
+
+    $streamCode = '';
+    if ($level === 'AL') {
+        $streamCode = validateProfileText($body['stream_code'] ?? '', 'Stream', 2, 64);
+    }
+
+    $rawSubjects = $body['subjects'] ?? [];
+    if (!is_array($rawSubjects)) {
+        $rawSubjects = [];
+    }
+    if (count($rawSubjects) !== 3) {
+        sendJsonResponse('error', 'Choose exactly 3 subjects.', ['field' => 'subjects'], 400);
+    }
+
+    $subjectRows = [];
+    $seenCodes = [];
+    $seenBuckets = [];
+    foreach (array_values($rawSubjects) as $position => $item) {
+        $label = '';
+        $bucket = null;
+        if (is_array($item)) {
+            $label = (string) ($item['label'] ?? '');
+            if (isset($item['bucket']) && $item['bucket'] !== null && $item['bucket'] !== '') {
+                $bucket = (int) $item['bucket'];
+            }
+        } else {
+            $label = (string) $item;
+        }
+
+        $label = validateProfileText($label, 'Subject', 2, 120);
+
+        // A stable slug is the join key for matching; the label stays human.
+        $slug = strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '_', $label));
+        $slug = trim($slug, '_');
+        if ($slug === '') {
+            $slug = 'subject_' . $position;
+        }
+        $slug = substr($slug, 0, 64);
+
+        if (isset($seenCodes[$slug])) {
+            sendJsonResponse('error', 'That subject is already selected.', ['field' => 'subjects'], 400);
+        }
+        $seenCodes[$slug] = true;
+
+        if ($level === 'OL') {
+            if ($bucket === null || $bucket < 1 || $bucket > 3) {
+                sendJsonResponse(
+                    'error',
+                    'Each O/L optional subject must come from one of the three buckets.',
+                    ['field' => 'subjects'],
+                    400
+                );
+            }
+            if (isset($seenBuckets[$bucket])) {
+                sendJsonResponse(
+                    'error',
+                    'Choose only one subject from each bucket.',
+                    ['field' => 'subjects'],
+                    400
+                );
+            }
+            $seenBuckets[$bucket] = true;
+        } else {
+            $bucket = null;
+        }
+
+        $subjectRows[] = [
+            'code'     => $slug,
+            'label'    => $label,
+            'bucket'   => $bucket,
+            'position' => (int) $position,
+        ];
+    }
+
+    if ($level === 'OL' && count($seenBuckets) !== 3) {
+        sendJsonResponse('error', 'Choose one subject from each bucket.', ['field' => 'subjects'], 400);
+    }
+
+    try {
+        $pdo->beginTransaction();
+
+        $update = $pdo->prepare(
+            'UPDATE users SET
+                exam_level = :level,
+                stream_code = :stream,
+                exam_year = :year,
+                medium = :medium,
+                academic_updated_at = NOW(),
+                updated_at = NOW()
+             WHERE id = :id'
+        );
+        $update->execute([
+            'level'  => $level,
+            'stream' => $streamCode,
+            'year'   => $examYear,
+            'medium' => $medium,
+            'id'     => $academicUserId,
+        ]);
+
+        $pdo->prepare('DELETE FROM user_subjects WHERE user_id = :id')
+            ->execute(['id' => $academicUserId]);
+
+        $insert = $pdo->prepare(
+            'INSERT INTO user_subjects
+                (user_id, subject_code, subject_label, exam_level, bucket_no, position)
+             VALUES (:user_id, :code, :label, :level, :bucket, :position)'
+        );
+        foreach ($subjectRows as $row) {
+            $insert->execute([
+                'user_id'  => $academicUserId,
+                'code'     => $row['code'],
+                'label'    => $row['label'],
+                'level'    => $level,
+                'bucket'   => $row['bucket'],
+                'position' => $row['position'],
+            ]);
+        }
+
+        $pdo->commit();
+    } catch (Throwable $e) {
+        if ($pdo->inTransaction()) {
+            $pdo->rollBack();
+        }
+        $ref = bin2hex(random_bytes(4));
+        error_log('[TheStudent][auth][' . $ref . '] academic_profile failed: ' . $e->getMessage());
+        sendJsonResponse(
+            'error',
+            'We could not save your subjects right now. Reference: ' . $ref,
+            ['ref' => $ref],
+            500
+        );
+    }
+
+    $fresh = $pdo->prepare(
+        'SELECT * FROM users WHERE id = :id LIMIT 1'
+    );
+    $fresh->execute(['id' => $academicUserId]);
+    $freshUser = $fresh->fetch() ?: $academicUser;
+    $freshSubjects = ts_user_subjects($pdo, $academicUserId);
+
+    sendJsonResponse('success', 'Your academic details are saved.', [
+        'user' => publicUser($freshUser, $freshSubjects),
+        'academic_complete' => ts_academic_complete($freshUser, $freshSubjects),
+    ]);
+}
+
 // ===========================================================================
 if ($action === 'login') {
     requirePost('login');
@@ -1350,7 +1610,7 @@ if ($action === 'login') {
     sendJsonResponse('success', 'Login successful', [
         'token'      => $session['token'],
         'expires_at' => $session['expires_at'],
-        'user'       => publicUser($user + ['is_email_verified' => 1]),
+        'user'       => publicUser($user + ['is_email_verified' => 1], ts_user_subjects($pdo, (int) $user['id'])),
     ]);
 }
 
@@ -1565,7 +1825,7 @@ if ($action === 'verify_otp') {
     sendJsonResponse('success', 'Email verified. Welcome to TheStudent!', [
         'token'      => $session['token'],
         'expires_at' => $session['expires_at'],
-        'user'       => publicUser($user),
+        'user'       => publicUser($user, ts_user_subjects($pdo, (int) $user['id'])),
     ]);
 }
 
@@ -1749,7 +2009,7 @@ if ($action === 'change_password') {
     sendJsonResponse('success', 'Password updated. Other devices have been signed out.', [
         'token'      => $session['token'],
         'expires_at' => $session['expires_at'],
-        'user'       => publicUser($user),
+        'user'       => publicUser($user, ts_user_subjects($pdo, (int) $user['id'])),
     ]);
 }
 
@@ -1854,7 +2114,7 @@ if ($action === 'google_login') {
             'user'       => publicUser(array_merge($user, [
                 'full_name'       => $fullName !== '' ? $fullName : ($user['full_name'] ?? 'Student'),
                 'profile_picture' => $profilePicture ?? ($user['profile_picture'] ?? null),
-            ])),
+            ]), ts_user_subjects($pdo, $userId)),
         ]);
     }
 
@@ -1942,7 +2202,7 @@ if ($action === 'me' || $action === 'profile') {
 
     sendJsonResponse('success', 'User profile retrieved', [
         'expires_at' => $expiresAt,
-        'user'       => publicUser($user),
+        'user'       => publicUser($user, ts_user_subjects($pdo, (int) $user['id'])),
     ]);
 }
 

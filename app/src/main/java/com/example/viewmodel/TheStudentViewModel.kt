@@ -109,6 +109,13 @@ data class TheStudentUiState(
     val isSavingProfile: Boolean = false,
     val profileSetupError: String? = null,
 
+    // Structured academic profile (A/L or O/L, stream, subjects, medium).
+    // Opened from the profile screen; also the data the matching algorithm
+    // will read once the directory is ranked.
+    val isAcademicSetupOpen: Boolean = false,
+    val isSavingAcademic: Boolean = false,
+    val academicSetupError: String? = null,
+
     // Redesigned AI Tutor (English Voice Assistant with Hugging Face Qwen/Gemma)
     val voiceAssistantState: AssistantVoiceState = AssistantVoiceState.IDLE,
     val micRmsDb: Float = 0f,
@@ -1951,6 +1958,102 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val firstName = profile.name.trim().split(" ").firstOrNull() ?: "Student"
             showSnackbar("Welcome to TheStudent, $firstName!")
             simulateSkeletonRefresh()
+        }
+    }
+
+    // ── Structured academic profile ──────────────────────────────────────────
+    /**
+     * Open the academic step (stream, three subjects, exam year, medium).
+     *
+     * Every other new feature — matching, help requests, per-subject ratings —
+     * reads from what is saved here, so this is the first thing the profile
+     * screen nudges a student to finish.
+     */
+    fun openAcademicSetup() {
+        _uiState.update {
+            it.copy(isAcademicSetupOpen = true, academicSetupError = null)
+        }
+    }
+
+    /** Close the academic step. Refused while a save is in flight. */
+    fun closeAcademicSetup() {
+        if (_uiState.value.isSavingAcademic) return
+        _uiState.update {
+            it.copy(isAcademicSetupOpen = false, academicSetupError = null)
+        }
+    }
+
+    fun dismissAcademicSetupError() {
+        _uiState.update { it.copy(academicSetupError = null) }
+    }
+
+    /**
+     * Persist the academic profile.
+     *
+     * The server validates the shape (3 distinct subjects, one per O/L bucket,
+     * a sane year, a known medium); this only prepares the request. On success
+     * the refreshed profile replaces the cached one, so the profile screen and
+     * the chat profile immediately show the new subjects.
+     */
+    fun saveAcademicProfile(profile: AcademicProfile) {
+        if (_uiState.value.isSavingAcademic) return
+
+        val token = preferences.sessionToken
+        if (token.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(academicSetupError = "Your session expired. Please sign in again.")
+            }
+            endSession("Your session expired. Please sign in again.", revokeOnServer = false)
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSavingAcademic = true, academicSetupError = null) }
+
+            val result = TheStudentAuthClient.saveAcademicProfile(
+                backendBaseUrl = serverUrlState.value,
+                token = token,
+                profile = profile
+            )
+
+            when (result) {
+                is AuthApiResult.Success -> {
+                    val saved = result.profile.copy(isLoggedIn = true)
+                    repository.saveUserProfile(saved)
+                    _uiState.update {
+                        it.copy(
+                            isSavingAcademic = false,
+                            isAcademicSetupOpen = false,
+                            academicSetupError = null
+                        )
+                    }
+                    showSnackbar("Subjects saved — matching will use them from now on")
+                    simulateSkeletonRefresh()
+                }
+
+                is AuthApiResult.Error -> {
+                    _uiState.update {
+                        it.copy(isSavingAcademic = false, academicSetupError = result.message)
+                    }
+                    if (result.invalidatesSession) {
+                        endSession(result.message, revokeOnServer = false)
+                    }
+                }
+
+                is AuthApiResult.RequiresOtp -> _uiState.update {
+                    it.copy(
+                        isSavingAcademic = false,
+                        academicSetupError = "Please verify your email address first."
+                    )
+                }
+
+                is AuthApiResult.ResetRequired -> _uiState.update {
+                    it.copy(
+                        isSavingAcademic = false,
+                        academicSetupError = "Please sign in again to continue."
+                    )
+                }
+            }
         }
     }
 

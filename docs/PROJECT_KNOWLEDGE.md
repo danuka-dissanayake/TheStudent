@@ -133,6 +133,15 @@ plus a local Room table that owns the actual history.
   message**, so the renderer must mirror it on the other device
   (`if (bubble.isMine) reply.isMine else !reply.isMine`); otherwise every quote
   reads "You" on both phones.
+* **Academic profile is structured on purpose.** `users.stream_code`,
+  `exam_level` (`AL`/`OL`), `exam_year`, `medium` + one row per subject in
+  `user_subjects` (`UNIQUE(user_id, subject_code)`). Free-text
+  `stream_or_degree` stays for display only — it can never be matched on,
+  because two "Technology" students may share zero subjects.
+  `POST ?action=academic_profile` replaces the subject list inside a
+  transaction; the app owns the catalog (`AcademicCatalog`), the server owns
+  the shape (exactly 3 distinct subjects, one per O/L bucket, sane year).
+  Matching must JOIN `user_subjects`, never `LIKE` on the free text.
 * `action=profile` returns an allow-list only (name, photo, target exam, stream,
   institution, presence, joined month). Nothing account-identifying is in the
   SELECT at all, so the chat profile screen cannot leak contact details.
