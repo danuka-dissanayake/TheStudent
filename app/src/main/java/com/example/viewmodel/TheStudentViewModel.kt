@@ -113,6 +113,10 @@ data class TheStudentUiState(
     val isSavingProfile: Boolean = false,
     val profileSetupError: String? = null,
 
+    // Editing your own details from the Account page ("Edit details").
+    val isSavingAccount: Boolean = false,
+    val accountSaveError: String? = null,
+
     // Structured academic profile (A/L or O/L, stream, subjects, medium).
     // Opened from the profile screen; also the data the matching algorithm
     // will read once the directory is ranked.
@@ -2843,6 +2847,87 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /** Sign out of this device (server session revoked, local state cleared). */
     fun logout() {
         endSession("Logged out successfully.")
+    }
+
+    /**
+     * Save the details edited on the Account page.
+     *
+     * Only the fields that actually changed are sent, so a student who just
+     * swapped their photo cannot accidentally rewrite their phone number with a
+     * half-typed value. The session is never touched here — saving your own
+     * details must not look like a sign-out.
+     */
+    fun updateAccountDetails(
+        fullName: String,
+        phone: String,
+        institution: String,
+        avatarJpeg: ByteArray? = null
+    ) {
+        if (_uiState.value.isSavingAccount) return
+
+        val token = preferences.sessionToken
+        if (token.isNullOrBlank()) {
+            _uiState.update {
+                it.copy(accountSaveError = "Your session expired. Please sign in again.")
+            }
+            return
+        }
+
+        val current = userProfile.value
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSavingAccount = true, accountSaveError = null) }
+
+            val result = TheStudentAuthClient.updateProfile(
+                backendBaseUrl = serverUrlState.value,
+                token = token,
+                fullName = fullName.takeIf { it != current.name },
+                phone = phone.takeIf { it != current.phone },
+                institution = institution.takeIf { it != current.institution },
+                avatarJpeg = avatarJpeg
+            )
+
+            when (result) {
+                is AuthApiResult.Success -> {
+                    val merged = result.profile.copy(
+                        isLoggedIn = true,
+                        profileCompleted = current.profileCompleted,
+                        // Local academic data wins: the update endpoint does not
+                        // touch level/stream/subjects, so echo what we already had.
+                        academic = current.academic,
+                        streakDays = current.streakDays,
+                        totalPapersSolved = current.totalPapersSolved,
+                        studyHoursThisWeek = current.studyHoursThisWeek
+                    )
+                    repository.saveUserProfile(merged)
+                    preferences.userName = merged.name
+                    _uiState.update {
+                        it.copy(
+                            isSavingAccount = false,
+                            accountSaveError = null
+                        )
+                    }
+                    showSnackbar("Your details are saved.")
+                }
+
+                is AuthApiResult.Error -> _uiState.update {
+                    it.copy(isSavingAccount = false, accountSaveError = result.message)
+                }
+
+                is AuthApiResult.RequiresOtp -> _uiState.update {
+                    it.copy(
+                        isSavingAccount = false,
+                        accountSaveError = "Please finish verifying your email first."
+                    )
+                }
+
+                is AuthApiResult.ResetRequired -> _uiState.update {
+                    it.copy(
+                        isSavingAccount = false,
+                        accountSaveError = "Please sign in again to edit your details."
+                    )
+                }
+            }
+        }
     }
 
     /**

@@ -397,6 +397,42 @@ object TheStudentAuthClient {
     }
 
     /**
+     * Edit name / phone / school / photo.
+     *
+     * Deliberately separate from [completeProfile]: that endpoint is the setup
+     * gate and demands an exam, a stream and a password. Here every field is
+     * optional — anything left null is not sent, so it is not overwritten.
+     */
+    suspend fun updateProfile(
+        backendBaseUrl: String,
+        token: String,
+        fullName: String? = null,
+        phone: String? = null,
+        institution: String? = null,
+        avatarJpeg: ByteArray? = null
+    ): AuthApiResult = withContext(Dispatchers.IO) {
+        val bodyBuilder = MultipartBody.Builder().setType(MultipartBody.FORM)
+        fullName?.let { bodyBuilder.addFormDataPart("full_name", it.trim()) }
+        phone?.let { bodyBuilder.addFormDataPart("phone", it.trim()) }
+        institution?.let { bodyBuilder.addFormDataPart("institution", it.trim()) }
+        if (avatarJpeg != null && avatarJpeg.isNotEmpty()) {
+            bodyBuilder.addFormDataPart(
+                "avatar",
+                "avatar.jpg",
+                avatarJpeg.toRequestBody("image/jpeg".toMediaType())
+            )
+        }
+
+        executeAuth(
+            Request.Builder()
+                .url(endpoint(backendBaseUrl, "update_profile"))
+                .post(bodyBuilder.build())
+                .header("Accept", "application/json")
+                .header("Authorization", "Bearer $token")
+        )
+    }
+
+    /**
      * Save the structured academic profile (level, stream, exam year, medium
      * and the three subjects).
      *

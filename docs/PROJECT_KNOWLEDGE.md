@@ -65,7 +65,8 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `AiTutorScreen.kt` | 603 | English voice tutor: visualizer, transcript, grammar tip, scenario pills, hands-free, HF settings |
 | `AiLanguageScreen.kt` | 786 | 4 sub-tabs: Voice Conversation, Vocabulary, Grammar quiz, Pronunciation |
 | `AiAssistantScreen.kt` | 4526 | **Flagship**: ChatGPT-style chat, markdown/table/link rendering, chain-of-thought reasoning blocks, model picker, OCR preview, document cards, stop/retry/rate |
-| `ProfileScreen.kt` | ~1050 | The student's own record: identity hero (avatar, name, level chip), stats strip, level + badge ladder, reputation card (average, distribution, the private notes only they can read), studies card with subject rows, library tabs (saved / courses / history), and account rows (account, security, appearance, admin, sign out behind a confirmation). Opens `ExpScreen`, `SecurityScreen`, `AdminPanelScreen`. |
+| `AccountScreen.kt` | ~640 | The account page opened from Profile: editable photo, name, phone and school (e-mail and password are read-only there), session facts, password & devices, sign out. Kept separate from the sign-in flow on purpose — opening your own details must never look like a logout. |
+| `ProfileScreen.kt` | ~1080 | The student's own record: identity hero (avatar, name, level chip), stats strip, level + badge ladder, reputation card (average, distribution, the private notes only they can read), studies card with subject rows, library tabs (saved / courses / history), and account rows (account, security, appearance, admin, sign out behind a confirmation). Opens `ExpScreen`, `SecurityScreen`, `AdminPanelScreen`. |
 | `AdminPanelScreen.kt` | 1103 | Upload form (thumbnail/PDF/marking-scheme pickers), paper list + delete, backend URL tester |
 | `LearnScreen.kt` | 428 | **Orphaned** — never referenced from `MainActivity` |
 
@@ -310,6 +311,12 @@ No account reaches the dashboard until `users.profile_completed_at` is set.
   dimensions, MIME), re-encodes them to JPEG with GD (kills polyglots/EXIF),
   stores a random 32-hex name in `uploads/avatars/`, and that folder denies
   script execution.
+* Editing later is a *different* endpoint: `POST api/auth.php?action=update_profile`
+  `{full_name?, phone?, institution?, avatar?}` `[Bearer]`. Every field is
+  optional (only what is sent is written), it never asks for the target exam or a
+  password, and it never marks the profile complete again — so fixing a typo or
+  changing your photo cannot re-trigger setup or re-award the `profile_complete`
+  EXP.
 * Android: `AppScreenFlow.PROFILE_SETUP` between AUTH and MAIN,
   `ui/screens/ProfileSetupScreen.kt`, `data/remote/AvatarPreparer.kt`,
   `TheStudentAuthClient.completeProfile()`, Room v2 migration for the new

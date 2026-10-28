@@ -17,6 +17,8 @@
  *   POST google_login            {id_token, target_exam?}
  *   POST complete_profile        multipart or JSON {full_name, phone, target_exam,
  *                                institution, stream_or_degree, password?, avatar?}
+ *   POST update_profile          multipart or JSON {full_name?, phone?, institution?,
+ *                                avatar?}                                [Bearer]
  *   GET  me                      [Bearer]  (alias: profile)
  *   POST delete_account          {password?}                        [Bearer]
  *   POST logout                  [Bearer]
@@ -87,7 +89,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.3.0';
+const TS_API_VERSION                = '3.4.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -1362,6 +1364,109 @@ if ($action === 'complete_profile') {
             (int) $updatedUser['id']
         ),
         'role'       => $updatedUser['role'] ?? 'student',
+        'expires_at' => null,
+    ]);
+}
+
+// ===========================================================================
+// 1b. EDIT YOUR OWN DETAILS  (?action=update_profile)
+// ===========================================================================
+/**
+ * Edit name, phone, school and photo without touching the academic profile.
+ *
+ * `complete_profile` is the setup step: it insists on a target exam, a stream
+ * and (for a Google-only account) a password, and it marks the profile complete.
+ * A student who simply wants to fix a typo in their name, or put a new photo up,
+ * must not have to re-send all of that — and must never be told "say which exam
+ * you are sitting" by a screen that only edits a phone number.
+ *
+ * Every field is optional; only what is sent is written. Nothing here can change
+ * the e-mail (that is the sign-in identity), the role, or the exam data.
+ */
+if ($action === 'update_profile') {
+    requirePost('update_profile');
+
+    [$editUser] = requireSession($pdo, false);
+    $editUserId = (int) $editUser['id'];
+    $previousAvatar = $editUser['profile_picture'] ?? null;
+
+    $sets = [];
+    $params = ['id' => $editUserId];
+
+    if (array_key_exists('full_name', $body)) {
+        $newName = validateProfileText($body['full_name'] ?? '', 'Full name', TS_PROFILE_NAME_MIN, TS_PROFILE_NAME_MAX);
+        $sets[] = 'full_name = :full_name';
+        $params['full_name'] = $newName;
+    }
+
+    if (array_key_exists('phone', $body)) {
+        $sets[] = 'phone = :phone';
+        $params['phone'] = $newPhone;
+    }
+
+    if (array_key_exists('institution', $body)) {
+        $newInstitution = validateProfileText(
+            $body['institution'] ?? '',
+            'School or institution',
+            TS_PROFILE_INSTITUTION_MIN,
+            TS_PROFILE_INSTITUTION_MAX
+        );
+        $sets[] = 'institution = :institution';
+        $params['institution'] = $newInstitution;
+    }
+
+    // ---- photo -----------------------------------------------------------
+    $avatarPath = null;
+    $avatarFile = $_FILES['avatar'] ?? null;
+    if (is_array($avatarFile) && ($avatarFile['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_NO_FILE) {
+        try {
+            $avatarPath = ts_store_avatar($avatarFile, $editUserId);
+        } catch (RuntimeException $e) {
+            sendJsonResponse('error', $e->getMessage(), ['field' => 'avatar'], 400);
+        }
+        $sets[] = 'profile_picture = :avatar';
+        $params['avatar'] = $avatarPath;
+    }
+
+    if (empty($sets)) {
+        sendJsonResponse('error', 'Nothing to change.', [], 400);
+    }
+
+    $sets[] = 'updated_at = NOW()';
+    $sql = 'UPDATE users SET ' . implode(', ', $sets) . ' WHERE id = :id';
+
+    try {
+        $pdo->prepare($sql)->execute($params);
+    } catch (Throwable $e) {
+        // Never leave an orphaned file behind when the row did not change.
+        if ($avatarPath !== null) {
+            ts_avatar_delete($avatarPath);
+        }
+        $ref = bin2hex(random_bytes(4));
+        error_log('[TheStudent][auth][' . $ref . '] update_profile failed: ' . $e->getMessage());
+        sendJsonResponse(
+            'error',
+            'We could not save your details right now. Reference: ' . $ref,
+            ['ref' => $ref],
+            500
+        );
+    }
+
+    if ($avatarPath !== null) {
+        ts_avatar_delete($previousAvatar);
+    }
+
+    $editFresh = $pdo->prepare('SELECT * FROM users WHERE id = :id');
+    $editFresh->execute(['id' => $editUserId]);
+    $editUpdated = $editFresh->fetch() ?: $editUser;
+
+    sendJsonResponse('success', 'Details updated.', [
+        'user'       => withExp(
+            $pdo,
+            publicUser($editUpdated, ts_user_subjects($pdo, $editUserId)),
+            $editUserId
+        ),
+        'role'       => $editUpdated['role'] ?? 'student',
         'expires_at' => null,
     ]);
 }

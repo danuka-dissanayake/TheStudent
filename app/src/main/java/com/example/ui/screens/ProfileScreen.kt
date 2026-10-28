@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.CircularProgressIndicator
@@ -92,6 +93,7 @@ fun ProfileScreen(
     isAdmin: Boolean,
     onToggleTheme: () -> Unit,
     onOpenAccount: () -> Unit,
+    onBack: () -> Unit = {},
     onPaperClick: (String) -> Unit,
     onCourseClick: (String) -> Unit = {},
     onEditAcademic: () -> Unit,
@@ -109,20 +111,22 @@ fun ProfileScreen(
     // infinite height and crash. The dialog below is composed by the caller's
     // window, so it does not need the Box to sit in.
     Column(modifier = modifier.fillMaxSize().background(ProfBg)) {
+        // Pinned above the list, not an item in it: the title and the two buttons
+        // must stay put while the record scrolls under them.
+        ProfileHeader(
+            onBack = onBack,
+            onOpenSecurity = onOpenSecurity,
+            onOpenAccount = onOpenAccount
+        )
+
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .weight(1f)
+                .fillMaxWidth()
                 .testTag("profile_screen_content"),
-            contentPadding = PaddingValues(bottom = 28.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 28.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp)
         ) {
-            item(key = "header") {
-                ProfileHeader(
-                    onOpenSecurity = onOpenSecurity,
-                    onOpenAccount = onOpenAccount
-                )
-            }
-
             item(key = "hero") {
                 IdentityHero(
                     userProfile = userProfile,
@@ -267,44 +271,66 @@ fun ProfileScreen(
 
 @Composable
 private fun ProfileHeader(
+    onBack: () -> Unit,
     onOpenSecurity: () -> Unit,
     onOpenAccount: () -> Unit
 ) {
-    Row(
+    Column(
         modifier = Modifier
             .fillMaxWidth()
+            .background(ProfBg)
             .statusBarsPadding()
-            .padding(start = 20.dp, end = 14.dp, top = 14.dp, bottom = 2.dp),
-        verticalAlignment = Alignment.CenterVertically
     ) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = "Profile",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 26.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = ProfInk,
-                letterSpacing = (-0.6).sp
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 14.dp, end = 14.dp, top = 8.dp, bottom = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            CircleGhostButton(
+                icon = Icons.AutoMirrored.Filled.ArrowBack,
+                description = "Back",
+                onClick = onBack,
+                tag = "profile_back"
             )
-            Text(
-                text = "Your studies, your record",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
-                color = ProfMuted
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Profile",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 21.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = ProfInk,
+                    letterSpacing = (-0.4).sp
+                )
+                Text(
+                    text = "Your record",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    color = ProfMuted
+                )
+            }
+            CircleGhostButton(
+                icon = Icons.Default.Shield,
+                description = "Security and sessions",
+                onClick = onOpenSecurity,
+                tag = "profile_security"
+            )
+            Spacer(Modifier.width(8.dp))
+            CircleGhostButton(
+                icon = Icons.Default.ManageAccounts,
+                description = "Account settings",
+                onClick = onOpenAccount,
+                tag = "profile_account"
             )
         }
-        CircleGhostButton(
-            icon = Icons.Default.Shield,
-            description = "Security and sessions",
-            onClick = onOpenSecurity,
-            tag = "profile_security"
-        )
-        Spacer(Modifier.width(8.dp))
-        CircleGhostButton(
-            icon = Icons.Default.ManageAccounts,
-            description = "Account settings",
-            onClick = onOpenAccount,
-            tag = "profile_account"
+        // Hairline: without it the cards slide under the title with nothing
+        // separating them, which reads as a rendering glitch.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(ProfHairline)
         )
     }
 }

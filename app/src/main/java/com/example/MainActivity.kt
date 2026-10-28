@@ -537,9 +537,18 @@ class MainActivity : ComponentActivity() {
                                                         if (uiState.isAccountOpen) {
                                                             AccountScreen(
                                                                 userProfile = userProfile,
+                                                                isSaving = uiState.isSavingAccount,
+                                                                saveError = uiState.accountSaveError,
                                                                 onBack = { viewModel.closeAccount() },
                                                                 onOpenSecurity = { viewModel.openSecurityPanel() },
-                                                                onEditAcademic = { viewModel.openAcademicSetup() },
+                                                                onSave = { name, phone, school, avatar ->
+                                                                    viewModel.updateAccountDetails(
+                                                                        fullName = name,
+                                                                        phone = phone,
+                                                                        institution = school,
+                                                                        avatarJpeg = avatar
+                                                                    )
+                                                                },
                                                                 onSignOut = { viewModel.logout() }
                                                             )
                                                         } else if (uiState.isAcademicSetupOpen) {
@@ -580,6 +589,7 @@ class MainActivity : ComponentActivity() {
                                                                 isAdmin = isAdmin,
                                                                 onToggleTheme = { viewModel.toggleTheme() },
                                                                 onOpenAccount = { viewModel.openAccount() },
+                                                                onBack = { viewModel.setTab(TheStudentNavTab.HOME) },
                                                                 onPaperClick = { paperId ->
                                                                     viewModel.allPapers.find { it.id == paperId }?.let {
                                                                         viewModel.openPaperDetail(it)
