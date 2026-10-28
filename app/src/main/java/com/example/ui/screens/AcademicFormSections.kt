@@ -20,6 +20,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.AcademicCatalog
@@ -257,6 +258,7 @@ fun streamOrDegreeFor(profile: AcademicProfile): String = when (profile.examLeve
 //  Stage sections
 // ─────────────────────────────────────────────────────────────────────────────
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun JuniorSection(
     studyYear: Int?,
@@ -272,14 +274,16 @@ private fun JuniorSection(
         subtitle = "Grades 6–9 are junior secondary: a common curriculum, no national exam.",
         flat = flat
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             AcademicCatalog.juniorGrades.forEach { grade ->
                 AcademicChoiceChip(
                     label = "Grade $grade",
                     selected = studyYear == grade,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("academic_grade_$grade"),
+                    modifier = Modifier.testTag("academic_grade_$grade"),
                     onClick = { onYear(grade) }
                 )
             }
@@ -306,6 +310,7 @@ private fun JuniorSection(
     MediumCard(medium = medium, onMedium = onMedium, flat = flat)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun OlSection(
     studyYear: Int?,
@@ -323,14 +328,16 @@ private fun OlSection(
         subtitle = "O/L is sat at the end of Grade 11.",
         flat = flat
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             AcademicCatalog.olGrades.forEach { grade ->
                 AcademicChoiceChip(
                     label = "Grade $grade",
                     selected = studyYear == grade,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("academic_grade_$grade"),
+                    modifier = Modifier.testTag("academic_grade_$grade"),
                     onClick = { onYear(grade) }
                 )
             }
@@ -383,6 +390,7 @@ private fun OlSection(
     MediumCard(medium = medium, onMedium = onMedium, flat = flat)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AlSection(
     stream: String,
@@ -462,14 +470,16 @@ private fun AlSection(
         subtitle = "A/L is a two-year programme — say which year you are in.",
         flat = flat
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             AcademicCatalog.alGrades.forEach { grade ->
                 AcademicChoiceChip(
                     label = "Grade $grade",
                     selected = studyYear == grade,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("academic_grade_$grade"),
+                    modifier = Modifier.testTag("academic_grade_$grade"),
                     onClick = { onYear(grade) }
                 )
             }
@@ -480,6 +490,7 @@ private fun AlSection(
     MediumCard(medium = medium, onMedium = onMedium, flat = flat)
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun UniSection(
     university: String,
@@ -510,24 +521,22 @@ private fun UniSection(
         subtitle = "The faculty or programme you are reading for.",
         flat = flat
     ) {
-        AcademicCatalog.degreeFields.chunked(2).forEach { pair ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                pair.forEach { field ->
-                    AcademicChoiceChip(
-                        label = field,
-                        selected = programme == field,
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("academic_field_" + AcademicCatalog.codeFor(field)),
-                        onClick = { onProgramme(field) }
-                    )
-                }
-                if (pair.size == 1) Spacer(Modifier.weight(1f))
+        // Content-width chips that wrap, not a two-column grid: "Architecture &
+        // Quantity Surveying" is three times the width of "Law", and forcing
+        // both into half the screen clipped the long ones on small phones.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            AcademicCatalog.degreeFields.forEach { field ->
+                AcademicChoiceChip(
+                    label = field,
+                    selected = programme == field,
+                    modifier = Modifier.testTag("academic_field_" + AcademicCatalog.codeFor(field)),
+                    onClick = { onProgramme(field) }
+                )
             }
-            Spacer(Modifier.height(8.dp))
         }
     }
 
@@ -536,14 +545,18 @@ private fun UniSection(
         subtitle = "Most degrees run three or four years; medicine and some others longer.",
         flat = flat
     ) {
-        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Six chips in six equal columns left ~44 dp each on a 360 dp phone,
+        // which is narrower than the word "Year" itself.
+        FlowRow(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             AcademicCatalog.studyYears.forEach { year ->
                 AcademicChoiceChip(
                     label = "Year $year",
                     selected = studyYear == year,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("academic_year_of_study_$year"),
+                    modifier = Modifier.testTag("academic_year_of_study_$year"),
                     onClick = { onYear(year) }
                 )
             }
@@ -581,6 +594,7 @@ private fun ExamYearCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MediumCard(medium: String, onMedium: (String) -> Unit, flat: Boolean) {
     AcademicSectionCard(
@@ -588,17 +602,16 @@ private fun MediumCard(medium: String, onMedium: (String) -> Unit, flat: Boolean
         subtitle = "Help only works in a language you both share.",
         flat = flat
     ) {
-        Row(
+        FlowRow(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
         ) {
             AcademicCatalog.mediums.forEach { name ->
                 AcademicChoiceChip(
                     label = name,
                     selected = medium == name,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("academic_medium_" + AcademicCatalog.codeFor(name)),
+                    modifier = Modifier.testTag("academic_medium_" + AcademicCatalog.codeFor(name)),
                     onClick = { onMedium(name) }
                 )
             }
@@ -622,8 +635,10 @@ private fun StageTile(
         shape = RoundedCornerShape(16.dp),
         color = if (selected) EmeraldPrimary else Color(0xFFF8FAFC),
         border = if (selected) null else BorderStroke(1.dp, FormHairline),
+        // min height, so a narrow phone grows the tile instead of clipping the
+        // third line of the blurb.
         modifier = modifier
-            .height(92.dp)
+            .heightIn(min = 92.dp)
             .testTag(tag)
     ) {
         Column(
@@ -650,7 +665,7 @@ private fun StageTile(
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 9.5.sp,
                 lineHeight = 12.sp,
-                maxLines = 2,
+                maxLines = 3,
                 color = if (selected) Color.White.copy(alpha = 0.85f) else FormMuted
             )
         }
@@ -670,11 +685,14 @@ private fun AcademicSectionCard(
 ) {
     val body: @Composable ColumnScope.() -> Unit = {
         Text(
+            // Ink, not grey: these headings are the only thing separating one
+            // block of the form from the next, so they have to read as a label
+            // rather than as a watermark.
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
             fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = FormFaint,
+            fontWeight = FontWeight.ExtraBold,
+            color = FormInk,
             letterSpacing = 1.1.sp
         )
         if (!subtitle.isNullOrBlank()) {
@@ -782,16 +800,24 @@ private fun AcademicChoiceChip(
         color = if (selected) EmeraldPrimary else Color.White,
         border = if (selected) null else BorderStroke(1.dp, FormHairline),
         shadowElevation = if (selected) 4.dp else 0.dp,
-        modifier = modifier.height(40.dp)
+        // min, not a fixed height: a label that wraps to two lines must be able
+        // to grow instead of being clipped, and none of these chips is narrower
+        // than its own text any more.
+        modifier = modifier.heightIn(min = 40.dp)
     ) {
-        Box(contentAlignment = Alignment.Center) {
+        Box(
+            contentAlignment = Alignment.Center,
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp)
+        ) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 12.5.sp,
+                lineHeight = 15.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else FormMuted,
-                modifier = Modifier.padding(horizontal = 10.dp)
+                textAlign = TextAlign.Center,
+                maxLines = 2
             )
         }
     }
