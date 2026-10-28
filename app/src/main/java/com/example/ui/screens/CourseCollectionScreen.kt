@@ -226,15 +226,17 @@ private fun CourseCatalogBrowse(
     val listState = rememberLazyListState()
     val scope = rememberCoroutineScope()
     val featured = remember { CourseCatalog.courses.filter { it.featured } }
+    // Only the facets become chips. The search term is already visible in the
+    // field right above, so echoing it beside the Filters button was noise.
     val activeFilters = listOfNotNull(
         certificate?.short,
         stage,
         level,
         subject,
-        provider,
-        if (query.isNotBlank()) "“$query”" else null
+        provider
     )
-    val filtering = activeFilters.isNotEmpty()
+    val hasQuery = query.isNotBlank()
+    val filtering = activeFilters.isNotEmpty() || hasQuery
 
     val visible = remember(query, certificate, stage, level, subject, provider) {
         CourseCatalog.courses.filter { course ->
@@ -268,12 +270,24 @@ private fun CourseCatalogBrowse(
         isLoading = false
     }
 
-    // Facet changes re-shimmer. Typing does not: flashing the list on every
-    // keystroke would be worse than no animation at all.
+    // Facet changes re-shimmer immediately.
     LaunchedEffect(facetKey) {
         if (booted) {
             isLoading = true
             delay(420)
+            isLoading = false
+        }
+    }
+
+    // Typing shimmers too, but only once the student pauses: the effect is keyed
+    // on the query, so every keystroke cancels the previous delay. A 260ms pause
+    // counts as "finished typing", then 320ms of skeleton — smooth, and it never
+    // flickers mid-word.
+    LaunchedEffect(query) {
+        if (booted && query.isNotEmpty()) {
+            delay(260)
+            isLoading = true
+            delay(320)
             isLoading = false
         }
     }
@@ -390,10 +404,14 @@ private fun CourseCatalogBrowse(
                         color = CcInk
                     ),
                     colors = OutlinedTextFieldDefaults.colors(
-                        focusedBorderColor = CcGreen,
+                        // No coloured focus ring: the cursor and the filtered
+                        // results are the feedback, and a green outline on a
+                        // search field reads as an error state on this palette.
+                        focusedBorderColor = CcHairline,
                         unfocusedBorderColor = CcHairline,
                         focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White
+                        unfocusedContainerColor = Color.White,
+                        cursorColor = CcInk
                     )
                 )
             }

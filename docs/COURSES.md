@@ -101,9 +101,12 @@ and filters scroll with the page, so content gets the screen back.
 Sections, top to bottom:
 
 1. **fixed header** — back, title, course and provider counts;
-2. search (scrolls) — title, subject, provider and skills;
-3. a single **filter row** (scrolls): a `Filters (n)` button plus the currently
-   applied filters as chips, with a **Clear** action;
+2. search (scrolls) — title, subject, provider and skills. The field keeps a
+   neutral hairline when focused (a coloured ring on a search box reads as an
+   error state) and only shows a cursor;
+3. a single **filter row** (scrolls): a `Filters (n)` button plus the applied
+   facets as chips, with a **Clear** action. The search term is *not* echoed here
+   — it is already in the field above;
 4. **Editor's picks** — a rail that slides itself every 4.2s with a 700ms eased
    scroll, pausing while a finger is on it. It **loops forward**: the card list is
    laid out three times over and the rail starts in the middle copy, so after the
@@ -150,6 +153,9 @@ nothing happened. So:
 - **on arrival**, ~0.7s of shimmer that mirrors the real layout (slider, video
   cards, provider tiles, course rows), so the content lands without a jump;
 - **on a filter change**, ~0.4s of shimmer over the results;
+- **while typing**, once the student pauses for 260ms, ~0.32s of row shimmer.
+  The effect is keyed on the query, so each keystroke cancels the previous delay
+  and it never flickers mid-word;
 - **when the pager changes page**, ~0.38s of row shimmer (`courses_page_skeleton`)
   in place of the results, right after scrolling up to the heading;
 - **when a course card is opened**, ~0.4s of detail shimmer — coloured hero with
@@ -299,3 +305,6 @@ mark is for; it is never used as TheStudent's own branding.
 | Background scrolled under the video card | the overlay drew on top but took no gestures | the overlay consumes pointer events, so nothing behind receives them |
 | List of 40+ cards made the page very tall | every course rendered at once | 15 per page with a numbered pager, and filters reset to page 1 |
 | Page change snapped | new rows replaced the old instantly | pager scrolls to the heading, then row skeletons for ~0.38s |
+| Green focus ring on search felt wrong | `focusedBorderColor = CcGreen` | neutral hairline + cursor colour |
+| Search term repeated next to Filters | query was added to the chip list | chips are facets only; the field shows the term |
+| Filtering as you type felt abrupt | no loading state for typing | debounced 260ms, then 0.32s of row shimmer |
