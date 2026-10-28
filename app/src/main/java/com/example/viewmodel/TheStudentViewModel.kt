@@ -96,6 +96,8 @@ data class TheStudentUiState(
     val isExpOpen: Boolean = false,
     /** The account details page, opened from Profile — never the sign-in flow. */
     val isAccountOpen: Boolean = false,
+    /** "Your progress": subject accuracy, streak and what to practise next. */
+    val isProgressOpen: Boolean = false,
     val activeLanguageSubTab: Int = 0, // 0: Voice Conv, 1: Vocabulary, 2: Grammar, 3: Pronunciation
     val isSpeakingActive: Boolean = false,
     val activeGrammarQuestionIndex: Int = 0,
@@ -342,6 +344,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _quizResult = MutableStateFlow<QuizResult?>(null)
     val quizResult: StateFlow<QuizResult?> = _quizResult.asStateFlow()
+
+    /** The "Your progress" page: derived from submitted attempts, never stored. */
+    private val _quizProgress = MutableStateFlow(QuizProgress())
+    val quizProgress: StateFlow<QuizProgress> = _quizProgress.asStateFlow()
+
+    private val _isProgressLoading = MutableStateFlow(false)
+    val isProgressLoading: StateFlow<Boolean> = _isProgressLoading.asStateFlow()
+
+    private val _progressError = MutableStateFlow<String?>(null)
+    val progressError: StateFlow<String?> = _progressError.asStateFlow()
 
     private val _isQuizStarting = MutableStateFlow(false)
     val isQuizStarting: StateFlow<Boolean> = _isQuizStarting.asStateFlow()
@@ -598,6 +610,56 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    // ── Progress ────────────────────────────────────────────────────────────
+
+    fun openProgress() {
+        _uiState.update { it.copy(isProgressOpen = true) }
+        loadProgress()
+    }
+
+    fun closeProgress() {
+        _uiState.update { it.copy(isProgressOpen = false) }
+    }
+
+    fun loadProgress() {
+        if (_isProgressLoading.value) return
+        viewModelScope.launch {
+            _isProgressLoading.value = true
+            _progressError.value = null
+            val outcome = quizzesRepository.progress()
+            val loaded = outcome.valueOrNull()
+            if (loaded != null) {
+                _quizProgress.value = loaded
+            } else {
+                _progressError.value = outcome.errorOrNull ?: "Your progress could not be loaded."
+            }
+            _isProgressLoading.value = false
+        }
+    }
+
+    /** Practise the quiz the progress page suggested, from wherever it was tapped. */
+    fun practiseSuggested() {
+        val suggestion = _quizProgress.value.practice ?: return
+        val quiz = _quizzes.value.firstOrNull { it.id == suggestion.quizId }
+        if (quiz != null) {
+            openQuiz(quiz)
+            return
+        }
+        // The list has not been loaded on this launch (the progress page can be
+        // opened straight from Profile): fetch, then open.
+        viewModelScope.launch {
+            val outcome = quizzesRepository.loadQuizzes()
+            val list = outcome.valueOrNull()
+            if (list != null) {
+                _quizzes.value = list
+                list.firstOrNull { it.id == suggestion.quizId }?.let { openQuiz(it) }
+                    ?: showSnackbar("That quiz is no longer available.")
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "Quizzes could not be loaded.")
+            }
+        }
+    }
+
     /** Open the runner and start (or resume) an attempt. */
     fun openQuiz(quiz: QuizSummary) {
         // The server refuses the fourth attempt anyway; stopping here means the
@@ -670,6 +732,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 // The ledger paid; the pill must say so, from the server.
                 refreshExp()
                 loadQuizzes()
+                loadProgress()
             } else {
                 showSnackbar(outcome.errorOrNull ?: "Your answers could not be submitted.")
             }

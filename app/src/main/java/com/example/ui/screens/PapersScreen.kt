@@ -131,6 +131,7 @@ fun PapersScreen(
     segment: Int = 0,
     onSegmentChange: (Int) -> Unit = {},
     onOpenQuiz: (com.example.data.model.QuizSummary) -> Unit = {},
+    onOpenQuizProgress: () -> Unit = {},
     onRefreshQuizzes: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
@@ -456,6 +457,7 @@ fun PapersScreen(
                 error = quizError,
                 onOpenQuiz = onOpenQuiz,
                 onRefresh = onRefreshQuizzes,
+                onOpenProgress = onOpenQuizProgress,
                 modifier = Modifier.fillMaxSize()
             )
         } else {

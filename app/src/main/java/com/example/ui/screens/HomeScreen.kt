@@ -28,6 +28,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.Course
+import com.example.data.model.QuizProgress
 import com.example.data.model.PastPaper
 import com.example.data.model.StudyNote
 import com.example.data.model.UserProfile
@@ -48,6 +49,9 @@ fun HomeScreen(
     onOpenAiAssistant: () -> Unit,
     onOpenLanguageLab: () -> Unit,
     onOpenExp: () -> Unit = {},
+    quizProgress: QuizProgress = QuizProgress(),
+    onOpenProgress: () -> Unit = {},
+    onContinueLearning: () -> Unit = {},
     onNavigateTab: (TheStudentNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -164,113 +168,172 @@ fun HomeScreen(
             }
         }
 
-        // Continue Learning Banner
+        // Continue Learning — real data only. The average, the streak and the
+        // quiz below all come from submitted attempts, so the card can never
+        // show a lesson the student never opened. With no attempts it invites a
+        // first quiz instead of inventing a half-finished one.
         item {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = "Continue Learning",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                val activeCourse = popularCourses.firstOrNull()
-                if (activeCourse != null) {
-                    Card(
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Continue Learning",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "My progress",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = EmeraldPrimary,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .clickable { onCourseClick(activeCourse) }
-                            .testTag("continue_learning_card"),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.surface
-                        ),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(
-                            modifier = Modifier.padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                verticalAlignment = Alignment.CenterVertically,
-                                horizontalArrangement = Arrangement.SpaceBetween
-                            ) {
-                                Surface(
-                                    shape = RoundedCornerShape(8.dp),
-                                    color = EmeraldContainer
-                                ) {
-                                    Text(
-                                        text = activeCourse.category,
-                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                        style = MaterialTheme.typography.labelSmall,
-                                        color = OnEmeraldContainer,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                }
+                            .clip(RoundedCornerShape(50))
+                            .clickable { onOpenProgress() }
+                            .padding(horizontal = 8.dp, vertical = 4.dp)
+                            .testTag("home_open_progress")
+                    )
+                }
 
+                val summary = quizProgress.summary
+                val practice = quizProgress.practice
+                // One number drives the bar: the suggested quiz's accuracy, or the
+                // overall average when there is nothing specific to practise.
+                val barAccuracy = if (practice != null && practice.accuracy >= 0) {
+                    practice.accuracy
+                } else {
+                    summary.averagePercent
+                }
+
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .clickable { onOpenProgress() }
+                        .testTag("continue_learning_card"),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(8.dp),
+                                color = EmeraldContainer
+                            ) {
                                 Text(
-                                    text = "Lesson 6 of ${activeCourse.totalLessons}",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    text = when {
+                                        practice != null -> practice.subject
+                                        summary.attempts > 0 -> "All quizzes attempted"
+                                        else -> "Start here"
+                                    },
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = OnEmeraldContainer,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                             }
 
                             Text(
-                                text = activeCourse.title,
-                                style = MaterialTheme.typography.titleSmall,
-                                fontWeight = FontWeight.Bold,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                text = if (summary.streakDays > 0) {
+                                    "${summary.streakDays} day streak"
+                                } else {
+                                    "${summary.attempts} attempts"
+                                },
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
+                        }
 
-                            // Progress bar
-                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                LinearProgressIndicator(
-                                    progress = { 0.38f },
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(8.dp)
-                                        .clip(RoundedCornerShape(4.dp)),
-                                    color = EmeraldPrimary,
-                                    trackColor = EmeraldContainer
-                                )
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween
-                                ) {
-                                    Text(
-                                        text = "Circular Motion & Pendulum",
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Text(
-                                        text = "38% Done",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = EmeraldPrimary
-                                    )
-                                }
-                            }
+                        Text(
+                            text = practice?.title ?: if (summary.attempts > 0) {
+                                "You have attempted every quiz"
+                            } else {
+                                "Take your first quiz"
+                            },
+                            style = MaterialTheme.typography.titleSmall,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
 
-                            Button(
-                                onClick = { onCourseClick(activeCourse) },
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            LinearProgressIndicator(
+                                progress = {
+                                    barAccuracy.coerceIn(0, 100) / 100f
+                                },
                                 modifier = Modifier
                                     .fillMaxWidth()
-                                    .testTag("resume_lesson_button"),
-                                shape = RoundedCornerShape(12.dp),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = EmeraldPrimary
-                                )
+                                    .height(8.dp)
+                                    .clip(RoundedCornerShape(4.dp)),
+                                color = EmeraldPrimary,
+                                trackColor = EmeraldContainer
+                            )
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.PlayArrow,
-                                    contentDescription = null,
-                                    modifier = Modifier.size(18.dp)
+                                Text(
+                                    text = when {
+                                        practice != null && practice.accuracy >= 0 ->
+                                            "Your weakest topic · ${practice.accuracy}%"
+                                        practice != null ->
+                                            "Not attempted yet · ${practice.maxAttempts} attempts"
+                                        else -> "${summary.quizzesPassed} of " +
+                                            "${summary.quizzesPublished} quizzes passed"
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                Spacer(modifier = Modifier.width(6.dp))
-                                Text("Resume Lesson (50 min)")
+                                Text(
+                                    text = "${summary.averagePercent}% avg",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldPrimary
+                                )
                             }
+                        }
+
+                        Button(
+                            onClick = {
+                                if (practice != null) onContinueLearning() else onOpenProgress()
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("resume_lesson_button"),
+                            shape = RoundedCornerShape(12.dp),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = EmeraldPrimary
+                            )
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.PlayArrow,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                when {
+                                    practice != null && practice.accuracy >= 0 -> "Practise again"
+                                    practice != null -> "Practise now"
+                                    else -> "Find a quiz"
+                                }
+                            )
                         }
                     }
                 }

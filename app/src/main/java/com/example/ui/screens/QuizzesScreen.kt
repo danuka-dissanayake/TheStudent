@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
@@ -80,6 +81,7 @@ fun QuizzesSegment(
     error: String?,
     onOpenQuiz: (QuizSummary) -> Unit,
     onRefresh: () -> Unit,
+    onOpenProgress: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var query by remember { mutableStateOf("") }
@@ -205,6 +207,35 @@ fun QuizzesSegment(
                         onlyEnrolled = !onlyEnrolled
                     }
                 )
+            }
+            // A filter, not a toggle: it leaves the list for the progress page.
+            Surface(
+                onClick = onOpenProgress,
+                shape = RoundedCornerShape(50),
+                color = QuizGreenSoft,
+                modifier = Modifier
+                    .height(32.dp)
+                    .testTag("quizzes_open_progress")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                ) {
+                    Icon(
+                        Icons.Default.Insights,
+                        contentDescription = null,
+                        tint = QuizGreen,
+                        modifier = Modifier.size(14.dp)
+                    )
+                    Text(
+                        text = "My progress",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = QuizGreen
+                    )
+                }
             }
         }
 

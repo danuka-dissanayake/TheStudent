@@ -84,10 +84,11 @@ class MainActivity : ComponentActivity() {
 
             // "Your EXP" is a page, so back leaves the page — not the tab.
             BackHandler(enabled = uiState.isExpOpen) { viewModel.closeExp() }
+            BackHandler(enabled = uiState.isProgressOpen) { viewModel.closeProgress() }
             // Same for the account page: back must not drop the session or the tab.
             BackHandler(enabled = uiState.isAccountOpen) { viewModel.closeAccount() }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -241,6 +242,9 @@ class MainActivity : ComponentActivity() {
                             val isQuizSubmitting by viewModel.isQuizSubmitting.collectAsStateWithLifecycle()
                             val adminQuizzes by viewModel.adminQuizzes.collectAsStateWithLifecycle()
                             val isAdminQuizzesLoading by viewModel.isAdminQuizzesLoading.collectAsStateWithLifecycle()
+                            // Read here, not inside HOME: Home's Continue Learning card
+                            // and the progress page share one snapshot.
+                            val quizProgress by viewModel.quizProgress.collectAsStateWithLifecycle()
 
                             if (!uiState.isAuthenticated && !viewModel.preferences.isLoggedIn) {
                                 LaunchedEffect(Unit) {
@@ -374,6 +378,19 @@ class MainActivity : ComponentActivity() {
                                     customZaiApiKey = uiState.customZaiApiKey,
                                     onUpdateZaiApiKey = { viewModel.updateZaiApiKey(it) }
                                 )
+                            } else if (uiState.isProgressOpen) {
+                                val progress by viewModel.quizProgress.collectAsStateWithLifecycle()
+                                val isProgressLoading by viewModel.isProgressLoading.collectAsStateWithLifecycle()
+                                val progressError by viewModel.progressError.collectAsStateWithLifecycle()
+
+                                ProgressScreen(
+                                    progress = progress,
+                                    isLoading = isProgressLoading,
+                                    error = progressError,
+                                    onBack = { viewModel.closeProgress() },
+                                    onRefresh = { viewModel.loadProgress() },
+                                    onPractice = { viewModel.practiseSuggested() }
+                                )
                             } else if (uiState.isExpOpen) {
                                 val exp by viewModel.expState.collectAsStateWithLifecycle()
                                 val isExpLoading by viewModel.isExpLoading.collectAsStateWithLifecycle()
@@ -458,6 +475,7 @@ class MainActivity : ComponentActivity() {
                                                  uiState.currentTab != TheStudentNavTab.PROFILE &&
                                                  uiState.currentTab != TheStudentNavTab.PAPERS &&
                                                  !uiState.isExpOpen &&
+                                                 !uiState.isProgressOpen &&
                                                  !uiState.isAccountOpen
                                              ) {
                                                  TheStudentTopAppBar(
@@ -476,7 +494,7 @@ class MainActivity : ComponentActivity() {
                                              }
                                          },
                                             bottomBar = {
-                                                if (!uiState.isExpOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
+                                                if (!uiState.isExpOpen && !uiState.isProgressOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
                                                     TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
@@ -525,8 +543,12 @@ class MainActivity : ComponentActivity() {
                                                             onOpenAiAssistant = { viewModel.openAiAssistant() },
                                                             onOpenLanguageLab = { viewModel.openLanguageLab(0) },
                                                             onOpenExp = { viewModel.openExp() },
+                                                            quizProgress = quizProgress,
+                                                            onOpenProgress = { viewModel.openProgress() },
+                                                            onContinueLearning = { viewModel.practiseSuggested() },
                                                             onNavigateTab = { viewModel.setTab(it) }
                                                         )
+                                                        LaunchedEffect(Unit) { viewModel.loadProgress() }
                                                     }
                                                     TheStudentNavTab.CHAT -> {
                                                          ChatScreen(
@@ -557,6 +579,7 @@ class MainActivity : ComponentActivity() {
                                                             segment = uiState.librarySegment,
                                                             onSegmentChange = { viewModel.setLibrarySegment(it) },
                                                             onOpenQuiz = { viewModel.openQuiz(it) },
+                                                            onOpenQuizProgress = { viewModel.openProgress() },
                                                             onRefreshQuizzes = { viewModel.loadQuizzes(forceRefresh = true) },
                                                             onLevelSelected = {
                                                                 viewModel.setEducationLevel(it)
@@ -673,6 +696,7 @@ class MainActivity : ComponentActivity() {
                                                                 },
                                                                 onEditAcademic = { viewModel.openAcademicSetup() },
                                                                 onOpenExp = { viewModel.openExp() },
+                                                                onOpenProgress = { viewModel.openProgress() },
                                                                 onOpenSecurity = { viewModel.openSecurityPanel() },
                                                                 onOpenAdmin = { viewModel.openAdminPanel() },
                                                                 onSignOut = { viewModel.logout() },

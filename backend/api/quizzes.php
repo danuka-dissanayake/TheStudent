@@ -25,7 +25,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/_admin_guard.php';   // bearer token, json error, admin guard
 require_once __DIR__ . '/_exp.php';           // the EXP ledger
 
-const TS_QUIZ_API_VERSION = '1.1.0';
+const TS_QUIZ_API_VERSION = '1.2.0';
 const TS_QUIZ_EXP_MAX_REWARD = 40;
 const TS_QUIZ_MAX_QUESTIONS = 200;
 
@@ -723,6 +723,211 @@ try {
                     'attempts_left' => ts_quiz_attempts_left($pdo, (int) $quiz['id'], $uid, $quiz),
                     'review' => $graded['review'],
                 ],
+                'exp' => ts_quiz_exp_block($pdo, $uid),
+            ]);
+
+        case 'progress':
+            ts_quiz_require_ready($pdo);
+            $user = ts_quiz_user($pdo);
+            $uid = (int) $user['id'];
+
+            // Everything below is derived from submitted attempts. Nothing is
+            // stored as a "stat": if a quiz is deleted or attempts are reset, the
+            // numbers move with it.
+            $attemptStmt = $pdo->prepare(
+                'SELECT a.id, a.quiz_id, a.score, a.max_score, a.percent, a.passed,
+                        a.duration_seconds, a.exp_awarded, a.submitted_at,
+                        q.title, q.subject, q.grade, q.pass_percent
+                 FROM quiz_attempts a
+                 JOIN quizzes q ON q.id = a.quiz_id
+                 WHERE a.user_id = :uid AND a.submitted_at IS NOT NULL
+                 ORDER BY a.submitted_at DESC, a.id DESC'
+            );
+            $attemptStmt->execute(['uid' => $uid]);
+            $attempts = $attemptStmt->fetchAll();
+
+            $subjects = [];
+            $quizStats = [];
+            $recent = [];
+            $totalScore = 0;
+            $totalMax = 0;
+            $duration = 0;
+            $expFromQuizzes = 0;
+            $bestPercent = 0;
+            $passedQuizzes = [];
+
+            foreach ($attempts as $row) {
+                $quizId = (int) $row['quiz_id'];
+                $subject = trim((string) $row['subject']);
+                if ($subject === '') {
+                    $subject = 'General';
+                }
+                $score = (int) $row['score'];
+                $max = max(1, (int) $row['max_score']);
+                $percent = (int) $row['percent'];
+                $passed = (int) $row['passed'] === 1;
+
+                $totalScore += $score;
+                $totalMax += $max;
+                $duration += (int) $row['duration_seconds'];
+                $expFromQuizzes += (int) $row['exp_awarded'];
+                $bestPercent = max($bestPercent, $percent);
+                if ($passed) {
+                    $passedQuizzes[$quizId] = true;
+                }
+
+                if (!isset($subjects[$subject])) {
+                    $subjects[$subject] = [
+                        'subject' => $subject,
+                        'attempts' => 0,
+                        'score' => 0,
+                        'max' => 0,
+                        'best' => 0,
+                        'passed' => false,
+                    ];
+                }
+                $subjects[$subject]['attempts']++;
+                $subjects[$subject]['score'] += $score;
+                $subjects[$subject]['max'] += $max;
+                $subjects[$subject]['best'] = max($subjects[$subject]['best'], $percent);
+                $subjects[$subject]['passed'] = $subjects[$subject]['passed'] || $passed;
+
+                if (!isset($quizStats[$quizId])) {
+                    $quizStats[$quizId] = [
+                        'quiz_id' => $quizId,
+                        'title' => (string) $row['title'],
+                        'subject' => $subject,
+                        'grade' => (string) $row['grade'],
+                        'attempts' => 0,
+                        'score' => 0,
+                        'max' => 0,
+                        'best' => 0,
+                        'passed' => false,
+                    ];
+                }
+                $quizStats[$quizId]['attempts']++;
+                $quizStats[$quizId]['score'] += $score;
+                $quizStats[$quizId]['max'] += $max;
+                $quizStats[$quizId]['best'] = max($quizStats[$quizId]['best'], $percent);
+                $quizStats[$quizId]['passed'] = $quizStats[$quizId]['passed'] || $passed;
+
+                if (count($recent) < 10) {
+                    $recent[] = [
+                        'attempt_id' => (int) $row['id'],
+                        'quiz_id' => $quizId,
+                        'quiz_title' => (string) $row['title'],
+                        'subject' => $subject,
+                        'grade' => (string) $row['grade'],
+                        'score' => $score,
+                        'max_score' => (int) $row['max_score'],
+                        'percent' => $percent,
+                        'passed' => $passed,
+                        'duration_seconds' => (int) $row['duration_seconds'],
+                        'exp_awarded' => (int) $row['exp_awarded'],
+                        'submitted_at' => (string) $row['submitted_at'],
+                    ];
+                }
+            }
+
+            $subjectList = [];
+            foreach ($subjects as $subject) {
+                $accuracy = $subject['max'] > 0
+                    ? (int) round(($subject['score'] / $subject['max']) * 100)
+                    : 0;
+                $subjectList[] = [
+                    'subject' => $subject['subject'],
+                    'attempts' => $subject['attempts'],
+                    'accuracy' => $accuracy,
+                    'best' => $subject['best'],
+                    'passed' => $subject['passed'],
+                ];
+            }
+            // Weakest first: the top of the list is what to work on, not what
+            // already works.
+            usort($subjectList, static fn ($a, $b) => $a['accuracy'] <=> $b['accuracy']);
+
+            // "Practise next": the weakest quiz that still has attempts left, so
+            // the button always opens something the student can actually do.
+            $openQuizzes = $pdo->prepare(
+                "SELECT q.id, q.title, q.subject, q.grade, q.max_attempts,
+                        (SELECT COUNT(*) FROM quiz_attempts qa
+                          WHERE qa.quiz_id = q.id AND qa.user_id = :uid AND qa.submitted_at IS NOT NULL) AS used
+                 FROM quizzes q WHERE q.status = 'published'"
+            );
+            $openQuizzes->execute(['uid' => $uid]);
+            $available = [];
+            foreach ($openQuizzes->fetchAll() as $row) {
+                $used = (int) $row['used'];
+                $limit = max(1, min(10, (int) ($row['max_attempts'] ?? 3)));
+                if ($used >= $limit) {
+                    continue;
+                }
+                $quizId = (int) $row['id'];
+                $available[] = [
+                    'quiz_id' => $quizId,
+                    'title' => (string) $row['title'],
+                    'subject' => (string) $row['subject'],
+                    'accuracy' => isset($quizStats[$quizId]) && $quizStats[$quizId]['max'] > 0
+                        ? (int) round(($quizStats[$quizId]['score'] / $quizStats[$quizId]['max']) * 100)
+                        : -1,
+                    'attempts_used' => $used,
+                    'max_attempts' => $limit,
+                ];
+            }
+
+            $practice = null;
+            $attempted = array_values(array_filter($available, static fn ($q) => $q['accuracy'] >= 0));
+            usort($attempted, static fn ($a, $b) => $a['accuracy'] <=> $b['accuracy']);
+            if ($attempted) {
+                $practice = $attempted[0];
+            } elseif ($available) {
+                // Nothing attempted yet, or everything attempted is finished:
+                // offer a fresh quiz rather than nothing at all.
+                $practice = $available[0];
+            }
+
+            // Streak: consecutive server-local days with at least one submitted
+            // attempt, counted back from today (yesterday counts as alive too).
+            $days = [];
+            foreach ($attempts as $row) {
+                $day = substr((string) $row['submitted_at'], 0, 10);
+                if ($day !== '' && !in_array($day, $days, true)) {
+                    $days[] = $day;
+                }
+            }
+            $streak = 0;
+            if ($days) {
+                $today = new DateTimeImmutable('today');
+                $cursor = $today;
+                if ($days[0] !== $today->format('Y-m-d')) {
+                    $cursor = $today->modify('-1 day');
+                }
+                foreach ($days as $day) {
+                    if ($day === $cursor->format('Y-m-d')) {
+                        $streak++;
+                        $cursor = $cursor->modify('-1 day');
+                    } elseif ($day < $cursor->format('Y-m-d')) {
+                        break;
+                    }
+                }
+            }
+
+            $published = (int) $pdo->query("SELECT COUNT(*) FROM quizzes WHERE status = 'published'")->fetchColumn();
+
+            ts_quiz_json('success', 'Progress loaded.', [
+                'summary' => [
+                    'attempts' => count($attempts),
+                    'quizzes_published' => $published,
+                    'quizzes_passed' => count($passedQuizzes),
+                    'average_percent' => $totalMax > 0 ? (int) round(($totalScore / $totalMax) * 100) : 0,
+                    'best_percent' => $bestPercent,
+                    'duration_seconds' => $duration,
+                    'exp_from_quizzes' => $expFromQuizzes,
+                    'streak_days' => $streak,
+                ],
+                'subjects' => $subjectList,
+                'practice' => $practice,
+                'recent' => $recent,
                 'exp' => ts_quiz_exp_block($pdo, $uid),
             ]);
 

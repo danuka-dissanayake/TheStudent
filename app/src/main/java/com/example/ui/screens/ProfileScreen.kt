@@ -98,6 +98,7 @@ fun ProfileScreen(
     onCourseClick: (String) -> Unit = {},
     onEditAcademic: () -> Unit,
     onOpenExp: () -> Unit = {},
+    onOpenProgress: () -> Unit = {},
     onOpenSecurity: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onSignOut: () -> Unit = {},
@@ -244,6 +245,7 @@ fun ProfileScreen(
                     onOpenSecurity = onOpenSecurity,
                     onOpenAdmin = onOpenAdmin,
                     onOpenAccount = onOpenAccount,
+                    onOpenProgress = onOpenProgress,
                     onSignOut = { confirmSignOut = true }
                 )
             }
@@ -1411,6 +1413,7 @@ private fun AccountCard(
     onOpenSecurity: () -> Unit,
     onOpenAdmin: () -> Unit,
     onOpenAccount: () -> Unit,
+    onOpenProgress: () -> Unit = {},
     onSignOut: () -> Unit
 ) {
     Surface(
@@ -1421,6 +1424,15 @@ private fun AccountCard(
             .padding(horizontal = 16.dp)
     ) {
         Column(modifier = Modifier.padding(vertical = 4.dp)) {
+            SettingRow(
+                icon = Icons.Default.Insights,
+                tint = EmeraldPrimary,
+                title = "Your progress",
+                subtitle = "Subject accuracy, streak and what to practise next",
+                onClick = onOpenProgress,
+                tag = "profile_row_progress"
+            )
+            SettingDivider()
             SettingRow(
                 icon = Icons.Default.ManageAccounts,
                 tint = EmeraldPrimary,

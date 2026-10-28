@@ -202,3 +202,60 @@ data class QuizDraft(
 
     val isReady: Boolean get() = problem == null
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Progress (derived from real attempts, never stored as a stat)
+// ─────────────────────────────────────────────────────────────────────────────
+
+data class QuizProgressSummary(
+    val attempts: Int = 0,
+    val quizzesPublished: Int = 0,
+    val quizzesPassed: Int = 0,
+    val averagePercent: Int = 0,
+    val bestPercent: Int = 0,
+    val durationSeconds: Int = 0,
+    val expFromQuizzes: Int = 0,
+    val streakDays: Int = 0
+) {
+    /** 0f…1f, for the hero bar. */
+    val passedFraction: Float
+        get() = if (quizzesPublished <= 0) 0f
+        else (quizzesPassed.toFloat() / quizzesPublished.toFloat()).coerceIn(0f, 1f)
+}
+
+data class SubjectProgress(
+    val subject: String,
+    val attempts: Int = 0,
+    val accuracy: Int = 0,
+    val best: Int = 0,
+    val passed: Boolean = false
+) {
+    val strength: Strength
+        get() = when {
+            accuracy >= 75 -> Strength.STRONG
+            accuracy >= 50 -> Strength.STEADY
+            else -> Strength.WEAK
+        }
+
+    enum class Strength { STRONG, STEADY, WEAK }
+}
+
+/** "Practise next" — always a quiz the student can still open. */
+data class PracticeSuggestion(
+    val quizId: Int,
+    val title: String,
+    val subject: String,
+    /** -1 when the quiz has never been attempted. */
+    val accuracy: Int = -1,
+    val attemptsUsed: Int = 0,
+    val maxAttempts: Int = 3
+)
+
+data class QuizProgress(
+    val summary: QuizProgressSummary = QuizProgressSummary(),
+    val subjects: List<SubjectProgress> = emptyList(),
+    val practice: PracticeSuggestion? = null,
+    val recent: List<QuizHistoryItem> = emptyList()
+) {
+    val isEmpty: Boolean get() = summary.attempts == 0 && recent.isEmpty()
+}

@@ -7,6 +7,7 @@ import com.example.data.model.QuizAttempt
 import com.example.data.model.QuizDraft
 import com.example.data.model.QuizHistoryItem
 import com.example.data.model.QuizHubStats
+import com.example.data.model.QuizProgress
 import com.example.data.model.QuizQuestion
 import com.example.data.model.QuizResult
 import com.example.data.model.QuizSummary
@@ -166,6 +167,16 @@ class QuizzesRepository(context: Context) {
             QuizOutcome.Ok(result)
         } else {
             QuizOutcome.Err(envelope.message ?: "Your answers could not be submitted.")
+        }
+    }
+
+    /** Per-subject accuracy, streak and what to practise next, from real attempts. */
+    suspend fun progress(): QuizOutcome<QuizProgress> = call { auth ->
+        val envelope = service().progress(auth)
+        if (envelope.status == "success") {
+            QuizOutcome.Ok(envelope.progress())
+        } else {
+            QuizOutcome.Err(envelope.message ?: "Your progress could not be loaded.")
         }
     }
 

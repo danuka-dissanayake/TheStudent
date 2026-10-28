@@ -574,3 +574,68 @@ Without the migration the API still behaves as three attempts per quiz: the
 column is read as `3` when absent, and `admin_save` simply omits it (see
 `ts_quiz_has_max_attempts`). Run the migration to make the per-quiz setting
 editable.
+
+---
+
+## 16. Progress (`action=progress`, API `1.2.0`)
+
+The quizzes were complete but silent: a student could take all three and the
+app still showed the same Home card, `Circular Motion · Lesson 6 of 12 · 38%`,
+which was mock data from `SampleEducationalData`. **Your progress** replaces it
+with numbers that come from submitted attempts.
+
+### The rule
+
+Nothing on the progress page is stored as a statistic. Every value is derived,
+on every request, from `quiz_attempts` joined to `quizzes`:
+
+| Value | How it is computed |
+| --- | --- |
+| `average_percent` | `SUM(score) / SUM(max_score)` over all submitted attempts — total marks, not the mean of percentages, so a 10-mark and a 20-mark quiz weigh honestly |
+| `best_percent` | highest single attempt `percent` |
+| `quizzes_passed` | distinct quizzes with at least one `passed` attempt |
+| `quizzes_published` | `COUNT(*)` of published quizzes |
+| `duration_seconds` | sum of attempt durations — surfaced as `1h 42m`, never raw seconds |
+| `exp_from_quizzes` | sum of `exp_awarded` actually paid by the ledger |
+| `streak_days` | consecutive server-local dates with a submitted attempt, counted back from today, **yesterday-tolerant** so a streak is not lost before the student studies today |
+| `subjects[].accuracy` | the same sum-of-marks arithmetic, per subject |
+| `subjects[]` order | **weakest first** — the top of the list is what to work on |
+
+A deleted quiz, a reset attempt or an archived quiz moves all of it, because
+there is no second copy to drift.
+
+### `practice` — the "practise this next" deep link
+
+The server picks it, so the app never has to guess:
+
+1. only quizzes that are `published` **and still have attempts left** are
+   eligible (an enrolled quiz cannot be suggested — the button would be dead);
+2. among those, the weakest by accuracy (`-1` when never attempted);
+3. if the student has attempted nothing, the first available quiz is offered
+   instead of nothing.
+
+The app then opens that quiz through the normal `openQuiz` path, so attempt
+limits, EXP and the runner behave exactly as they do from the hub.
+
+### App surface
+
+- **`ProgressScreen`** (`ui/screens/ProgressScreen.kt`) — hero average with a
+  passed-quizzes bar, three stat tiles (streak · best · EXP), subject accuracy
+  bars tinted by strength (≥75 strong, ≥50 steady, else amber "work on this"),
+  the practise card, and the last five attempts with pass/fail chips.
+  Tags: `progress_content`, `progress_practice`, `progress_practice_button`,
+  `progress_subject_*`, `progress_refresh`, `progress_empty`, `progress_back`.
+- **Profile → "Your progress"** row (`profile_row_progress`) and a
+  **My progress** pill on the quizzes hub (`quizzes_open_progress`).
+- **Home → Continue Learning** now reads the same snapshot: the weakest quiz
+  that is still open, its accuracy, the average in the corner and the streak in
+  the badge. With no attempts it says *Take your first quiz* rather than
+  inventing a half-finished lesson. Tags: `continue_learning_card`,
+  `resume_lesson_button`, `home_open_progress`.
+- The view model holds `quizProgress` and reloads it after every graded submit,
+  so finishing a quiz immediately moves Home and the progress page.
+
+### Deploying
+
+Re-upload `backend/api/quizzes.php` (`1.2.0`). No schema change — the table
+already records everything the page needs.

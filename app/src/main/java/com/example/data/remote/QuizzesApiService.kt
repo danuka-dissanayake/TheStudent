@@ -3,11 +3,15 @@ package com.example.data.remote
 import com.example.data.model.QuizAttempt
 import com.example.data.model.QuizHistoryItem
 import com.example.data.model.QuizHubStats
+import com.example.data.model.PracticeSuggestion
 import com.example.data.model.QuizOption
 import com.example.data.model.QuizQuestion
 import com.example.data.model.QuizResult
+import com.example.data.model.QuizProgress
+import com.example.data.model.QuizProgressSummary
 import com.example.data.model.QuizReviewItem
 import com.example.data.model.QuizSummary
+import com.example.data.model.SubjectProgress
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
 import retrofit2.http.Body
@@ -41,7 +45,43 @@ data class QuizPayload(
     @Json(name = "average") val average: Int? = null,
     @Json(name = "passed") val passed: Boolean? = null,
     @Json(name = "exp_from_quizzes") val expFromQuizzes: Int? = null,
-    @Json(name = "quiz_id") val quizId: Int? = null
+    @Json(name = "quiz_id") val quizId: Int? = null,
+    // progress
+    @Json(name = "summary") val summary: QuizProgressSummaryDto? = null,
+    @Json(name = "subjects") val subjects: List<SubjectProgressDto>? = null,
+    @Json(name = "practice") val practice: PracticeSuggestionDto? = null,
+    @Json(name = "recent") val recent: List<QuizHistoryDto>? = null
+)
+
+@JsonClass(generateAdapter = true)
+data class QuizProgressSummaryDto(
+    @Json(name = "attempts") val attempts: Int = 0,
+    @Json(name = "quizzes_published") val quizzesPublished: Int = 0,
+    @Json(name = "quizzes_passed") val quizzesPassed: Int = 0,
+    @Json(name = "average_percent") val averagePercent: Int = 0,
+    @Json(name = "best_percent") val bestPercent: Int = 0,
+    @Json(name = "duration_seconds") val durationSeconds: Int = 0,
+    @Json(name = "exp_from_quizzes") val expFromQuizzes: Int = 0,
+    @Json(name = "streak_days") val streakDays: Int = 0
+)
+
+@JsonClass(generateAdapter = true)
+data class SubjectProgressDto(
+    @Json(name = "subject") val subject: String = "",
+    @Json(name = "attempts") val attempts: Int = 0,
+    @Json(name = "accuracy") val accuracy: Int = 0,
+    @Json(name = "best") val best: Int = 0,
+    @Json(name = "passed") val passed: Boolean = false
+)
+
+@JsonClass(generateAdapter = true)
+data class PracticeSuggestionDto(
+    @Json(name = "quiz_id") val quizId: Int = 0,
+    @Json(name = "title") val title: String = "",
+    @Json(name = "subject") val subject: String = "",
+    @Json(name = "accuracy") val accuracy: Int = -1,
+    @Json(name = "attempts_used") val attemptsUsed: Int = 0,
+    @Json(name = "max_attempts") val maxAttempts: Int = 3
 )
 
 @JsonClass(generateAdapter = true)
@@ -281,6 +321,12 @@ interface QuizzesApiService {
     ): QuizEnvelope
 
     @GET("api/quizzes.php")
+    suspend fun progress(
+        @Header("Authorization") authorization: String,
+        @Query("action") action: String = "progress"
+    ): QuizEnvelope
+
+    @GET("api/quizzes.php")
     suspend fun history(
         @Header("Authorization") authorization: String,
         @Query("action") action: String = "history"
@@ -365,6 +411,21 @@ internal fun QuizEnvelope.result(): QuizResult? {
     )
 }
 
+internal fun QuizHistoryDto.toHistoryItem(): QuizHistoryItem = QuizHistoryItem(
+    attemptId = attemptId,
+    quizId = quizId,
+    quizTitle = quizTitle,
+    subject = subject,
+    grade = grade,
+    score = score,
+    maxScore = maxScore,
+    percent = percent,
+    passed = passed,
+    durationSeconds = durationSeconds,
+    expAwarded = expAwarded,
+    submittedAt = submittedAt
+)
+
 internal fun QuizEnvelope.history(): List<QuizHistoryItem> =
     data?.attempts.orEmpty().map {
         QuizHistoryItem(
@@ -392,6 +453,43 @@ internal fun QuizEnvelope.hubStats(): QuizHubStats {
         average = payload?.average ?: 0,
         passed = payload?.passed ?: false,
         expFromQuizzes = payload?.expFromQuizzes ?: 0
+    )
+}
+
+internal fun QuizEnvelope.progress(): QuizProgress {
+    val payload = data
+    val summaryDto = payload?.summary
+    return QuizProgress(
+        summary = QuizProgressSummary(
+            attempts = summaryDto?.attempts ?: 0,
+            quizzesPublished = summaryDto?.quizzesPublished ?: 0,
+            quizzesPassed = summaryDto?.quizzesPassed ?: 0,
+            averagePercent = summaryDto?.averagePercent ?: 0,
+            bestPercent = summaryDto?.bestPercent ?: 0,
+            durationSeconds = summaryDto?.durationSeconds ?: 0,
+            expFromQuizzes = summaryDto?.expFromQuizzes ?: 0,
+            streakDays = summaryDto?.streakDays ?: 0
+        ),
+        subjects = payload?.subjects.orEmpty().map {
+            SubjectProgress(
+                subject = it.subject,
+                attempts = it.attempts,
+                accuracy = it.accuracy,
+                best = it.best,
+                passed = it.passed
+            )
+        },
+        practice = payload?.practice?.takeIf { it.quizId > 0 }?.let {
+            PracticeSuggestion(
+                quizId = it.quizId,
+                title = it.title,
+                subject = it.subject,
+                accuracy = it.accuracy,
+                attemptsUsed = it.attemptsUsed,
+                maxAttempts = it.maxAttempts
+            )
+        },
+        recent = payload?.recent.orEmpty().map { it.toHistoryItem() }
     )
 }
 
