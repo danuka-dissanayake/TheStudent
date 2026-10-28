@@ -1857,25 +1857,24 @@ private fun ChatPeerProfileScreen(
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(18.dp))
-                    // Two compact capsules rather than two wide ones: 38 dp tall
-                    // with a real weight difference (Message is the action people
-                    // came for, so it gets the solid fill and the glow), and the
-                    // narrower "Ask for help" carries its own icon chip. Still
-                    // side by side, still fits a 360 dp screen.
+                    // Two small capsules that hug their own text instead of
+                    // stretching edge to edge: a pair of buttons that fills the
+                    // width reads as a form footer, and these are secondary to
+                    // the person above them. Centred, 38 dp tall, Message in
+                    // solid emerald and Ask help in white with a mint chip.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
                             .padding(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(9.dp),
+                        horizontalArrangement = Arrangement.Center,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             onClick = onMessage,
                             shape = RoundedCornerShape(50),
-                            color = Color.Transparent,
-                            shadowElevation = 10.dp,
+                            color = EmeraldPrimary,
+                            shadowElevation = 9.dp,
                             modifier = Modifier
-                                .weight(1.25f)
                                 .height(38.dp)
                                 .testTag("chat_profile_message")
                         ) {
@@ -1883,12 +1882,13 @@ private fun ChatPeerProfileScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier
-                                    .fillMaxSize()
+                                    .fillMaxHeight()
                                     .background(
                                         Brush.horizontalGradient(
                                             listOf(Color(0xFF10B981), EmeraldPrimary)
                                         )
                                     )
+                                    .padding(horizontal = 20.dp)
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.Send,
@@ -1896,7 +1896,7 @@ private fun ChatPeerProfileScreen(
                                     tint = Color.White,
                                     modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(7.dp))
                                 Text(
                                     text = "Message",
                                     fontFamily = MaisonNeueFontFamily,
@@ -1908,6 +1908,8 @@ private fun ChatPeerProfileScreen(
                             }
                         }
 
+                        Spacer(Modifier.width(10.dp))
+
                         Surface(
                             onClick = onAskForHelp,
                             shape = RoundedCornerShape(50),
@@ -1915,14 +1917,15 @@ private fun ChatPeerProfileScreen(
                             border = BorderStroke(1.2.dp, Color(0xFF6EE7B7)),
                             shadowElevation = 3.dp,
                             modifier = Modifier
-                                .weight(1f)
                                 .height(38.dp)
                                 .testTag("chat_profile_help")
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier
+                                    .fillMaxHeight()
+                                    .padding(horizontal = 14.dp)
                             ) {
                                 Box(
                                     modifier = Modifier
@@ -1938,7 +1941,7 @@ private fun ChatPeerProfileScreen(
                                         modifier = Modifier.size(11.dp)
                                     )
                                 }
-                                Spacer(Modifier.width(6.dp))
+                                Spacer(Modifier.width(7.dp))
                                 Text(
                                     text = "Ask help",
                                     fontFamily = MaisonNeueFontFamily,
