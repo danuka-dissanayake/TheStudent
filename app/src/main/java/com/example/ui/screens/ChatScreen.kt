@@ -21,12 +21,16 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
+import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.clickable
@@ -52,6 +56,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.onFocusChanged
@@ -65,6 +70,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
@@ -72,6 +78,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.unit.IntOffset
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
@@ -272,6 +279,342 @@ private fun chatPurposeLabel(purpose: String, subject: String): String = when (p
     "partner" -> "Study partner"
     "talk" -> "Chatting"
     else -> "Just talking"
+}
+
+/**
+ * The floating help bubble.
+ *
+ * A small circle that floats over the conversation, parked above the microphone
+ * by default. It is dragged with a finger and remembers where it was left for
+ * that conversation, so it never permanently covers a message.
+ *
+ * The circle stays 44 dp — small, out of the way — and carries its state in a
+ * badge on the rim. The words come out on tap, in a compact card above it:
+ *
+ *  • amber `?`  — you just sent a question, offer to track it
+ *  • amber dot  — request sent, waiting for them
+ *  • green tick — they accepted, close it when solved
+ *  • green `+`  — completed before, ask again
+ *  • no badge   — nothing to do; the bubble fades back so it stops shouting
+ */
+@Composable
+private fun FloatingHelpBubble(
+    state: ChatUiState,
+    peerName: String,
+    onOpenPurpose: () -> Unit,
+    onAskForHelp: () -> Unit,
+    onAskAgain: () -> Unit,
+    onCompleteHelp: () -> Unit,
+    onCancelHelp: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val request = state.helpRequest
+    val firstName = peerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "them" }
+
+    // Badge + wording for the current situation. One place, so the badge and the
+    // card can never disagree.
+    val badge: String
+    val headline: String
+    val body: String
+    when {
+        state.questionOfferVisible -> {
+            badge = "?"
+            headline = "Track this question?"
+            body = "$firstName gets credit, and you can rate the help after."
+        }
+        request?.status == "pending" -> {
+            badge = "·"
+            headline = if (request.isSeeker) "Waiting for $firstName" else "$firstName needs help"
+            body = if (request.isSeeker) "Sent — they haven't answered yet." else "Tap to open the request."
+        }
+        request?.status == "accepted" -> {
+            badge = "✓"
+            headline = if (request.isSeeker) "Helped?" else "You're helping $firstName"
+            body = if (request.isSeeker) "Close the request when your question is solved." else "They close it when it's solved."
+        }
+        state.helpCompletedWithPeer > 0 -> {
+            badge = "+"
+            headline = "Helped ${state.helpCompletedWithPeer} times"
+            body = "Ask $firstName again, or change what this chat is about."
+        }
+        else -> {
+            badge = ""
+            headline = "Need help with something?"
+            body = "Tap to tell $firstName, or just keep chatting."
+        }
+    }
+
+    var expanded by remember(state.activePeer?.id) { mutableStateOf(false) }
+    var offsetX by remember(state.activePeer?.id) { mutableStateOf(0f) }
+    var offsetY by remember(state.activePeer?.id) { mutableStateOf(0f) }
+    var containerSize by remember { mutableStateOf(IntSize.Zero) }
+
+    val bubblePx = with(LocalDensity.current) { 44.dp.toPx() }
+    val edgePadPx = with(LocalDensity.current) { 13.dp.toPx() }
+
+    // While there is something to act on the bubble breathes; idle bubbles sit
+    // still so the screen is not permanently animated.
+    val isActive = badge.isNotEmpty()
+    val pulse = if (isActive) {
+        val transition = rememberInfiniteTransition(label = "help_bubble_pulse")
+        val scale by transition.animateFloat(
+            initialValue = 1f,
+            targetValue = 1.06f,
+            animationSpec = infiniteRepeatable(
+                animation = tween(1400, easing = LinearEasing),
+                repeatMode = RepeatMode.Reverse
+            ),
+            label = "help_bubble_scale"
+        )
+        scale
+    } else {
+        1f
+    }
+
+    Box(
+        modifier = modifier
+            .onSizeChanged { containerSize = it }
+            // Tapping anywhere else closes the little card first, so the sheet
+            // behind it is never opened by accident.
+            .pointerInput(expanded) {
+                if (expanded) {
+                    detectTapGestures(onTap = { expanded = false })
+                }
+            }
+    ) {
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 13.dp, bottom = 12.dp)
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) },
+            horizontalAlignment = Alignment.End
+        ) {
+            AnimatedVisibility(
+                visible = expanded,
+                enter = fadeIn(tween(140)) + expandVertically(),
+                exit = fadeOut(tween(120)) + shrinkVertically()
+            ) {
+                HelpBubbleCard(
+                    headline = headline,
+                    body = body,
+                    isSeeker = request?.isSeeker ?: true,
+                    status = request?.status,
+                    canAskAgain = state.helpCompletedWithPeer > 0,
+                    isBusy = state.isAskingHelp || state.isHelpBusy,
+                    onPrimary = {
+                        expanded = false
+                        when {
+                            state.questionOfferVisible -> onAskForHelp()
+                            request?.status == "accepted" && request.isSeeker -> onCompleteHelp()
+                            state.helpCompletedWithPeer > 0 -> onAskAgain()
+                            request == null -> onAskForHelp()
+                            else -> onOpenPurpose()
+                        }
+                    },
+                    onSecondary = {
+                        expanded = false
+                        when {
+                            request?.status == "accepted" && request.isSeeker -> onCancelHelp()
+                            else -> onOpenPurpose()
+                        }
+                    }
+                )
+            }
+
+            Spacer(Modifier.height(8.dp))
+
+            // ── the circle itself ───────────────────────────────────────────
+            Box(
+                modifier = Modifier
+                    .graphicsLayer(scaleX = pulse, scaleY = pulse)
+                    .size(44.dp)
+                    .testTag("chat_help_bubble")
+                    .pointerInput(state.activePeer?.id, containerSize) {
+                        awaitEachGesture {
+                            val down = awaitFirstDown(requireUnconsumed = false)
+                            var previous = down.position
+                            var travelled = 0f
+                            var dragging = false
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                                if (!change.pressed) break
+                                val delta = change.position - previous
+                                previous = change.position
+                                travelled += delta.getDistance()
+
+                                if (!dragging && travelled > viewConfiguration.touchSlop) {
+                                    dragging = true
+                                    expanded = false
+                                }
+                                if (dragging) {
+                                    change.consume()
+                                    // Keep the whole circle on screen: the
+                                    // container is the message area, and the
+                                    // column is anchored bottom-end.
+                                    val maxLeft = containerSize.width - bubblePx - edgePadPx
+                                    val maxUp = containerSize.height - bubblePx - edgePadPx
+                                    offsetX = (offsetX + delta.x).coerceIn(-maxLeft, 0f)
+                                    offsetY = (offsetY + delta.y).coerceIn(-maxUp, 0f)
+                                }
+                            }
+                            // A tap is a press that never really moved: that is
+                            // what opens the card, so dragging can never do it.
+                            if (!dragging) expanded = !expanded
+                        }
+                    },
+                contentAlignment = Alignment.Center
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .shadow(10.dp, CircleShape)
+                        .background(
+                            brush = Brush.verticalGradient(
+                                listOf(Color(0xFF10B981), Color(0xFF059669))
+                            ),
+                            shape = CircleShape
+                        ),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Forum,
+                        contentDescription = "Chat options",
+                        tint = Color.White.copy(alpha = if (isActive) 1f else 0.82f),
+                        modifier = Modifier.size(20.dp)
+                    )
+                }
+
+                // Badge on the rim: `?` offer, `·` waiting, `✓` accepted,
+                // `+` ask again. Empty when there is nothing to do.
+                if (badge.isNotEmpty()) {
+                    Box(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .offset(x = 2.dp, y = (-2).dp)
+                            .size(17.dp)
+                            .shadow(3.dp, CircleShape)
+                            .background(
+                                when (badge) {
+                                    "?" , "·" -> Color(0xFFF59E0B)
+                                    else -> Color(0xFF10B981)
+                                },
+                                CircleShape
+                            ),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = badge,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 10.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = Color.White
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** The compact card that opens above the bubble. Two actions at most. */
+@Composable
+private fun HelpBubbleCard(
+    headline: String,
+    body: String,
+    isSeeker: Boolean,
+    status: String?,
+    canAskAgain: Boolean,
+    isBusy: Boolean,
+    onPrimary: () -> Unit,
+    onSecondary: () -> Unit
+) {
+    val primaryLabel = when {
+        status == "pending" && !isSeeker -> "Open"
+        status == "pending" -> "Change"
+        status == "accepted" && isSeeker -> "This helped — close"
+        status == "accepted" -> "Open chat"
+        canAskAgain -> "Ask again"
+        else -> "Ask for help"
+    }
+    val secondaryLabel = when {
+        status == "accepted" && isSeeker -> "Cancel"
+        else -> "What's this chat?"
+    }
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        shadowElevation = 12.dp,
+        modifier = Modifier
+            .widthIn(max = 250.dp)
+            .testTag("chat_help_bubble_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Text(
+                text = headline,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.Bold,
+                color = ChatInk
+            )
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = body,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = ChatMuted
+            )
+            Spacer(Modifier.height(11.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    onClick = { if (!isBusy) onPrimary() },
+                    enabled = !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = EmeraldPrimary,
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("chat_help_bubble_primary")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 13.dp)
+                    ) {
+                        Text(
+                            text = if (isBusy) "…" else primaryLabel,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
+                }
+                Surface(
+                    onClick = onSecondary,
+                    shape = RoundedCornerShape(50),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, ChatHairline),
+                    modifier = Modifier.height(34.dp)
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 13.dp)
+                    ) {
+                        Text(
+                            text = secondaryLabel,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ChatMuted,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+    }
 }
 
 /**
@@ -2516,6 +2859,21 @@ private fun ChatConversationScreen(
                     // Overlay inside the list container: the conversation is
                     // already parked at the bottom underneath when this fades out.
                     ConversationLoadingOverlay(visible = !conversationSettled)
+
+                    // The help bubble floats over the conversation, parked above
+                    // the microphone by default and draggable from there.
+                    if (conversationSettled) {
+                        FloatingHelpBubble(
+                            state = state,
+                            peerName = peer.name,
+                            onOpenPurpose = onOpenIntent,
+                            onAskForHelp = onTrackQuestion,
+                            onAskAgain = onAskAgain,
+                            onCompleteHelp = onCompleteHelp,
+                            onCancelHelp = onCancelHelp,
+                            modifier = Modifier.fillMaxSize()
+                        )
+                    }
                 }
 
                 state.errorMessage?.let { message ->
