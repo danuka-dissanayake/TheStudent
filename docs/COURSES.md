@@ -194,6 +194,16 @@ one `origin` value derived from the package name. `playsinline=1` keeps it insid
 the dialog, `rel=0` stops related videos from other channels appearing, and the
 channel is still credited under the player with a **Watch on YouTube** exit.
 
+**The white screen after that.** With the header in place the player loaded and
+played — audio, scrubbing, controls — but painted a blank white rectangle. Three
+things cause exactly that, and all three are now handled:
+
+| Cause | Fix |
+| --- | --- |
+| the view sits in a **dialog window**, a second window that composites everything but the video frames | the player is an in-composition overlay (`course_video_overlay`), not a `Dialog` |
+| something **clips** the `WebView`, forcing it into an offscreen layer | no `clip()` above it; the card's corners are a rounded *background*, not a clip |
+| the app has no **hardware acceleration** (sound plays, picture is blank) | `android:hardwareAccelerated="true"` on `<application>`, plus `setLayerType(LAYER_TYPE_HARDWARE)` on the WebView |
+
 The player shows a spinner until `onPageFinished` and, if the *main frame* fails
 to load, swaps to the thumbnail with an **Open in YouTube** button — never an
 empty black rectangle. `onRelease` stops the load, blanks the page and destroys
@@ -265,3 +275,4 @@ mark is for; it is never used as TheStudent's own branding.
 | Filter sheet opened at nearly full height | default handle + uncapped content | fixed header and button, chips scroll inside 356dp, slim handle |
 | YouTube error 152-4 | embed arrived without a `Referer`; the library could not set it either | WebView embed with a `Referer` header and a matching `origin=`, spinner + fallback |
 | Editor's picks snapped back at the end | `(index + 1) % size` animated backwards from the last card | three copies, start in the middle, eased `animateScrollBy`, silent recentre |
+| Video played but painted white | dialog window + clipped WebView + no explicit hardware acceleration | inline overlay, no clip, `hardwareAccelerated=true` and `LAYER_TYPE_HARDWARE` |

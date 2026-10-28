@@ -90,8 +90,6 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import coil.compose.SubcomposeAsyncImage
 import com.example.data.model.CatalogCertificate
 import com.example.data.model.CatalogCourse
@@ -163,31 +161,37 @@ fun CourseCollectionScreen(
     BackHandler(enabled = selectedCourse != null) { selectedCourse = null }
 
     Surface(color = CcBg, modifier = modifier.fillMaxSize()) {
-        val course = selectedCourse
-        if (course != null) {
-            CourseDetail(
-                course = course,
-                onBack = { selectedCourse = null },
-                onOpenProvider = { openUrl(course.url) },
-                onPlayVideo = { id -> playingVideo = CourseCatalog.video(id) }
-            )
-        } else {
-            CourseCatalogBrowse(
-                onBack = onBack,
-                onOpenCourse = { selectedCourse = it },
-                onPlayVideo = { playingVideo = it }
-            )
-        }
+        Box(modifier = Modifier.fillMaxSize()) {
+            val course = selectedCourse
+            if (course != null) {
+                CourseDetail(
+                    course = course,
+                    onBack = { selectedCourse = null },
+                    onOpenProvider = { openUrl(course.url) },
+                    onPlayVideo = { id -> playingVideo = CourseCatalog.video(id) }
+                )
+            } else {
+                CourseCatalogBrowse(
+                    onBack = onBack,
+                    onOpenCourse = { selectedCourse = it },
+                    onPlayVideo = { playingVideo = it }
+                )
+            }
 
-        playingVideo?.let { video ->
-            YouTubeEmbedDialog(
-                video = video,
-                onDismiss = { playingVideo = null },
-                onOpenYouTube = {
-                    openUrl(video.watchUrl)
-                    playingVideo = null
-                }
-            )
+            // The player is an overlay in this composition, deliberately not a
+            // Dialog: a dialog gets its own window, and a video surface in a
+            // second window is exactly where frames go missing (audio and
+            // controls work, the picture stays blank).
+            playingVideo?.let { video ->
+                YouTubePlayerOverlay(
+                    video = video,
+                    onDismiss = { playingVideo = null },
+                    onOpenYouTube = {
+                        openUrl(video.watchUrl)
+                        playingVideo = null
+                    }
+                )
+            }
         }
     }
 }
@@ -2036,346 +2040,238 @@ private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * A real player, inside the app.
+ * A real player, inside the app — rendered as an in-composition overlay.
  *
- * YouTube now refuses to configure a player (error 152/153, "video player
- * configuration error") for an embed that arrives without a **Referer**: the
- * iframe has to be able to say which app is hosting it. A plain
- * `loadUrl("…/embed/…")` sends none, which is exactly how the first two attempts
- * failed — first as a black box, then through a library that cannot set the
- * header either.
+ * Two things are load-bearing here, and both were learned the hard way:
  *
- * So the WebView loads the embed URL *with an explicit `Referer` header* whose
- * origin is the app's own package (`https://com.thestudent.sl`), and passes the
- * same value as `origin=` on the URL so the player's postMessage handshake
- * matches. That pair is what the player needs; nothing else about the embed is
- * unusual, ads and attribution stay intact, and the channel is credited
- * underneath with a "Watch on YouTube" exit.
+ *   1. **It is not a `Dialog`.** The YouTube player paints its video through a
+ *      surface of its own; a dialog window is a second window, and on many
+ *      devices that second window composites everything except the video frames
+ *      — the controls respond, the audio plays, the picture is blank. Staying in
+ *      the activity's own window (which is hardware accelerated) fixes it.
+ *   2. **Nothing clips the `WebView`.** A `Modifier.clip()` above it forces the
+ *      view into an offscreen layer, with the same result: a white or black
+ *      rectangle. The video block is therefore square-cornered, and only the
+ *      card's *background* is rounded (`background(shape)` draws a shape without
+ *      clipping children).
+ *
+ * The `Referer` header is still required — YouTube refuses to configure a
+ * player (error 152/153) for an embed that cannot say which app hosts it — and
+ * it must match the `origin=` parameter, so both come from one value.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-private fun YouTubeEmbedDialog(
+private fun YouTubePlayerOverlay(
     video: CatalogVideo,
     onDismiss: () -> Unit,
     onOpenYouTube: () -> Unit
 ) {
     val context = LocalContext.current
-    // A syntactically valid https origin that belongs to this app. Used for both
-    // the Referer header and the player's `origin` parameter, so they agree.
     val origin = remember(context) { "https://" + context.packageName }
 
     var loading by remember(video.videoId) { mutableStateOf(true) }
     var failed by remember(video.videoId) { mutableStateOf(false) }
 
-    Dialog(
-        onDismissRequest = onDismiss,
-        properties = DialogProperties(usePlatformDefaultWidth = false)
-    ) {
-        Surface(
-            shape = RoundedCornerShape(20.dp),
-            color = Color.White,
-            modifier = Modifier.padding(horizontal = 14.dp)
-        ) {
-            Column {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .clip(RoundedCornerShape(topStart = 20.dp, topEnd = 20.dp))
-                        .background(Color.Black)
-                        .testTag("course_video_player")
-                ) {
-                    if (failed) {
-                        // The player could not start: show the thumbnail and a
-                        // way out instead of an empty rectangle.
-                        SubcomposeAsyncImage(
-                            model = video.thumbnailUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize(),
-                            loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
-                            error = { Box(Modifier.fillMaxSize().background(CcInk)) }
-                        )
-                        Box(
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .background(Color(0xCC0F172A)),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = "This video will not play here",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = CT.body,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White
-                                )
-                                Spacer(Modifier.height(10.dp))
-                                Surface(
-                                    onClick = onOpenYouTube,
-                                    shape = RoundedCornerShape(50),
-                                    color = Color(0xFFDC2626),
-                                    modifier = Modifier
-                                        .height(40.dp)
-                                        .testTag("course_video_fallback")
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "Open in YouTube",
-                                            fontFamily = MaisonNeueFontFamily,
-                                            fontSize = CT.meta,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White,
-                                            modifier = Modifier.padding(horizontal = 18.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    } else {
-                        AndroidView(
-                            modifier = Modifier.fillMaxSize(),
-                            factory = { ctx ->
-                                WebView(ctx).apply {
-                                    setBackgroundColor(AndroidColor.BLACK)
-                                    settings.apply {
-                                        javaScriptEnabled = true
-                                        domStorageEnabled = true
-                                        databaseEnabled = true
-                                        mediaPlaybackRequiresUserGesture = false
-                                        loadWithOverviewMode = true
-                                        useWideViewPort = true
-                                        mixedContentMode =
-                                            WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
-                                    }
-                                    webChromeClient = WebChromeClient()
-                                    webViewClient = object : WebViewClient() {
-                                        override fun onPageFinished(
-                                            view: WebView,
-                                            url: String?
-                                        ) {
-                                            loading = false
-                                        }
+    BackHandler(onBack = onDismiss)
 
-                                        override fun onReceivedError(
-                                            view: WebView,
-                                            request: WebResourceRequest,
-                                            error: WebResourceError
-                                        ) {
-                                            // Only the main document matters; a
-                                            // failed sub-resource is not fatal.
-                                            if (request.isForMainFrame) {
-                                                loading = false
-                                                failed = true
-                                            }
-                                        }
-                                    }
-                                    loadUrl(
-                                        "https://www.youtube.com/embed/" +
-                                            video.videoId +
-                                            "?autoplay=1&playsinline=1&rel=0" +
-                                            "&modestbranding=1&origin=" + origin,
-                                        mapOf("Referer" to origin)
-                                    )
-                                }
-                            },
-                            onRelease = { webView ->
-                                webView.stopLoading()
-                                webView.loadUrl("about:blank")
-                                webView.destroy()
-                            }
-                        )
-
-                        if (loading) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .background(Color.Black),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(
-                                    color = Color.White,
-                                    strokeWidth = 2.dp,
-                                    modifier = Modifier.size(26.dp)
-                                )
-                            }
-                        }
-                    }
-                }
-
-                Column(modifier = Modifier.padding(16.dp)) {
-                    Text(
-                        text = video.title,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = CT.cardTitle,
-                        lineHeight = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = CcInk,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = "${video.channel} on YouTube",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = CT.meta,
-                        color = CcMuted,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(14.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        Surface(
-                            onClick = onDismiss,
-                            shape = RoundedCornerShape(50),
-                            color = CcBg,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(44.dp)
-                                .testTag("course_video_close")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Close",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = CT.body,
-                                    fontWeight = FontWeight.Bold,
-                                    color = CcInk
-                                )
-                            }
-                        }
-                        Surface(
-                            onClick = onOpenYouTube,
-                            shape = RoundedCornerShape(50),
-                            color = Color(0xFFDC2626),
-                            modifier = Modifier
-                                .weight(1.4f)
-                                .height(44.dp)
-                                .testTag("course_video_open_youtube")
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = "Watch on YouTube",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = CT.body,
-                                    fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1
-                                )
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-/**
- * The detail page's loading state. It mirrors the real page — coloured hero,
- * facts card, certificate row, about text, video, sticky button — so nothing
- * jumps when the content arrives. The back button is real from the first frame:
- * a loading state must never trap you on a screen.
- */
-@Composable
-private fun CourseDetailSkeleton(course: CatalogCourse, onBack: () -> Unit) {
-    val tint = paperCoverTint(course.subject)
-    val light = rememberShimmerBrush()
-    val dark = rememberShimmerBrush(onDark = true)
-
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .testTag("course_detail_skeleton")
+            .background(Color(0xF20B1220))
+            .testTag("course_video_overlay"),
+        contentAlignment = Alignment.Center
     ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(tint.copy(alpha = 0.9f), tint.copy(alpha = 0.6f))
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 18.dp)
-        ) {
-            Column {
-                Surface(
-                    onClick = onBack,
-                    shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.18f),
-                    modifier = Modifier
-                        .size(40.dp)
-                        .testTag("course_detail_back")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(18.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .height(24.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(dark)
-                )
-                Spacer(Modifier.height(9.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.6f)
-                        .height(24.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(dark)
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(dark)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(150.dp)
-                            .height(13.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(dark)
-                    )
-                }
-            }
-        }
-
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
+                .padding(horizontal = 12.dp)
+                .background(Color.White, RoundedCornerShape(18.dp))
         ) {
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(108.dp), 16)
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(64.dp), 16)
-            ShimmerBlock(light, Modifier.width(150.dp).height(16.dp), 6)
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(38.dp), 10)
-            ShimmerBlock(light, Modifier.width(150.dp).height(16.dp), 6)
-            ShimmerBlock(light, Modifier.fillMaxWidth().aspectRatio(16f / 9f), 16)
-        }
+            // No clip, no shadow elevation over the WebView: plain black box.
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(16f / 9f)
+                    .background(Color.Black)
+                    .testTag("course_video_player")
+            ) {
+                if (failed) {
+                    SubcomposeAsyncImage(
+                        model = video.thumbnailUrl,
+                        contentDescription = null,
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
+                        error = { Box(Modifier.fillMaxSize().background(CcInk)) }
+                    )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxSize()
+                            .background(Color(0xCC0F172A)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text(
+                                text = "This video will not play here",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = CT.body,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                            Spacer(Modifier.height(10.dp))
+                            Surface(
+                                onClick = onOpenYouTube,
+                                shape = RoundedCornerShape(50),
+                                color = Color(0xFFDC2626),
+                                modifier = Modifier
+                                    .height(40.dp)
+                                    .testTag("course_video_fallback")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Text(
+                                        text = "Open in YouTube",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = CT.meta,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White,
+                                        modifier = Modifier.padding(horizontal = 18.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    AndroidView(
+                        modifier = Modifier.fillMaxSize(),
+                        factory = { ctx ->
+                            WebView(ctx).apply {
+                                setBackgroundColor(AndroidColor.BLACK)
+                                // Hardware rendering: software layers cannot
+                                // paint decoded video frames.
+                                setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null)
+                                settings.apply {
+                                    javaScriptEnabled = true
+                                    domStorageEnabled = true
+                                    databaseEnabled = true
+                                    mediaPlaybackRequiresUserGesture = false
+                                    loadWithOverviewMode = true
+                                    useWideViewPort = true
+                                    mixedContentMode =
+                                        WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                }
+                                webChromeClient = WebChromeClient()
+                                webViewClient = object : WebViewClient() {
+                                    override fun onPageFinished(view: WebView, url: String?) {
+                                        loading = false
+                                    }
 
-        Spacer(Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .height(48.dp)
-        ) {
-            ShimmerBlock(light, Modifier.fillMaxSize(), 14)
+                                    override fun onReceivedError(
+                                        view: WebView,
+                                        request: WebResourceRequest,
+                                        error: WebResourceError
+                                    ) {
+                                        if (request.isForMainFrame) {
+                                            loading = false
+                                            failed = true
+                                        }
+                                    }
+                                }
+                                loadUrl(
+                                    "https://www.youtube.com/embed/" +
+                                        video.videoId +
+                                        "?autoplay=1&playsinline=1&rel=0" +
+                                        "&modestbranding=1&origin=" + origin,
+                                    mapOf("Referer" to origin)
+                                )
+                            }
+                        },
+                        onRelease = { webView ->
+                            webView.stopLoading()
+                            webView.loadUrl("about:blank")
+                            webView.destroy()
+                        }
+                    )
+
+                    if (loading) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color.Black),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(26.dp)
+                            )
+                        }
+                    }
+                }
+            }
+
+            Column(modifier = Modifier.padding(16.dp)) {
+                Text(
+                    text = video.title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = CT.cardTitle,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = CcInk,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = "${video.channel} on YouTube",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = CT.meta,
+                    color = CcMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(14.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(50),
+                        color = CcBg,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("course_video_close")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Close",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = CT.body,
+                                fontWeight = FontWeight.Bold,
+                                color = CcInk
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = onOpenYouTube,
+                        shape = RoundedCornerShape(50),
+                        color = Color(0xFFDC2626),
+                        modifier = Modifier
+                            .weight(1.4f)
+                            .height(44.dp)
+                            .testTag("course_video_open_youtube")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Watch on YouTube",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = CT.body,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                }
+            }
         }
     }
 }
