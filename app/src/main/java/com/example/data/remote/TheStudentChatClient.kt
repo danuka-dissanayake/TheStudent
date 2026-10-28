@@ -7,6 +7,7 @@ import com.example.data.model.ChatDirectory
 import com.example.data.model.ChatEnvelope
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
+import com.example.data.model.ChatPeerProfile
 import com.example.data.model.ChatThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
