@@ -26,7 +26,7 @@ import java.util.concurrent.TimeUnit
 /** Result of a quiz call, with "offline" told apart from "the server said no". */
 sealed class QuizOutcome<out T> {
     data class Ok<T>(val value: T) : QuizOutcome<T>()
-    data class Err(val message: String, val offline: Boolean = false) : QuizOutcome<Nothing>
+    data class Err(val message: String, val offline: Boolean = false) : QuizOutcome<Nothing>()
 
     fun valueOrNull(): T? = (this as? Ok<T>)?.value
     val errorOrNull: String? get() = (this as? Err)?.message
@@ -190,7 +190,7 @@ class QuizzesRepository(context: Context) {
     }
 
     suspend fun loadForEdit(id: Int): QuizOutcome<Pair<QuizSummary?, List<QuizQuestion>>> = call { auth ->
-        val envelope = service().adminGet(auth, id)
+        val envelope = service().adminGet(auth, id = id)
         if (envelope.status == "success") {
             QuizOutcome.Ok(envelope.questionsForAdmin())
         } else {

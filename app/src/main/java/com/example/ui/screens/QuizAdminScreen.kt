@@ -856,7 +856,7 @@ private fun QuestionEditor(
                 Spacer(Modifier.width(4.dp))
                 SmallIcon(Icons.Default.ArrowDownward, "Move down", canMoveDown) { onMove(1) }
                 Spacer(Modifier.width(4.dp))
-                SmallIcon(Icons.Default.Delete, "Delete question", true, onDelete, tint = AdmRed)
+                SmallIcon(Icons.Default.Delete, "Delete question", true, tint = AdmRed, onClick = onDelete)
             }
             Spacer(Modifier.height(8.dp))
             EditorField("Question", question.prompt, singleLine = false) {
@@ -916,9 +916,15 @@ private fun QuestionEditor(
                     }
                     if (question.options.size > 2) {
                         Spacer(Modifier.width(4.dp))
-                        SmallIcon(Icons.Default.Close, "Remove option", true, {
-                            onChange(question.copy(options = question.options.filter { it.id != option.id }))
-                        }, tint = AdmFaint)
+                        SmallIcon(
+                            icon = Icons.Default.Close,
+                            description = "Remove option",
+                            enabled = true,
+                            tint = AdmFaint,
+                            onClick = {
+                                onChange(question.copy(options = question.options.filter { it.id != option.id }))
+                            }
+                        )
                     }
                 }
                 Spacer(Modifier.height(6.dp))
@@ -1103,8 +1109,8 @@ private fun SmallIcon(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
     description: String,
     enabled: Boolean,
-    onClick: () -> Unit,
-    tint: Color = AdmMuted
+    tint: Color = AdmMuted,
+    onClick: () -> Unit
 ) {
     Box(
         modifier = Modifier
