@@ -59,7 +59,7 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `SplashScreen.kt` | 555 | Tri-spinner logo, cycling word loader, feature chips |
 | `OnboardingScreen.kt` | 1097 | 3 intro cards, trust badges, Google/email entry, region picker |
 | `AuthScreen.kt` | 1921 | Sign-in / sign-up / OTP keypad, Google & Apple buttons, shimmer transitions |
-| `HomeScreen.kt` | 875 | Greeting, stats (streak, hours, papers, points), courses, papers, notes, AI entry points |
+| `HomeScreen.kt` | ~1700 | **The dashboard.** Greeting row (time-of-day greeting, name, streak pill, avatar) → deep-emerald hero report card (white accuracy ring, quizzes passed / studied / EXP, the CTA into the practise flow, the EXP ledger and the full report) → four quick-action tiles → *This week* card (per-subject accuracy bars for the weakest subjects, a seven-bar weekday sparkline built from real attempt dates, best/attempts/time chips) → *practise next* quiz → the courses and language-lab promos → rails for popular courses, past papers, high-yield notes and saved courses. Every number comes from `QuizProgress` / `UserProfile`; empty states point at the action that creates the data. See `docs/DASHBOARD.md`. |
 | `ChatScreen.kt` | ~1050 | **Production 1:1 student chat** — directory of registered students (full name + avatar only), live online rail/count, unread badges, typing + last-seen, one-time safety notice, clear chat. Data from `api/chat.php` via `TheStudentChatClient`; see `docs/CHAT.md` |
 | `PapersScreen.kt` | ~1160 | Two segments under one header — `Papers` (search, category chips, sort sheet, filter sheet, save/download, server-URL sheet) and `Quizzes`. |
 | `AiTutorScreen.kt` | 603 | English voice tutor: visualizer, transcript, grammar tip, scenario pills, hands-free, HF settings |

@@ -171,59 +171,132 @@ fun PaperTileSkeleton(modifier: Modifier = Modifier) {
 }
 
 /**
- * Realistic Skeleton placeholder for Home Screen top header & continue learning card.
+ * Skeleton for the dashboard.
+ *
+ * It mirrors the real layout block for block — greeting, hero report card, four
+ * quick-action tiles, the weekly report card and the first rail — so the
+ * shimmer that plays while content loads resolves into the same shapes instead
+ * of jumping to a different design.
  */
 @Composable
 fun HomeSkeletonLoading(modifier: Modifier = Modifier) {
     Column(
         modifier = modifier
             .fillMaxSize()
-            .padding(16.dp),
-        verticalArrangement = Arrangement.spacedBy(20.dp)
+            .padding(horizontal = 16.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // Welcome Card Skeleton
+        // Greeting row.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(top = 14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                ShimmerBox(modifier = Modifier.size(width = 118.dp, height = 12.dp))
+                ShimmerBox(modifier = Modifier.size(width = 150.dp, height = 22.dp))
+            }
+            Spacer(Modifier.weight(1f))
+            ShimmerBox(modifier = Modifier.size(width = 74.dp, height = 26.dp), shapeRadius = 13.dp)
+            Spacer(Modifier.size(9.dp))
+            ShimmerBox(modifier = Modifier.size(42.dp), shapeRadius = 21.dp)
+        }
+
+        // Hero report card.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
+                .height(232.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(MaterialTheme.colorScheme.surface)
-                .padding(20.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                    ShimmerBox(modifier = Modifier.size(width = 160.dp, height = 24.dp))
-                    ShimmerBox(modifier = Modifier.size(width = 110.dp, height = 16.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShimmerBox(modifier = Modifier.size(98.dp), shapeRadius = 49.dp)
+                Spacer(Modifier.size(16.dp))
+                Column(
+                    modifier = Modifier.weight(1f),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    repeat(3) {
+                        Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                            ShimmerBox(modifier = Modifier.size(width = 74.dp, height = 14.dp))
+                            ShimmerBox(modifier = Modifier.size(width = 96.dp, height = 9.dp))
+                        }
+                    }
                 }
-                ShimmerBox(modifier = Modifier.size(width = 65.dp, height = 28.dp), shapeRadius = 14.dp)
             }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                ShimmerBox(modifier = Modifier.size(width = 95.dp, height = 48.dp), shapeRadius = 12.dp)
-                ShimmerBox(modifier = Modifier.size(width = 95.dp, height = 48.dp), shapeRadius = 12.dp)
-                ShimmerBox(modifier = Modifier.size(width = 95.dp, height = 48.dp), shapeRadius = 12.dp)
-            }
+            Spacer(Modifier.weight(1f))
+            ShimmerBox(modifier = Modifier.fillMaxWidth().height(38.dp), shapeRadius = 19.dp)
         }
 
-        // Active Course Card Skeleton
-        CourseCardSkeleton()
-
-        // Carousel / Papers header Skeleton
+        // Quick actions.
         Row(
             modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            ShimmerBox(modifier = Modifier.size(width = 140.dp, height = 20.dp))
-            ShimmerBox(modifier = Modifier.size(width = 60.dp, height = 20.dp))
+            repeat(4) {
+                Column(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(86.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .background(MaterialTheme.colorScheme.surface),
+                    horizontalAlignment = Alignment.CenterHorizontally,
+                    verticalArrangement = Arrangement.Center
+                ) {
+                    ShimmerBox(modifier = Modifier.size(34.dp), shapeRadius = 11.dp)
+                    Spacer(Modifier.size(7.dp))
+                    ShimmerBox(modifier = Modifier.size(width = 44.dp, height = 10.dp))
+                }
+            }
         }
 
-        PaperTileSkeleton()
-        PaperTileSkeleton()
+        // Weekly report.
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(196.dp)
+                .clip(RoundedCornerShape(20.dp))
+                .background(MaterialTheme.colorScheme.surface)
+                .padding(15.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                ShimmerBox(modifier = Modifier.size(width = 88.dp, height = 16.dp))
+                Spacer(Modifier.weight(1f))
+                ShimmerBox(modifier = Modifier.size(width = 54.dp, height = 14.dp))
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                Column(
+                    modifier = Modifier.weight(1.35f),
+                    verticalArrangement = Arrangement.spacedBy(11.dp)
+                ) {
+                    repeat(3) { ShimmerBox(modifier = Modifier.fillMaxWidth().height(14.dp)) }
+                }
+                ShimmerBox(modifier = Modifier.weight(1f).height(76.dp), shapeRadius = 6.dp)
+            }
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                repeat(3) {
+                    ShimmerBox(modifier = Modifier.size(width = 72.dp, height = 20.dp), shapeRadius = 10.dp)
+                }
+            }
+        }
+
+        // First rail.
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            ShimmerBox(modifier = Modifier.size(width = 128.dp, height = 18.dp))
+            Spacer(Modifier.weight(1f))
+            ShimmerBox(modifier = Modifier.size(width = 48.dp, height = 14.dp))
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            // The real rail cards are a fixed 178dp wide, so these are too.
+            repeat(2) {
+                Box(modifier = Modifier.width(178.dp)) { CourseCardSkeleton() }
+            }
+        }
     }
 }
 
