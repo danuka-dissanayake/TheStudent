@@ -1,0 +1,166 @@
+package com.example.ui.components
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import coil.compose.SubcomposeAsyncImage
+import com.example.data.model.PastPaper
+import com.example.ui.theme.MaisonNeueFontFamily
+
+/**
+ * The thumbnail shown for a paper.
+ *
+ * The paper API has no thumbnail column, so most papers arrive with an empty
+ * `thumbnailUrl` — showing one shared placeholder image made every row look the
+ * same and told the user nothing. Instead each paper gets a cover drawn from its
+ * own metadata: a sheet of paper with the examination colour, the subject
+ * initial, the year and the medium. If a real thumbnail URL ever arrives, that
+ * image wins.
+ */
+@Composable
+fun PaperCover(
+    paper: PastPaper,
+    modifier: Modifier = Modifier,
+    corner: Dp = 14.dp
+) {
+    val tint = paperCoverTint(paper.subject)
+    Surface(
+        shape = RoundedCornerShape(corner),
+        color = Color.White,
+        border = BorderStroke(1.dp, Color(0x140F172A)),
+        modifier = modifier
+    ) {
+        if (paper.thumbnailUrl.isNotBlank()) {
+            SubcomposeAsyncImage(
+                model = paper.thumbnailUrl,
+                contentDescription = paper.title,
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .clip(RoundedCornerShape(corner)),
+                loading = { CoverArt(paper, tint) },
+                error = { CoverArt(paper, tint) }
+            )
+        } else {
+            CoverArt(paper, tint)
+        }
+    }
+}
+
+/**
+ * A miniature exam paper: coloured header band, ruled body lines and the year.
+ * Deliberately drawn from primitives so it is crisp at any size and costs
+ * nothing to load.
+ */
+@Composable
+private fun CoverArt(paper: PastPaper, tint: Color) {
+    Column(modifier = Modifier.fillMaxSize()) {
+        // Header band — the examination colour, with a "title" bar in white.
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.34f)
+                .background(tint),
+            contentAlignment = Alignment.Center
+        ) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth(0.5f)
+                    .height(2.dp)
+                    .clip(RoundedCornerShape(1.dp))
+                    .background(Color.White.copy(alpha = 0.9f))
+            )
+        }
+        // Body — the subject initial on the left, ruled lines on the right.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(0.66f)
+                .padding(horizontal = 4.dp, vertical = 3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = paper.subject.take(1).uppercase().ifBlank { "P" },
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = tint
+            )
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(start = 3.dp),
+                verticalArrangement = Arrangement.spacedBy(2.dp)
+            ) {
+                MiniLine(1f, tint.copy(alpha = 0.35f))
+                MiniLine(0.75f, Color(0xFFCBD5E1))
+                MiniLine(0.55f, Color(0xFFE2E8F0))
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniLine(fraction: Float, color: Color) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(fraction)
+            .height(1.5.dp)
+            .clip(RoundedCornerShape(1.dp))
+            .background(color)
+    )
+}
+
+/** Small pill with the paper year, used where the cover has room for it. */
+@Composable
+fun PaperYearPill(paper: PastPaper, modifier: Modifier = Modifier) {
+    val tint = paperCoverTint(paper.subject)
+    Box(
+        modifier = modifier
+            .clip(RoundedCornerShape(50))
+            .background(tint.copy(alpha = 0.12f))
+            .padding(horizontal = 6.dp, vertical = 2.dp)
+    ) {
+        Text(
+            text = paper.year.toString(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = tint,
+            maxLines = 1,
+            overflow = TextOverflow.Clip
+        )
+    }
+}
+
+/** Stable colour per subject, so the same subject always looks the same. */
+fun paperCoverTint(subject: String): Color {
+    val palette = listOf(
+        Color(0xFF059669), Color(0xFF2563EB), Color(0xFF7C3AED),
+        Color(0xFFDB2777), Color(0xFFEA580C), Color(0xFF0891B2),
+        Color(0xFF65A30D), Color(0xFF9333EA)
+    )
+    val index = (subject.hashCode().rem(palette.size) + palette.size).rem(palette.size)
+    return palette[index]
+}

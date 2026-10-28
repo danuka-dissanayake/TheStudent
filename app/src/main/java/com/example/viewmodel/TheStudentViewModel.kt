@@ -3195,13 +3195,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun toggleSavePaper(paper: PastPaper) {
         viewModelScope.launch {
+            // The bookmark itself is the feedback: it fills or empties instantly.
+            // A bottom message for every tap only covered the list.
             val isSaved = savedPapers.value.any { it.id == paper.id }
             if (isSaved) {
                 repository.removeSavedPaper(paper.id)
-                showSnackbar("Paper removed from saved list")
             } else {
                 repository.toggleSavePaper(paper)
-                showSnackbar("Saved '${paper.title}' to Room database")
             }
         }
     }

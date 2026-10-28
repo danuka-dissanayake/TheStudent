@@ -53,6 +53,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
+import com.example.ui.components.PaperCover
 import com.example.ui.components.PaperTileSkeleton
 import com.example.ui.theme.MaisonNeueFontFamily
 
@@ -634,7 +635,6 @@ private fun PaperRow(
     onToggleSave: () -> Unit,
     onDownload: () -> Unit
 ) {
-    val tint = subjectTint(paper.subject)
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(18.dp),
@@ -647,22 +647,13 @@ private fun PaperRow(
             modifier = Modifier.padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Subject initial — the fastest way to scan a long list.
-            Box(
-                modifier = Modifier
-                    .size(46.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(tint.copy(alpha = 0.12f)),
-                contentAlignment = Alignment.Center
-            ) {
-                Text(
-                    text = paper.subject.take(1).uppercase(),
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 17.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = tint
-                )
-            }
+            // A cover drawn from the paper itself — the thumbnail a user
+            // expects to see next to a paper, not a generic icon.
+            PaperCover(
+                paper = paper,
+                modifier = Modifier.size(width = 40.dp, height = 50.dp),
+                corner = 10.dp
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -1088,15 +1079,4 @@ private fun FilterGroup(title: String, content: @Composable () -> Unit) {
             content()
         }
     }
-}
-
-/** Stable colour per subject, so the same subject always looks the same. */
-private fun subjectTint(subject: String): Color {
-    val palette = listOf(
-        Color(0xFF059669), Color(0xFF2563EB), Color(0xFF7C3AED),
-        Color(0xFFDB2777), Color(0xFFEA580C), Color(0xFF0891B2),
-        Color(0xFF65A30D), Color(0xFF9333EA)
-    )
-    val index = (subject.hashCode().rem(palette.size) + palette.size).rem(palette.size)
-    return palette[index]
 }
