@@ -342,7 +342,7 @@ fun AccountScreen(
                     Text(
                         text = visibleError,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = AccountDanger,
                         modifier = Modifier
@@ -453,7 +453,7 @@ fun AccountScreen(
                         Text(
                             text = if (isSaving) "Saving your details…" else "Save changes",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.sp,
+                            fontSize = 14.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -519,7 +519,7 @@ private fun AccountHeader(onBack: () -> Unit) {
             Text(
                 text = "Your details, one field at a time",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = AccountMuted
             )
         }
@@ -619,7 +619,7 @@ private fun IdentityCard(
                     Text(
                         text = email.ifBlank { "No e-mail on this account" },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         color = Color.White.copy(alpha = 0.80f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -635,7 +635,7 @@ private fun IdentityCard(
             Text(
                 text = "Tap the camera to change your photo.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = Color.White.copy(alpha = 0.72f)
             )
             if (photoError != null) {
@@ -643,7 +643,7 @@ private fun IdentityCard(
                 Text(
                     text = photoError,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = Color(0xFFFDE68A)
                 )
@@ -697,13 +697,13 @@ private fun DetailRow(
             Text(
                 text = labelOf(field),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = AccountMuted
             )
             Text(
                 text = value.ifBlank { "Not set" },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = if (value.isBlank()) AccountFaint else AccountInk,
                 maxLines = 1,
@@ -762,7 +762,7 @@ private fun EditingRow(
             Text(
                 text = labelOf(field),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = AccountGreen
             )
@@ -786,13 +786,13 @@ private fun EditingRow(
                             EditField.School -> "Your school or institute"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         color = AccountFaint
                     )
                 },
                 textStyle = TextStyle(
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = AccountInk
                 ),
@@ -883,13 +883,13 @@ private fun ReadOnlyField(icon: ImageVector, tint: Color, label: String, value: 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = AccountMuted
             )
             Text(
                 text = value,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = AccountInk,
                 maxLines = 1,
@@ -899,7 +899,7 @@ private fun ReadOnlyField(icon: ImageVector, tint: Color, label: String, value: 
         Text(
             text = "Locked",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = AccountFaint
         )
@@ -914,14 +914,14 @@ private fun ReadOnlyRow(icon: ImageVector, tint: Color, label: String, value: St
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = AccountMuted,
             modifier = Modifier.weight(1f)
         )
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.SemiBold,
             color = AccountInk,
             maxLines = 1,
@@ -948,7 +948,7 @@ private fun AccountSectionTitle(title: String) {
     Text(
         text = title.uppercase(),
         fontFamily = MaisonNeueFontFamily,
-        fontSize = 10.sp,
+        fontSize = 11.5.sp,
         fontWeight = FontWeight.Bold,
         color = AccountFaint,
         letterSpacing = 1.sp,
@@ -967,7 +967,7 @@ private fun AccountChip(text: String) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White
         )
@@ -1003,14 +1003,14 @@ private fun AccountAction(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (destructive) tint else AccountInk
                 )
                 Text(
                     text = subtitle,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = AccountMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1163,7 +1163,7 @@ private fun SignOutConfirm(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                     text = "Your saved papers, downloads and chat history stay on this phone. " +
                         "You can sign back in any time.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     lineHeight = 18.sp,
                     color = AccountMuted
                 )
@@ -1182,7 +1182,7 @@ private fun SignOutConfirm(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                             Text(
                                 text = "Stay",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AccountInk
                             )
@@ -1201,7 +1201,7 @@ private fun SignOutConfirm(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                             Text(
                                 text = "Sign out",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )

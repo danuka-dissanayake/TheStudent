@@ -149,7 +149,7 @@ fun QuizRunnerScreen(
                             }
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = RunMuted,
                         maxLines = 1
                     )
@@ -190,7 +190,7 @@ fun QuizRunnerScreen(
                             Text(
                                 text = "Question ${safeIndex + 1} of ${questions.size}",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = RunMuted,
                                 modifier = Modifier.weight(1f)
@@ -198,7 +198,7 @@ fun QuizRunnerScreen(
                             Text(
                                 text = if (question.marks == 1) "1 mark" else "${question.marks} marks",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 color = RunMuted
                             )
                         }
@@ -236,7 +236,7 @@ fun QuizRunnerScreen(
                                     Text(
                                         text = "QUESTION ${safeIndex + 1}",
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 9.5.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.ExtraBold,
                                         color = RunGreen,
                                         letterSpacing = 1.sp
@@ -282,7 +282,7 @@ fun QuizRunnerScreen(
                                             Text(
                                                 text = "Previous",
                                                 fontFamily = MaisonNeueFontFamily,
-                                                fontSize = 13.5.sp,
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = RunInk
                                             )
@@ -311,7 +311,7 @@ fun QuizRunnerScreen(
                                             Text(
                                                 text = if (isLast) "Submit quiz" else "Next question",
                                                 fontFamily = MaisonNeueFontFamily,
-                                                fontSize = 13.5.sp,
+                                                fontSize = 14.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = Color.White
                                             )
@@ -328,7 +328,7 @@ fun QuizRunnerScreen(
                                         "${questions.size - answered} unanswered — they are marked wrong"
                                     },
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 10.5.sp,
+                                    fontSize = 12.sp,
                                     color = if (answered == questions.size) RunGreen else RunMuted,
                                     modifier = Modifier
                                         .align(Alignment.CenterHorizontally)
@@ -395,7 +395,7 @@ private fun OptionRow(
                     Text(
                         text = letter,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = RunMuted
                     )
@@ -405,7 +405,7 @@ private fun OptionRow(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 lineHeight = 18.sp,
                 color = if (selected) Color.White else RunInk,
                 modifier = Modifier.weight(1f)
@@ -434,7 +434,7 @@ private fun TimerPill(remaining: Int) {
         Text(
             text = "%d:%02d".format((remaining / 60).coerceAtLeast(0), (remaining % 60).coerceAtLeast(0)),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             color = if (isUrgent) RunAmber else RunInk
         )
@@ -518,7 +518,7 @@ private fun LeaveQuizDialog(
                         "$answered of $total answers are on this screen. They stay until you leave, then the attempt starts over."
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     lineHeight = 17.sp,
                     color = RunMuted
                 )
@@ -536,7 +536,7 @@ private fun LeaveQuizDialog(
                             Text(
                                 text = "Keep going",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = RunInk
                             )
@@ -554,7 +554,7 @@ private fun LeaveQuizDialog(
                             Text(
                                 text = "Leave",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -621,7 +621,7 @@ private fun QuizResultContent(
                             Text(
                                 text = "${result.score} / ${result.maxScore}",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = RunMuted
                             )
                         }
@@ -650,7 +650,7 @@ private fun QuizResultContent(
                                 "Not passed · pass mark ${result.passPercent}%"
                             },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (result.passed) RunGreen else RunRed
                         )
@@ -663,7 +663,7 @@ private fun QuizResultContent(
                             "All ${result.maxAttempts} attempts used · added to your enrolled quizzes"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = RunMuted
                     )
                     Spacer(Modifier.height(14.dp))
@@ -692,7 +692,7 @@ private fun QuizResultContent(
                 Text(
                     text = "Review",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = RunInk,
                     modifier = Modifier.weight(1f)
@@ -708,7 +708,7 @@ private fun QuizResultContent(
                         Text(
                             text = "Wrong only",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (wrongOnly) Color.White else RunMuted,
                             modifier = Modifier.padding(horizontal = 10.dp)
@@ -721,7 +721,7 @@ private fun QuizResultContent(
                 Text(
                     text = "No wrong answers to show.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     color = RunMuted,
                     modifier = Modifier.padding(vertical = 8.dp)
                 )
@@ -776,7 +776,7 @@ private fun QuizResultContent(
                     Text(
                         text = "Back to quizzes",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -806,7 +806,7 @@ private fun ExpCard(result: QuizResult) {
                 Text(
                     text = if (earned > 0) "+$earned" else "0",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = if (earned > 0) Color.White else RunMuted
                 )
@@ -816,7 +816,7 @@ private fun ExpCard(result: QuizResult) {
                 Text(
                     text = if (earned > 0) "$earned EXP earned" else "No EXP this time",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = RunInk
                 )
@@ -828,7 +828,7 @@ private fun ExpCard(result: QuizResult) {
                         "This quiz's EXP was already earned, or today's allowance is used up."
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     lineHeight = 15.sp,
                     color = RunMuted
                 )
@@ -855,14 +855,14 @@ private fun ResultStat(
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 14.sp,
+            fontSize = 14.5.sp,
             fontWeight = FontWeight.ExtraBold,
             color = color
         )
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.5.sp,
+            fontSize = 11.sp,
             color = RunMuted
         )
     }
@@ -900,7 +900,7 @@ private fun ReviewCard(item: QuizReviewItem) {
                         else -> "Incorrect"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (item.correct) RunGreen else RunRed
                 )
@@ -909,7 +909,7 @@ private fun ReviewCard(item: QuizReviewItem) {
             Text(
                 text = item.prompt,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 lineHeight = 18.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = RunInk
@@ -919,7 +919,7 @@ private fun ReviewCard(item: QuizReviewItem) {
                 Text(
                     text = "Your answer: ${item.chosenLabel ?: "not answered"}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     lineHeight = 16.sp,
                     color = RunRed
                 )
@@ -928,7 +928,7 @@ private fun ReviewCard(item: QuizReviewItem) {
             Text(
                 text = "Correct answer: ${item.correctLabel}",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 lineHeight = 16.sp,
                 color = RunGreen
             )
@@ -944,7 +944,7 @@ private fun ReviewCard(item: QuizReviewItem) {
                     Text(
                         text = explanation,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         lineHeight = 16.sp,
                         color = RunMuted
                     )

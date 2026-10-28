@@ -119,88 +119,94 @@ fun ModernSidebarDrawer(
 
             DrawerSectionLabel("MENU", topPadding = 0.dp)
 
-            DrawerNavTile(
-                title = "Dashboard",
-                icon = Icons.Filled.Home,
-                isSelected = currentTab == TheStudentNavTab.HOME,
-                onClick = { onSelectTab(TheStudentNavTab.HOME) }
-            )
-            DrawerNavTile(
-                title = "Student chats",
-                icon = Icons.Filled.Chat,
-                isSelected = currentTab == TheStudentNavTab.CHAT,
-                onClick = { onSelectTab(TheStudentNavTab.CHAT) }
-            )
-            DrawerNavTile(
-                title = "AI Voice Tutor",
-                icon = Icons.Filled.AutoAwesome,
-                isSelected = currentTab == TheStudentNavTab.AI_TUTOR,
-                badge = "AI",
-                onClick = { onSelectTab(TheStudentNavTab.AI_TUTOR) }
-            )
-            DrawerNavTile(
-                title = "Past papers",
-                icon = Icons.Filled.Description,
-                isSelected = currentTab == TheStudentNavTab.PAPERS,
-                onClick = { onSelectTab(TheStudentNavTab.PAPERS) }
-            )
-            DrawerNavTile(
-                title = "My profile",
-                icon = Icons.Filled.Person,
-                isSelected = currentTab == TheStudentNavTab.PROFILE,
-                onClick = { onSelectTab(TheStudentNavTab.PROFILE) }
-            )
+            DrawerGroup {
+                DrawerNavTile(
+                    title = "Dashboard",
+                    icon = Icons.Filled.Home,
+                    isSelected = currentTab == TheStudentNavTab.HOME,
+                    onClick = { onSelectTab(TheStudentNavTab.HOME) }
+                )
+                DrawerNavTile(
+                    title = "Student chats",
+                    icon = Icons.Filled.Chat,
+                    isSelected = currentTab == TheStudentNavTab.CHAT,
+                    onClick = { onSelectTab(TheStudentNavTab.CHAT) }
+                )
+                DrawerNavTile(
+                    title = "AI Voice Tutor",
+                    icon = Icons.Filled.AutoAwesome,
+                    isSelected = currentTab == TheStudentNavTab.AI_TUTOR,
+                    badge = "AI",
+                    onClick = { onSelectTab(TheStudentNavTab.AI_TUTOR) }
+                )
+                DrawerNavTile(
+                    title = "Past papers",
+                    icon = Icons.Filled.Description,
+                    isSelected = currentTab == TheStudentNavTab.PAPERS,
+                    onClick = { onSelectTab(TheStudentNavTab.PAPERS) }
+                )
+                DrawerNavTile(
+                    title = "My profile",
+                    icon = Icons.Filled.Person,
+                    isSelected = currentTab == TheStudentNavTab.PROFILE,
+                    onClick = { onSelectTab(TheStudentNavTab.PROFILE) }
+                )
+            }
 
             DrawerSectionLabel("STUDY")
 
-            if (onOpenQuizzes != null) {
+            DrawerGroup {
+                if (onOpenQuizzes != null) {
+                    DrawerNavTile(
+                        title = "Quizzes",
+                        icon = Icons.Filled.Quiz,
+                        isSelected = false,
+                        onClick = onOpenQuizzes
+                    )
+                }
+                if (onOpenProgress != null) {
+                    DrawerNavTile(
+                        title = "My progress",
+                        icon = Icons.Filled.Insights,
+                        isSelected = false,
+                        onClick = onOpenProgress
+                    )
+                }
+                if (onOpenCourseCollection != null) {
+                    DrawerNavTile(
+                        title = "Free courses",
+                        icon = Icons.Filled.School,
+                        isSelected = false,
+                        onClick = onOpenCourseCollection
+                    )
+                }
                 DrawerNavTile(
-                    title = "Quizzes",
-                    icon = Icons.Filled.Quiz,
+                    title = "AI Study Assistant",
+                    icon = Icons.Filled.Psychology,
                     isSelected = false,
-                    onClick = onOpenQuizzes
+                    badge = "Multimodal",
+                    onClick = onOpenAiAssistant
+                )
+                DrawerNavTile(
+                    title = "Language lab",
+                    icon = Icons.Filled.Translate,
+                    isSelected = false,
+                    badge = "CEFR B2",
+                    onClick = onOpenLanguageLab
                 )
             }
-            if (onOpenProgress != null) {
-                DrawerNavTile(
-                    title = "My progress",
-                    icon = Icons.Filled.Insights,
-                    isSelected = false,
-                    onClick = onOpenProgress
-                )
-            }
-            if (onOpenCourseCollection != null) {
-                DrawerNavTile(
-                    title = "Free courses",
-                    icon = Icons.Filled.School,
-                    isSelected = false,
-                    onClick = onOpenCourseCollection
-                )
-            }
-            DrawerNavTile(
-                title = "AI Study Assistant",
-                icon = Icons.Filled.Psychology,
-                isSelected = false,
-                badge = "Multimodal",
-                onClick = onOpenAiAssistant
-            )
-            DrawerNavTile(
-                title = "Language lab",
-                icon = Icons.Filled.Translate,
-                isSelected = false,
-                badge = "CEFR B2",
-                onClick = onOpenLanguageLab
-            )
 
             if (isAdmin && onOpenAdminPanel != null) {
                 DrawerSectionLabel("ADMINISTRATOR", accent = MaterialTheme.colorScheme.error)
-                DrawerNavTile(
-                    title = "Admin panel",
-                    icon = Icons.Filled.AdminPanelSettings,
-                    isSelected = false,
-                    badge = "Admin",
-                    onClick = onOpenAdminPanel
-                )
+                DrawerGroup {
+                    DrawerNavTile(
+                        title = "Admin panel",
+                        icon = Icons.Filled.AdminPanelSettings,
+                        isSelected = false,
+                        badge = "Admin",
+                        onClick = onOpenAdminPanel
+                    )
+                }
             }
 
             Spacer(Modifier.height(14.dp))
@@ -227,7 +233,7 @@ fun ModernSidebarDrawer(
             Text(
                 text = "TheStudent · v2.0",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.sp,
                 color = SFaint,
                 modifier = Modifier.padding(start = 22.dp, top = 12.dp, bottom = 22.dp)
             )
@@ -255,7 +261,7 @@ private fun SidebarHeader(
                 )
             )
     ) {
-        Column(modifier = Modifier.padding(start = 20.dp, end = 16.dp, top = 20.dp, bottom = 44.dp)) {
+        Column(modifier = Modifier.padding(start = 20.dp, end = 16.dp, top = 18.dp, bottom = 46.dp)) {
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.End
@@ -283,39 +289,47 @@ private fun SidebarHeader(
 
             Spacer(Modifier.height(6.dp))
 
-            // Avatar with a white ring, as an identity anchor rather than decoration.
+            // A large portrait, ringed in white: the identity anchor of the sheet.
             Box(
                 modifier = Modifier
-                    .size(60.dp)
+                    .size(96.dp)
                     .clip(CircleShape)
-                    .background(Color.White.copy(alpha = 0.16f)),
+                    .background(Color.White.copy(alpha = 0.18f)),
                 contentAlignment = Alignment.Center
             ) {
-                if (userProfile.avatarUrl.isNotBlank()) {
-                    AsyncImage(
-                        model = userProfile.avatarUrl,
-                        contentDescription = null,
-                        contentScale = ContentScale.Crop,
-                        modifier = Modifier.size(54.dp).clip(CircleShape)
-                    )
-                } else {
-                    Text(
-                        text = initialsOf(userProfile.name),
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 20.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White
-                    )
+                Box(
+                    modifier = Modifier
+                        .size(88.dp)
+                        .clip(CircleShape)
+                        .background(Color(0xFF0B4A3B)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    if (userProfile.avatarUrl.isNotBlank()) {
+                        AsyncImage(
+                            model = userProfile.avatarUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.size(88.dp).clip(CircleShape)
+                        )
+                    } else {
+                        Text(
+                            text = initialsOf(userProfile.name),
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 30.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(14.dp))
 
             Text(
                 text = userProfile.name.ifBlank { "Student" },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 20.sp,
-                fontWeight = FontWeight.ExtraBold,
+                fontSize = 23.sp,
+                fontWeight = FontWeight.Bold,
                 letterSpacing = (-0.4).sp,
                 color = Color.White,
                 maxLines = 1,
@@ -329,8 +343,8 @@ private fun SidebarHeader(
             Text(
                 text = stage.ifBlank { "Set up your academic details" },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
-                color = Color.White.copy(alpha = 0.72f),
+                fontSize = 13.sp,
+                color = Color.White.copy(alpha = 0.75f),
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.padding(top = 2.dp)
@@ -364,7 +378,7 @@ private fun HeaderPill(text: String) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White,
             maxLines = 1
@@ -397,8 +411,8 @@ private fun WeeklyStrip(
                 Text(
                     text = "This week",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
+                    fontSize = 14.5.sp,
+                    fontWeight = FontWeight.Bold,
                     color = SInk,
                     modifier = Modifier.weight(1f)
                 )
@@ -413,7 +427,7 @@ private fun WeeklyStrip(
                         Text(
                             text = "Report",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
                             color = EmeraldPrimary
                         )
@@ -421,7 +435,7 @@ private fun WeeklyStrip(
                             imageVector = Icons.Default.ChevronRight,
                             contentDescription = null,
                             tint = EmeraldPrimary,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                     }
                 }
@@ -462,8 +476,8 @@ private fun WeeklyStrip(
                     "No attempts yet — start a quiz"
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
-                color = SFaint,
+                fontSize = 11.5.sp,
+                color = SMuted,
                 maxLines = 1
             )
         }
@@ -483,12 +497,37 @@ private fun DrawerSectionLabel(
     Text(
         text = text,
         fontFamily = MaisonNeueFontFamily,
-        fontSize = 10.sp,
-        fontWeight = FontWeight.ExtraBold,
+        fontSize = 11.sp,
+        fontWeight = FontWeight.Bold,
         letterSpacing = 1.1.sp,
         color = accent,
         modifier = Modifier.padding(start = 22.dp, top = topPadding, bottom = 10.dp)
     )
+}
+
+/** One white card holding a group of rows, so the list reads as a menu, not a wall. */
+@Composable
+private fun DrawerGroup(content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit) {
+    val isDark = isSystemInDarkTheme()
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (isDark) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f) else Color.White,
+        border = BorderStroke(1.dp, if (isDark) Color(0x1FFFFFFF) else SHairline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 14.dp)
+            .shadow(
+                elevation = if (isDark) 0.dp else 4.dp,
+                shape = RoundedCornerShape(20.dp),
+                clip = false
+            )
+    ) {
+        Column(
+            modifier = Modifier.padding(6.dp),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+            content = content
+        )
+    }
 }
 
 @Composable
@@ -499,68 +538,46 @@ private fun DrawerNavTile(
     badge: String? = null,
     onClick: () -> Unit
 ) {
-    val isDark = isSystemInDarkTheme()
-    // One icon colour for the whole list — colour is a signal, so only the
-    // current destination spends it. The active row is unmissable: an emerald
-    // wash, a bar on its leading edge, an emerald chip and emerald text.
-    val iconTint = if (isSelected) EmeraldPrimary else SIcon
-    val chipBg = if (isSelected) {
-        EmeraldPrimary.copy(alpha = 0.16f)
-    } else if (isDark) {
-        Color(0x22FFFFFF)
-    } else {
-        SIconChip
-    }
+    // Selected = a solid emerald pill with white content. Everything else is a
+    // quiet graphite row on the white card. Colour is a signal, not decoration.
     Surface(
         onClick = onClick,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 12.dp, vertical = 4.dp)
-            .clip(RoundedCornerShape(14.dp))
+            .clip(RoundedCornerShape(15.dp))
             .testTag(if (isSelected) "drawer_item_active" else "drawer_item_$title"),
-        shape = RoundedCornerShape(14.dp),
-        color = when {
-            isSelected && isDark -> EmeraldPrimary.copy(alpha = 0.22f)
-            isSelected -> SActive
-            else -> Color.Transparent
-        }
+        shape = RoundedCornerShape(15.dp),
+        color = if (isSelected) EmeraldPrimary else Color.Transparent
     ) {
         Row(
             modifier = Modifier
                 .fillMaxWidth()
-                .padding(end = 12.dp, top = 7.dp, bottom = 7.dp),
+                .padding(horizontal = 8.dp, vertical = 9.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Leading marker: the selected destination is anchored to the edge.
             Box(
                 modifier = Modifier
-                    .width(3.dp)
-                    .height(28.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(if (isSelected) EmeraldPrimary else Color.Transparent)
-            )
-            Spacer(Modifier.width(10.dp))
-            Box(
-                modifier = Modifier
-                    .size(36.dp)
-                    .clip(RoundedCornerShape(11.dp))
-                    .background(chipBg),
+                    .size(38.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(
+                        if (isSelected) Color.White.copy(alpha = 0.2f) else SIconChip
+                    ),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = iconTint,
-                    modifier = Modifier.size(18.dp)
+                    tint = if (isSelected) Color.White else SIcon,
+                    modifier = Modifier.size(19.dp)
                 )
             }
-            Spacer(Modifier.width(12.dp))
+            Spacer(Modifier.width(13.dp))
             Text(
                 text = title,
                 fontFamily = MaisonNeueFontFamily,
-                fontWeight = if (isSelected) FontWeight.ExtraBold else FontWeight.SemiBold,
-                fontSize = 14.5.sp,
-                color = if (isSelected) Color(0xFF047857) else SInk,
+                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                fontSize = 15.sp,
+                color = if (isSelected) Color.White else SInk,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f)
@@ -568,26 +585,28 @@ private fun DrawerNavTile(
             if (badge != null) {
                 Box(
                     modifier = Modifier
-                        .clip(RoundedCornerShape(7.dp))
-                        .background(if (isSelected) EmeraldPrimary else SIconChip)
-                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(
+                            if (isSelected) Color.White.copy(alpha = 0.22f) else EmeraldPrimary.copy(alpha = 0.12f)
+                        )
+                        .padding(horizontal = 8.dp, vertical = 3.dp)
                 ) {
                     Text(
                         text = badge,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = if (isSelected) Color.White else SIcon,
+                        color = if (isSelected) Color.White else EmeraldPrimary,
                         maxLines = 1
                     )
                 }
-                Spacer(Modifier.width(5.dp))
+                Spacer(Modifier.width(6.dp))
             }
             Icon(
-                imageVector = Icons.Default.ChevronRight,
+                imageVector = if (isSelected) Icons.Default.Check else Icons.Default.ChevronRight,
                 contentDescription = null,
-                tint = if (isSelected) EmeraldPrimary else SFaint,
-                modifier = Modifier.size(17.dp)
+                tint = if (isSelected) Color.White else SFaint,
+                modifier = Modifier.size(18.dp)
             )
         }
     }
@@ -612,8 +631,8 @@ private fun DrawerFooterRow(title: String, icon: ImageVector, onClick: () -> Uni
         Text(
             text = title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.5.sp,
-            fontWeight = FontWeight.SemiBold,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Medium,
             color = SInk,
             maxLines = 1
         )
@@ -645,7 +664,7 @@ private fun DrawerSignOutRow(onClick: () -> Unit) {
             Text(
                 text = "Sign out",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = SDanger
             )

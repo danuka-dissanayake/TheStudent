@@ -679,7 +679,7 @@ private fun FloatingHelpBubble(
                         Text(
                             text = badge,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White
                         )
@@ -730,7 +730,7 @@ private fun HelpBubbleCard(
             Text(
                 text = headline,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = ChatInk
             )
@@ -738,7 +738,7 @@ private fun HelpBubbleCard(
             Text(
                 text = body,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 lineHeight = 15.sp,
                 color = ChatMuted
             )
@@ -760,7 +760,7 @@ private fun HelpBubbleCard(
                         Text(
                             text = if (isBusy) "…" else primaryLabel,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             maxLines = 1
@@ -781,7 +781,7 @@ private fun HelpBubbleCard(
                         Text(
                             text = secondaryLabel,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = ChatMuted,
                             maxLines = 1
@@ -873,7 +873,7 @@ private fun RatingCardOverlay(
                             text = rate.subjectLine + " · " +
                                 if (rate.isTalk) "after a long chat" else "help closed",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             color = ChatMuted,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
@@ -938,7 +938,7 @@ private fun RatingCardOverlay(
                     text = starWords.getOrElse(stars) { "" }
                         .ifBlank { "Tap a star" },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = if (stars == 0) ChatMuted else Color(0xFFB45309),
                     textAlign = androidx.compose.ui.text.style.TextAlign.Center,
@@ -976,7 +976,7 @@ private fun RatingCardOverlay(
                             Text(
                                 text = label,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                                 color = if (selected) EmeraldDark else ChatMuted,
                                 modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
@@ -998,14 +998,14 @@ private fun RatingCardOverlay(
                         .testTag("chat_rating_note"),
                     textStyle = LocalTextStyle.current.copy(
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         color = ChatInk
                     ),
                     placeholder = {
                         Text(
                             text = "Private note (optional)",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             color = ChatMuted
                         )
                     },
@@ -1013,7 +1013,7 @@ private fun RatingCardOverlay(
                         Text(
                             text = "${note.length}/${rate.maxNote}",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = ChatMuted
                         )
                     },
@@ -1048,7 +1048,7 @@ private fun RatingCardOverlay(
                                     else -> "Send rating"
                                 },
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (canSend) Color.White else EmeraldDark
                             )
@@ -1071,7 +1071,7 @@ private fun RatingCardOverlay(
                             Text(
                                 text = "Not now",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = ChatMuted
                             )
@@ -1206,14 +1206,14 @@ private fun ChatIntentSheet(
                             Text(
                                 text = option.title,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
                                 color = ChatInk
                             )
                             Text(
                                 text = option.subtitle,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 10.5.sp,
+                                fontSize = 12.sp,
                                 color = ChatFaint
                             )
                         }
@@ -1269,7 +1269,7 @@ private fun ChatIntentSheet(
                                 else -> "Save"
                             },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.sp,
+                            fontSize = 14.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -1282,7 +1282,7 @@ private fun ChatIntentSheet(
                     Text(
                         text = "Not now",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = ChatMuted
                     )
@@ -1328,7 +1328,7 @@ private fun QuestionOfferCard(
                 Text(
                     text = "This looks like a question for $firstName",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ChatInk
                 )
@@ -1337,7 +1337,7 @@ private fun QuestionOfferCard(
             Text(
                 text = "Track it so $firstName gets credit for the help — and you can rate them after.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 lineHeight = 15.sp,
                 color = ChatMuted
             )
@@ -1359,7 +1359,7 @@ private fun QuestionOfferCard(
                         Text(
                             text = if (isBusy) "Sending…" else "Ask for help",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -1381,7 +1381,7 @@ private fun QuestionOfferCard(
                         Text(
                             text = "Not now",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = ChatMuted
                         )
@@ -1475,14 +1475,14 @@ private fun HelpRequestCard(
                     Text(
                         text = title,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.Bold,
                         color = ChatInk
                     )
                     Text(
                         text = subtitle,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         lineHeight = 16.sp,
                         color = ChatMuted
                     )
@@ -1506,7 +1506,7 @@ private fun HelpRequestCard(
                             Text(
                                 text = "I can help",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -1527,7 +1527,7 @@ private fun HelpRequestCard(
                             Text(
                                 text = "Not now",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = ChatMuted
                             )
@@ -1553,7 +1553,7 @@ private fun HelpRequestCard(
                         Text(
                             text = "Cancel request",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = ChatMuted
                         )
@@ -1577,7 +1577,7 @@ private fun HelpRequestCard(
                         Text(
                             text = "This helped — close",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -1588,7 +1588,7 @@ private fun HelpRequestCard(
                 Text(
                     text = "Waiting for them to close the request.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ChatFaint
                 )
             } else if (request.isCompleted) {
@@ -1616,7 +1616,7 @@ private fun HelpRequestCard(
                             Text(
                                 text = if (isBusy) "Sending…" else "Ask again",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -1625,7 +1625,7 @@ private fun HelpRequestCard(
                     Text(
                         text = "Next question, same student",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = ChatMuted
                     )
                 }
@@ -1681,7 +1681,7 @@ private fun PinnedHelpRequestCard(
                 Text(
                     text = "$firstName needs help",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ChatInk,
                     maxLines = 1,
@@ -1693,7 +1693,7 @@ private fun PinnedHelpRequestCard(
             Text(
                 text = request.subjectLine,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = ChatMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1720,7 +1720,7 @@ private fun PinnedHelpRequestCard(
                         Text(
                             text = if (isBusy) "Accepting…" else "I can help",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -1729,7 +1729,7 @@ private fun PinnedHelpRequestCard(
                 Text(
                     text = "Not now",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ChatMuted,
                     modifier = Modifier
@@ -1858,7 +1858,7 @@ private fun ChatPeerProfileScreen(
                     Text(
                         text = chatPresenceLine(peer),
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium,
                         color = if (peer.isOnline) EmeraldDark else ChatMuted,
                         textAlign = TextAlign.Center
@@ -1907,7 +1907,7 @@ private fun ChatPeerProfileScreen(
                                 Text(
                                     text = "Message",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
                                     maxLines = 1
@@ -1952,7 +1952,7 @@ private fun ChatPeerProfileScreen(
                                 Text(
                                     text = "Ask help",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldDark,
                                     maxLines = 1
@@ -2140,7 +2140,7 @@ private fun ChatPeerProfileScreen(
                                     Text(
                                         text = "Only what they chose to share",
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = EmeraldDark
                                     )
@@ -2149,7 +2149,7 @@ private fun ChatPeerProfileScreen(
                                         text = "Phone numbers and e-mail addresses are never " +
                                             "shown to other students.",
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 11.5.sp,
+                                        fontSize = 12.5.sp,
                                         lineHeight = 16.sp,
                                         color = ChatMuted
                                     )
@@ -2204,7 +2204,7 @@ private fun PeerRatingsCard(ratings: ChatRatingSummary) {
                         "No ratings yet"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ChatMuted
                 )
             }
@@ -2221,7 +2221,7 @@ private fun PeerRatingsCard(ratings: ChatRatingSummary) {
                     Text(
                         text = "$star",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = ChatFaint,
                         modifier = Modifier.width(10.dp)
@@ -2252,7 +2252,7 @@ private fun PeerRatingsCard(ratings: ChatRatingSummary) {
                     Text(
                         text = "${ratings.breakdown[star] ?: 0}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = ChatFaint,
                         modifier = Modifier.width(16.dp),
                         textAlign = TextAlign.End
@@ -2274,7 +2274,7 @@ private fun PeerRatingsCard(ratings: ChatRatingSummary) {
                         Text(
                             text = tag.label,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = EmeraldDark
                         )
@@ -2314,7 +2314,7 @@ private fun SubjectListRow(subjects: List<String>) {
             Text(
                 text = "Subjects",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = ChatFaint
             )
@@ -2335,7 +2335,7 @@ private fun SubjectListRow(subjects: List<String>) {
                     Text(
                         text = subject,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = 14.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = ChatInk,
                         modifier = Modifier.testTag("chat_profile_subject_$index")
@@ -2366,7 +2366,7 @@ private fun ProfileLoadingState(modifier: Modifier = Modifier) {
         Text(
             text = "Loading their profile…",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             color = ChatMuted
         )
@@ -2391,7 +2391,7 @@ private fun ProfileCard(
             Text(
                 text = title.uppercase(Locale.getDefault()),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = ChatFaint,
                 letterSpacing = 1.1.sp
@@ -2436,14 +2436,14 @@ private fun ProfileInfoRow(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = ChatFaint
             )
             Spacer(Modifier.height(1.dp))
             Text(
                 text = value,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = ChatInk
             )
@@ -2484,14 +2484,14 @@ private fun ProfileFactRow(
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             color = ChatMuted,
             modifier = Modifier.weight(1f)
         )
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = ChatInk,
             textAlign = TextAlign.End
@@ -2593,7 +2593,7 @@ private fun ChatDirectoryScreen(
                                 append(" · ${state.onlineCount} online")
                             },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             color = ChatMuted
                         )
                     }
@@ -2646,7 +2646,7 @@ private fun ChatDirectoryScreen(
                             Text(
                                 "Search by full name",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 14.sp,
+                                fontSize = 14.5.sp,
                                 color = ChatFaint
                             )
                         },
@@ -2686,7 +2686,7 @@ private fun ChatDirectoryScreen(
                         Text(
                             text = "Online now",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = ChatInk
                         )
@@ -2694,7 +2694,7 @@ private fun ChatDirectoryScreen(
                         Text(
                             text = "${state.onlineCount}",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             color = ChatMuted
                         )
                     }
@@ -2723,7 +2723,7 @@ private fun ChatDirectoryScreen(
                                     // the full name is on the directory row below.
                                     text = thread.peer.name.substringBefore(" "),
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Medium,
                                     color = ChatInk,
                                     maxLines = 1,
@@ -2761,14 +2761,14 @@ private fun ChatDirectoryScreen(
                             Text(
                                 text = message,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 color = Color(0xFFB91C1C),
                                 modifier = Modifier.weight(1f)
                             )
                             Text(
                                 text = "Dismiss",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = ChatError,
                                 modifier = Modifier
@@ -2812,7 +2812,7 @@ private fun ChatDirectoryScreen(
                                         "No student matches \"$searchQuery\""
                                     },
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = ChatInk,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -2821,7 +2821,7 @@ private fun ChatDirectoryScreen(
                                 Text(
                                     text = "Only registered TheStudent students appear here.",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     color = ChatMuted,
                                     textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                 )
@@ -2930,7 +2930,7 @@ private fun ChatThreadRow(
                     Text(
                         text = preview,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         color = if (peer.isTyping) EmeraldPrimary else ChatMuted,
                         fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
@@ -2946,7 +2946,7 @@ private fun ChatThreadRow(
                 Text(
                     text = formatThreadStamp(thread.lastMessageEpoch),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = if (thread.unreadCount > 0) EmeraldPrimary else ChatFaint,
                     fontWeight = if (thread.unreadCount > 0) FontWeight.Bold else FontWeight.Normal
                 )
@@ -2967,7 +2967,7 @@ private fun ChatThreadRow(
                             Text(
                                 text = if (thread.unreadCount > 99) "99+" else thread.unreadCount.toString(),
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 10.5.sp,
+                                fontSize = 12.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -2977,7 +2977,7 @@ private fun ChatThreadRow(
                         Text(
                             text = "online",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             color = ChatOnline,
                             fontWeight = FontWeight.Medium
                         )
@@ -3279,7 +3279,7 @@ private fun ChatConversationScreen(
                         Text(
                             text = peer.presenceLabel,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             fontWeight = FontWeight.Medium,
                             color = when {
                                 peer.isTyping -> EmeraldPrimary
@@ -3388,7 +3388,7 @@ private fun ChatConversationScreen(
                             Text(
                                 "Search in this chat",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 color = ChatFaint
                             )
                         },
@@ -3411,7 +3411,7 @@ private fun ChatConversationScreen(
                                             "${activeMatch.intValue + 1}/${matchRowIndices.size}"
                                         },
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (matchRowIndices.isEmpty()) ChatFaint else EmeraldDark
                                     )
@@ -3462,7 +3462,7 @@ private fun ChatConversationScreen(
                             else -> "${matchRowIndices.size} matching messages · use ↑ ↓ to jump"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = ChatMuted,
                         modifier = Modifier.padding(start = 18.dp, top = 2.dp, bottom = 2.dp)
                     )
@@ -3545,7 +3545,7 @@ private fun ChatConversationScreen(
                                         Text(
                                             text = "No messages match your search",
                                             fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 13.5.sp,
+                                            fontSize = 14.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = ChatMuted,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -3554,7 +3554,7 @@ private fun ChatConversationScreen(
                                         Text(
                                             text = "Try a different word or clear the search.",
                                             fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 12.sp,
+                                            fontSize = 13.sp,
                                             color = ChatFaint,
                                             textAlign = androidx.compose.ui.text.style.TextAlign.Center
                                         )
@@ -3570,7 +3570,7 @@ private fun ChatConversationScreen(
                                     Text(
                                         text = "This is the start with ${peer.name}",
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 14.sp,
+                                        fontSize = 14.5.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = ChatInk,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -3579,7 +3579,7 @@ private fun ChatConversationScreen(
                                     Text(
                                         text = "Ask about a past paper, share how you solved a question, or just say hello.",
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 12.5.sp,
+                                        fontSize = 13.5.sp,
                                         color = ChatMuted,
                                         textAlign = androidx.compose.ui.text.style.TextAlign.Center,
                                         lineHeight = 18.sp
@@ -3700,14 +3700,14 @@ private fun ChatConversationScreen(
                         Text(
                             text = message,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             color = ChatError,
                             modifier = Modifier.weight(1f)
                         )
                         Text(
                             text = "Dismiss",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = ChatError,
                             modifier = Modifier
@@ -3735,7 +3735,7 @@ private fun ChatConversationScreen(
                         Text(
                             text = "${peer.name} hasn't opened secure chat yet, so messages can't be delivered.",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = ChatMuted
                         )
                     }
@@ -3872,7 +3872,7 @@ private fun ChatConversationScreen(
                                 Text(
                                     "Message ${peer.name.substringBefore(" ")}…",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     color = ChatFaint
                                 )
                             },
@@ -4012,7 +4012,7 @@ private fun ChatConversationScreen(
                     Text(
                         text = "Messages are end-to-end encrypted",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = ChatFaint
                     )
                 }
@@ -4135,7 +4135,7 @@ private fun AttachmentPickerSheet(
             Text(
                 text = "Encrypted on your phone before it leaves. Up to 25 MB.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 lineHeight = 17.sp,
                 color = ChatMuted
             )
@@ -4201,7 +4201,7 @@ private fun AttachmentOptionRow(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.5.sp,
+                    fontSize = 15.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ChatInk
                 )
@@ -4209,7 +4209,7 @@ private fun AttachmentOptionRow(
                 Text(
                     text = subtitle,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     lineHeight = 15.sp,
                     color = ChatMuted
                 )
@@ -4287,7 +4287,7 @@ private fun ReplyComposerBar(
                         "Replying to ${peerName.substringBefore(" ")}"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = EmeraldDark
                 )
@@ -4295,7 +4295,7 @@ private fun ReplyComposerBar(
                 Text(
                     text = reply.preview,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     color = ChatMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -4354,14 +4354,14 @@ private fun ReplyQuoteBlock(reply: ChatReply, isMine: Boolean, peerName: String 
             Text(
                 text = quotedName,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 color = accent
             )
             Text(
                 text = reply.preview,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 lineHeight = 15.sp,
                 color = if (isMine) Color.White.copy(alpha = 0.88f) else ChatMuted,
                 maxLines = 2,
@@ -4464,7 +4464,7 @@ private fun RecordingComposer(
             Text(
                 text = clock,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = ChatInk
             )
@@ -4616,7 +4616,7 @@ private fun ChatOptionsMenu(
                             text = peerName.trim().take(1).uppercase(Locale.getDefault())
                                 .ifBlank { "?" },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = EmeraldDark
                         )
@@ -4626,7 +4626,7 @@ private fun ChatOptionsMenu(
                         Text(
                             text = peerName,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = ChatInk,
                             maxLines = 1,
@@ -4645,7 +4645,7 @@ private fun ChatOptionsMenu(
                             Text(
                                 text = presence,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 10.5.sp,
+                                fontSize = 12.sp,
                                 color = if (isOnline) EmeraldDark else ChatMuted,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -4745,7 +4745,7 @@ private fun ChatMenuRow(
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = if (tint == ChatError) ChatError else ChatInk,
             maxLines = 1,
@@ -4825,7 +4825,7 @@ private fun ChatConfirmDialog(
                 Text(
                     text = message,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     lineHeight = 19.sp,
                     color = ChatMuted,
                     textAlign = TextAlign.Center
@@ -4852,7 +4852,7 @@ private fun ChatConfirmDialog(
                         Text(
                             text = preview,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             lineHeight = 17.sp,
                             color = ChatMuted,
                             maxLines = 2,
@@ -4883,7 +4883,7 @@ private fun ChatConfirmDialog(
                         Text(
                             text = note,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = accent
                         )
@@ -4910,7 +4910,7 @@ private fun ChatConfirmDialog(
                             Text(
                                 text = "Cancel",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = ChatInk
                             )
@@ -4932,7 +4932,7 @@ private fun ChatConfirmDialog(
                             Text(
                                 text = confirmLabel,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -4977,7 +4977,7 @@ private fun MessageActionsSheet(
                     else -> "Message"
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 lineHeight = 19.sp,
                 color = ChatMuted,
                 maxLines = 2,
@@ -5039,7 +5039,7 @@ private fun MessageActionRow(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = tint
             )
@@ -5173,7 +5173,7 @@ private fun DayDivider(label: String) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = ChatMuted,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
@@ -5235,7 +5235,7 @@ private fun AttachmentDraftCard(
                 Text(
                     text = draft.name,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ChatInk,
                     maxLines = 1,
@@ -5251,7 +5251,7 @@ private fun AttachmentDraftCard(
                         else -> readableBytes(draft.size) + "  ·  ready to send"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = ChatMuted
                 )
                 if (uploadProgress != null) {
@@ -5346,7 +5346,7 @@ private fun ChatAttachmentContent(
                             else -> "Fetching photo…"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
                     )
                     if (downloadProgress != null) {
@@ -5397,7 +5397,7 @@ private fun ChatAttachmentContent(
                 Text(
                     text = attachment.name,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = if (message.isMine) Color.White else ChatInk,
                     maxLines = 2,
@@ -5413,7 +5413,7 @@ private fun ChatAttachmentContent(
                         else -> "Fetching…"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = if (message.isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
                 )
             }
@@ -5571,7 +5571,7 @@ private fun AudioNoteContent(
                     else -> attachment.readableDuration
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = if (isMine) Color.White.copy(alpha = 0.85f) else ChatMuted
             )
         }
@@ -5849,7 +5849,7 @@ private fun ChatBubble(
                     Text(
                         text = formatClock(message.sentAtEpoch),
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = 11.5.sp,
                         color = if (isMine) Color.White.copy(alpha = 0.82f) else ChatFaint
                     )
                     if (isMine && message.isPending) {
@@ -5966,7 +5966,7 @@ private fun SafetyNoticeBanner(onAcknowledge: () -> Unit) {
                 Text(
                     text = "Keep your chats safe",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = EmeraldDark
                 )
@@ -5977,7 +5977,7 @@ private fun SafetyNoticeBanner(onAcknowledge: () -> Unit) {
                     "passwords here. TheStudent will never ask for your password, and you " +
                     "can report a message from the chat menu.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 lineHeight = 17.sp,
                 color = Color(0xFF065F46)
             )
@@ -5992,7 +5992,7 @@ private fun SafetyNoticeBanner(onAcknowledge: () -> Unit) {
                     Text(
                         text = "I understand",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
@@ -6089,7 +6089,7 @@ private fun ChatLoadingState(modifier: Modifier = Modifier) {
         Text(
             text = "Loading your conversation…",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             color = ChatMuted
         )
     }

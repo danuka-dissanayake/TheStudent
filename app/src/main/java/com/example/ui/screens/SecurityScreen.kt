@@ -235,7 +235,7 @@ fun SecurityScreen(
                     )
                     Text(
                         text = "Manage your password and devices",
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         color = SecurityMuted
                     )
                 }
@@ -257,7 +257,7 @@ fun SecurityScreen(
                         Text(
                             text = if (role == TheStudentPreferences.ROLE_ADMIN) "Administrator account" else "Student account",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 13.5.sp,
+                            fontSize = 14.sp,
                             color = SecurityInk
                         )
                     }
@@ -323,10 +323,10 @@ fun SecurityScreen(
                 )
 
                 passwordError?.let { message ->
-                    Text(text = message, color = RedError, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                    Text(text = message, color = RedError, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                 }
                 passwordSuccess?.let { message ->
-                    Text(text = message, color = SecurityGreen, fontSize = 12.5.sp, fontWeight = FontWeight.Medium)
+                    Text(text = message, color = SecurityGreen, fontSize = 13.5.sp, fontWeight = FontWeight.Medium)
                 }
 
                 SolidPillButton(
@@ -339,7 +339,7 @@ fun SecurityScreen(
                 )
                 Text(
                     text = "Changing your password signs out every other device.",
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     color = SecurityMuted
                 )
             }
@@ -365,7 +365,7 @@ fun SecurityScreen(
                     text = if (isSigningOutAll) "Signing out..." else "Sign out of all devices",
                     color = SecurityInk,
                     fontWeight = FontWeight.SemiBold,
-                    fontSize = 14.sp
+                    fontSize = 14.5.sp
                 )
             }
 
@@ -377,7 +377,7 @@ fun SecurityScreen(
             Text(
                 text = "This permanently removes your account, saved papers and progress. " +
                     "It cannot be undone.",
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 color = SecurityMuted
             )
             Spacer(Modifier.height(12.dp))
@@ -391,7 +391,7 @@ fun SecurityScreen(
                 colors = ButtonDefaults.textButtonColors(contentColor = RedError),
                 modifier = Modifier.testTag("btn_delete_account")
             ) {
-                Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                Text("Delete my account", fontWeight = FontWeight.Bold, fontSize = 14.5.sp)
             }
 
             Spacer(Modifier.height(28.dp))
@@ -431,7 +431,7 @@ fun SecurityScreen(
                     Column {
                         Text(
                             "Your account and all of its data will be erased. This cannot be undone.",
-                            fontSize = 13.sp
+                            fontSize = 13.5.sp
                         )
                         Spacer(Modifier.height(12.dp))
                         CleanLabeledTextField(
@@ -449,7 +449,7 @@ fun SecurityScreen(
                         )
                         deleteError?.let { message ->
                             Spacer(Modifier.height(8.dp))
-                            Text(text = message, color = RedError, fontSize = 12.5.sp)
+                            Text(text = message, color = RedError, fontSize = 13.5.sp)
                         }
                     }
                 },
@@ -496,10 +496,10 @@ private fun InfoRow(label: String, value: String) {
             .padding(vertical = 3.dp),
         horizontalArrangement = Arrangement.SpaceBetween
     ) {
-        Text(text = label, fontSize = 12.5.sp, color = SecurityMuted)
+        Text(text = label, fontSize = 13.5.sp, color = SecurityMuted)
         Text(
             text = value,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             color = SecurityInk,
             fontWeight = FontWeight.SemiBold
         )

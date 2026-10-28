@@ -123,7 +123,7 @@ fun ProgressScreen(
                                 "${progress.summary.quizzesPublished} quizzes passed"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = ProgMuted
                     )
                 }
@@ -254,7 +254,7 @@ private fun HeroCard(progress: QuizProgress) {
                     Text(
                         text = "average across your quizzes",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = ProgMuted
                     )
                 }
@@ -269,7 +269,7 @@ private fun HeroCard(progress: QuizProgress) {
                     Text(
                         text = "${summary.quizzesPassed} passed",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = ProgGreen
                     )
@@ -277,7 +277,7 @@ private fun HeroCard(progress: QuizProgress) {
                     Text(
                         text = "${(summary.quizzesPublished - summary.quizzesPassed).coerceAtLeast(0)} to go",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = ProgMuted
                     )
@@ -303,7 +303,7 @@ private fun HeroCard(progress: QuizProgress) {
             Text(
                 text = "${summary.attempts} attempts · ${formatStudyTime(summary.durationSeconds)} spent answering",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = ProgMuted
             )
         }
@@ -342,7 +342,7 @@ private fun StatTile(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
+                fontSize = 11.sp,
                 color = ProgMuted,
                 maxLines = 1
             )
@@ -355,7 +355,7 @@ private fun SectionTitle(title: String) {
     Text(
         text = title,
         fontFamily = MaisonNeueFontFamily,
-        fontSize = 13.sp,
+        fontSize = 13.5.sp,
         fontWeight = FontWeight.ExtraBold,
         color = ProgInk,
         modifier = Modifier.padding(top = 18.dp, bottom = 10.dp)
@@ -385,7 +385,7 @@ private fun SubjectRow(subject: SubjectProgress) {
                 Text(
                     text = subject.subject,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ProgInk,
                     maxLines = 1,
@@ -395,7 +395,7 @@ private fun SubjectRow(subject: SubjectProgress) {
                 Text(
                     text = "${subject.accuracy}%",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = tint
                 )
@@ -425,7 +425,7 @@ private fun SubjectRow(subject: SubjectProgress) {
                     if (subject.passed) append(" · passed")
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.5.sp,
                 color = ProgMuted
             )
         }
@@ -471,7 +471,7 @@ private fun PracticeCard(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ProgInk,
                     maxLines = 2,
@@ -485,7 +485,7 @@ private fun PracticeCard(
                         "Not attempted yet · ${maxAttempts - attemptsUsed} attempts left"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = ProgMuted
                 )
             }
@@ -502,7 +502,7 @@ private fun PracticeCard(
                     Text(
                         text = "Practise",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 14.dp)
@@ -530,7 +530,7 @@ private fun RecentRow(item: QuizHistoryItem) {
                 Text(
                     text = item.quizTitle,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ProgInk,
                     maxLines = 1,
@@ -545,7 +545,7 @@ private fun RecentRow(item: QuizHistoryItem) {
                         "${item.score}/${item.maxScore}"
                     ).filter { it.isNotBlank() }.joinToString(" · "),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 11.5.sp,
                     color = ProgMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -561,7 +561,7 @@ private fun RecentRow(item: QuizHistoryItem) {
                 Text(
                     text = "${item.percent}%",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = tint
                 )
@@ -606,7 +606,7 @@ private fun ProgressEmptyState(error: String?, onRefresh: () -> Unit) {
         Text(
             text = error ?: "Take a quiz and your subjects, strengths and streak appear here.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             lineHeight = 17.sp,
             color = ProgMuted,
             modifier = Modifier.padding(horizontal = 10.dp)
@@ -622,7 +622,7 @@ private fun ProgressEmptyState(error: String?, onRefresh: () -> Unit) {
                 Text(
                     text = "Refresh",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.padding(horizontal = 26.dp)

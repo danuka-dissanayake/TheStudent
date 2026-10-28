@@ -167,7 +167,7 @@ fun PlasmaVisualizer(
                         Text(
                             text = scheme.displayName,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp),
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = if (isSelected) Color.White else Color(0xFF94A3B8)
                         )

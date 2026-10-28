@@ -361,7 +361,7 @@ private fun OlSection(
                     Text(
                         text = subject,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         color = FormInk
                     )
                 }
@@ -434,7 +434,7 @@ private fun AlSection(
             Text(
                 text = "Choose a stream first.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 color = FormFaint
             )
         } else {
@@ -460,7 +460,7 @@ private fun AlSection(
         Text(
             text = AcademicCatalog.alCommonComponents.joinToString(" · "),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             color = FormMuted
         )
     }
@@ -648,7 +648,7 @@ private fun StageTile(
             Text(
                 text = range.uppercase(),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 8.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.Bold,
                 letterSpacing = 0.8.sp,
                 color = if (selected) Color.White.copy(alpha = 0.75f) else FormFaint
@@ -656,15 +656,15 @@ private fun StageTile(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = if (selected) Color.White else FormInk
             )
             Text(
                 text = blurb,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
-                lineHeight = 12.sp,
+                fontSize = 11.sp,
+                lineHeight = 13.sp,
                 maxLines = 3,
                 color = if (selected) Color.White.copy(alpha = 0.85f) else FormMuted
             )
@@ -690,7 +690,7 @@ private fun AcademicSectionCard(
             // rather than as a watermark.
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.ExtraBold,
             color = FormInk,
             letterSpacing = 1.1.sp
@@ -700,7 +700,7 @@ private fun AcademicSectionCard(
             Text(
                 text = subtitle,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 lineHeight = 16.sp,
                 color = FormMuted
             )
@@ -750,7 +750,7 @@ private fun AcademicOptionRow(
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.5.sp,
+            fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
             color = when {
                 selected -> FormInk
@@ -812,8 +812,8 @@ private fun AcademicChoiceChip(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
-                lineHeight = 15.sp,
+                fontSize = 13.5.sp,
+                lineHeight = 16.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else FormMuted,
                 textAlign = TextAlign.Center,

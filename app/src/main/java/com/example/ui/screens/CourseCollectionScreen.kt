@@ -898,7 +898,7 @@ private fun FilterSection(
         Text(
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = CcFaint,
             letterSpacing = 0.8.sp
@@ -1450,7 +1450,7 @@ private fun ProviderRail(selected: String?, onSelect: (String) -> Unit) {
                     Text(
                         text = provider.name,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = 14.sp,
                         lineHeight = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = CcInk,
@@ -1462,7 +1462,7 @@ private fun ProviderRail(selected: String?, onSelect: (String) -> Unit) {
                         text = provider.kind,
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = CT.micro,
-                        lineHeight = 15.sp,
+                        lineHeight = 16.5.sp,
                         color = CcMuted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -1824,7 +1824,7 @@ private fun CreditBlock() {
             Text(
                 text = "Every course here belongs to someone else",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = CcInk
             )

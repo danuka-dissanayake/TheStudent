@@ -133,7 +133,7 @@ fun RevealingSpeechCard(
                     fontWeight = FontWeight.Normal,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.75f),
                     textAlign = TextAlign.Center,
-                    fontSize = 14.sp
+                    fontSize = 14.5.sp
                 )
             }
             Spacer(modifier = Modifier.height(10.dp))

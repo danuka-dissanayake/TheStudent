@@ -50,23 +50,33 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 
 `TheStudentTopAppBar` is one white bar with a hairline rule: the hamburger (which opens the sidebar from
 every tab that shows the bar), the `thestudent_wordmark` drawable (the real logo artwork, kept in
-`res/drawable-nodpi`), then the streak capsule and the avatar, which opens the profile. Search lives in the
-Papers header and the language lab in the sidebar, so the bar carries only what is used on every screen.
-Screens with their own header (Chat, Papers, Profile, EXP, Account, Progress, Courses) hide it.
+`res/drawable-nodpi`), then the streak capsule — nothing else. The avatar was removed so nothing competes
+with the logo; the profile is one tap away in the bottom bar and the sidebar. Search lives in the Papers
+header and the language lab in the sidebar. Screens with their own header (Chat, Papers, Profile, EXP,
+Account, Progress, Courses) hide the bar.
 
 `ModernSidebarDrawer` is organised around the student instead of around a link list: a deep-emerald
-identity header (avatar, name, stage, streak/XP/accuracy pills), a floating "This week" mini chart that
-straddles the header edge, then grouped navigation — **MENU** (Dashboard, Student chats, AI Voice Tutor,
-Past papers, My profile), **STUDY** (Quizzes, My progress, Free courses, AI Study Assistant, Language lab) —
-and a separated footer for Account & security and Sign out. Every row uses the same graphite icon colour on
-a neutral chip — colour is spent only on the active destination, which gets an emerald wash, an emerald bar
-on its leading edge, an emerald chip and emerald text.
+identity header with a **96dp** portrait (name 23sp, stage 13sp, streak/XP/accuracy pills), a floating
+"This week" mini chart that straddles the header edge, then grouped navigation rendered as white cards —
+**MENU** (Dashboard, Student chats, AI Voice Tutor, Past papers, My profile) and **STUDY** (Quizzes,
+My progress, Free courses, AI Study Assistant, Language lab) — and a separated footer for Account &
+security and Sign out. Unselected rows are quiet graphite-on-neutral-chip rows; the current destination is
+a **solid emerald pill** with white icon, white bold label and a white check.
 
 ---
 
 > **EXP** — points are a server-side ledger (`backend/api/_exp.php`,
 > `backend/database_exp.sql`), never a client counter. Read `docs/EXP.md` before
 > touching anything that awards or displays them.
+
+### Type
+
+One typeface, one scale. `ui/theme/Type.kt` binds `UbuntuFontFamily` (Light 300 / Regular 400 / Medium 500 /
+Bold 700, shipped in `res/font/ubuntu_*.ttf`) as **`MaisonNeueFontFamily`** — the alias every screen already
+uses — so the whole app renders in Ubuntu without touching call sites. The `Typography` object is the
+standard Material 3 ramp (57/45/36 display · 32/28/24 headline · 22/16/14 title · 16/14/12 body · 14/12/11
+label). Hand-set sizes across the UI were raised to that ramp's floor: nothing below 11sp, body copy at
+12–14sp, and headings 18sp and up.
 
 ## 3. Screens (`com.example.ui.screens`)
 

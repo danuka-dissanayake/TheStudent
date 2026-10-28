@@ -200,7 +200,7 @@ private fun ExpHeader(
             Text(
                 text = "Your learning journey",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 color = ExpMuted
             )
         }
@@ -228,7 +228,7 @@ private fun ExpHeader(
                 Text(
                     text = if (isLoading) "Updating…" else "EXP Log",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
                     color = EmeraldDark
                 )
@@ -265,7 +265,7 @@ private fun LevelProgressCard(tier: ExpTier, total: Int, progress: Float) {
                     Text(
                         text = tier.name,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = EmeraldPrimary
                     )
@@ -277,7 +277,7 @@ private fun LevelProgressCard(tier: ExpTier, total: Int, progress: Float) {
                         "Top level"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium,
                     color = ExpMuted
                 )
@@ -294,7 +294,7 @@ private fun LevelProgressCard(tier: ExpTier, total: Int, progress: Float) {
                     "${formatExp(total)} EXP"
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = ExpMuted
             )
         }
@@ -316,7 +316,7 @@ private fun TodayCard(today: Int, cap: Int, remaining: Int, progress: Float) {
                 Text(
                     text = "Today",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ExpInk
                 )
@@ -330,7 +330,7 @@ private fun TodayCard(today: Int, cap: Int, remaining: Int, progress: Float) {
                         "$remaining EXP still available today."
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = ExpFaint
                 )
             }
@@ -338,7 +338,7 @@ private fun TodayCard(today: Int, cap: Int, remaining: Int, progress: Float) {
             Text(
                 text = "$today / $cap",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = EmeraldDark
             )
@@ -392,14 +392,14 @@ private fun NextLevelRewards(tier: ExpTier) {
             Text(
                 text = "Next level rewards",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.5.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = ExpInk
             )
             Text(
                 text = "Reach $nextName to unlock these",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = ExpMuted
             )
 
@@ -468,7 +468,7 @@ private fun RewardTile(
         Text(
             text = title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Bold,
             color = ExpInk,
             maxLines = 1,
@@ -477,7 +477,7 @@ private fun RewardTile(
         Text(
             text = subtitle,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.sp,
             color = ExpMuted,
             maxLines = 1,
             textAlign = TextAlign.Center
@@ -509,7 +509,7 @@ private fun ExpSectionTitle(title: String, trailing: String?) {
         Text(
             text = title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 14.5.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.ExtraBold,
             color = ExpInk,
             modifier = Modifier.weight(1f)
@@ -518,7 +518,7 @@ private fun ExpSectionTitle(title: String, trailing: String?) {
             Text(
                 text = trailing,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Medium,
                 color = EmeraldDark
             )
@@ -543,7 +543,7 @@ private fun ActivityRow(award: ExpAward) {
                 Text(
                     text = award.label,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ExpInk,
                     maxLines = 1
@@ -551,7 +551,7 @@ private fun ActivityRow(award: ExpAward) {
                 Text(
                     text = award.note.ifBlank { award.label },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ExpMuted,
                     maxLines = 1
                 )
@@ -561,14 +561,14 @@ private fun ActivityRow(award: ExpAward) {
                 Text(
                     text = "+${award.amount} EXP",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = EmeraldPrimary
                 )
                 Text(
                     text = awardDate(award.createdEpoch),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 11.5.sp,
                     color = ExpFaint
                 )
             }
@@ -626,7 +626,7 @@ private fun EmptyActivityCard() {
             Text(
                 text = "No awards yet",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = ExpInk
             )
@@ -634,7 +634,7 @@ private fun EmptyActivityCard() {
             Text(
                 text = "Answer someone's question and close the request — the first +25 lands here.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = ExpMuted,
                 textAlign = TextAlign.Center
             )

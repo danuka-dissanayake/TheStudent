@@ -313,7 +313,7 @@ fun MinimalVisualizerStatus(
             style = MaterialTheme.typography.labelMedium,
             fontWeight = FontWeight.Medium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 13.sp,
+            fontSize = 13.5.sp,
             letterSpacing = 0.3.sp
         )
     }

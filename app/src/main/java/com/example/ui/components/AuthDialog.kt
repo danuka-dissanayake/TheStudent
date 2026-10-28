@@ -156,7 +156,7 @@ fun AuthDialog(
                     Text(
                         text = if (isSignUp) "Already have an account? Sign In" else "Don't have an account? Sign Up",
                         color = EmeraldPrimary,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold
                     )
                 }

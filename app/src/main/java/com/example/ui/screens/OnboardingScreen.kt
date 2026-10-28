@@ -305,7 +305,7 @@ fun OnboardingScreen(
                                                                 text = badge.text,
                                                                 fontFamily = MaisonNeueFontFamily,
                                                                 fontWeight = FontWeight.Bold,
-                                                                fontSize = 12.sp,
+                                                                fontSize = 13.sp,
                                                                 color = OnboardingDarkText
                                                             )
                                                         }
@@ -334,7 +334,7 @@ fun OnboardingScreen(
                                             text = slide.description,
                                             fontFamily = MaisonNeueFontFamily,
                                             fontWeight = FontWeight.Normal,
-                                            fontSize = 14.sp,
+                                            fontSize = 14.5.sp,
                                             lineHeight = 21.sp,
                                             color = OnboardingMutedText,
                                             modifier = Modifier.fillMaxWidth()
@@ -514,7 +514,7 @@ fun OnboardingScreen(
                                 Text(
                                     text = item,
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     fontWeight = if (selectedRegion in item) FontWeight.Bold else FontWeight.Normal,
                                     color = if (selectedRegion in item) OnboardingLimeGreenButton else OnboardingDarkText,
                                     modifier = Modifier.padding(12.dp)
@@ -776,7 +776,7 @@ fun WelcomeAuthLandingContent(
                 text = "Everything a Student Needs • AI Study Suite",
                 fontFamily = MaisonNeueFontFamily,
                 fontWeight = FontWeight.Normal,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 letterSpacing = 0.2.sp,
                 color = OnboardingMutedText
             )
@@ -808,14 +808,14 @@ fun WelcomeAuthLandingContent(
                 Text(
                     text = "Join 50K+ learners in",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     color = Color(0xFF166534),
                     fontWeight = FontWeight.Medium
                 )
                 Text(
                     text = selectedRegion,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFF14532D)
                 )
@@ -939,13 +939,13 @@ fun WelcomeAuthLandingContent(
             Text(
                 text = "Already have an account? ",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.sp,
+                fontSize = 14.5.sp,
                 color = OnboardingMutedText
             )
             Text(
                 text = "Sign in",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (!isGoogleLoading) OnboardingLimeGreenButton else Color(0xFF94A3B8)
             )
@@ -984,7 +984,7 @@ fun WelcomeAuthLandingContent(
                 Text(
                     text = "100% Free & Secure for Sri Lankan Students 🇱🇰",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Medium,
                     color = OnboardingMutedText
                 )
@@ -1002,13 +1002,13 @@ fun WelcomeAuthLandingContent(
             Text(
                 text = "By continuing, you agree to our ",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = Color(0xFF94A3B8)
             )
             Text(
                 text = "Terms",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OnboardingLimeGreenButton,
                 modifier = Modifier
@@ -1018,13 +1018,13 @@ fun WelcomeAuthLandingContent(
             Text(
                 text = " & ",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 color = Color(0xFF94A3B8)
             )
             Text(
                 text = "Privacy Policy",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = OnboardingLimeGreenButton,
                 modifier = Modifier
@@ -1050,7 +1050,7 @@ fun WelcomeAuthLandingContent(
                 Text(
                     text = "Welcome to TheStudent! By accessing our app, you agree to use the educational past papers, marking schemes, and AI tools for personal academic study and exam preparation. All materials are curated to support Sri Lankan students.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     lineHeight = 20.sp,
                     color = OnboardingDarkText
                 )
@@ -1078,7 +1078,7 @@ fun WelcomeAuthLandingContent(
                 Text(
                     text = "Your privacy is our priority. TheStudent does not sell or share your personal data. Your study progress, saved papers, and AI conversation history are kept secure and encrypted.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     lineHeight = 20.sp,
                     color = OnboardingDarkText
                 )

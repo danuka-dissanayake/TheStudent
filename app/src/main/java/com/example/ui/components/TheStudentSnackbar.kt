@@ -115,7 +115,7 @@ private fun TheStudentToast(message: String) {
                 Text(
                     text = message,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
                     lineHeight = 18.sp,
                     color = textColor,

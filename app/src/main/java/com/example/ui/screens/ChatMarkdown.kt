@@ -63,7 +63,7 @@ object ChatMarkdown {
                     text = line,
                     base = SpanStyle(
                         fontFamily = FontFamily.Monospace,
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         color = colors.codeText,
                         background = colors.codeBackground
                     ),
@@ -175,7 +175,7 @@ object ChatMarkdown {
                             fontFamily = FontFamily.Monospace,
                             background = colors.codeBackground,
                             color = colors.codeText,
-                            fontSize = 12.5.sp
+                            fontSize = 13.5.sp
                         )
                     ) {
                         appendPlain(text.substring(index + 1, end), base, colors, highlight)

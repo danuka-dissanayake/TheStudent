@@ -127,7 +127,7 @@ fun QuizzesSegment(
                 Text(
                     text = "Search quizzes, subjects, grades",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     color = QuizFaint
                 )
             },
@@ -148,7 +148,7 @@ fun QuizzesSegment(
             },
             singleLine = true,
             shape = RoundedCornerShape(26.dp),
-            textStyle = TextStyle(fontFamily = MaisonNeueFontFamily, fontSize = 13.5.sp, color = QuizInk),
+            textStyle = TextStyle(fontFamily = MaisonNeueFontFamily, fontSize = 14.sp, color = QuizInk),
             colors = OutlinedTextFieldDefaults.colors(
                 focusedBorderColor = QuizGreen,
                 unfocusedBorderColor = QuizHairline,
@@ -231,7 +231,7 @@ fun QuizzesSegment(
                     Text(
                         text = "My progress",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = QuizGreen
                     )
@@ -252,7 +252,7 @@ fun QuizzesSegment(
                     else -> "${quizzes.size} quizzes"
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = QuizMuted,
                 modifier = Modifier.weight(1f)
@@ -261,7 +261,7 @@ fun QuizzesSegment(
                 Text(
                     text = "Clear",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = QuizGreen,
                     modifier = Modifier
@@ -293,7 +293,7 @@ fun QuizzesSegment(
                 Text(
                     text = "Refresh",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = QuizInk
                 )
@@ -337,7 +337,7 @@ fun QuizzesSegment(
                 Text(
                     text = "Try another subject or clear the filters.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     color = QuizMuted
                 )
                 Spacer(Modifier.height(16.dp))
@@ -358,7 +358,7 @@ fun QuizzesSegment(
                         Text(
                             text = "Clear filters",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = QuizInk,
                             modifier = Modifier.padding(horizontal = 22.dp)
@@ -394,7 +394,7 @@ fun QuizzesSegment(
                             Text(
                                 text = "Showing the last quizzes this phone loaded.",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 color = QuizAmber
                             )
                         }
@@ -443,7 +443,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                 Text(
                     text = quiz.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = if (enrolled) QuizMuted else QuizInk,
                     maxLines = 2,
@@ -455,7 +455,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                         .filter { it.isNotBlank() }
                         .joinToString(" · "),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = QuizMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -508,7 +508,7 @@ private fun EnrolledChip() {
         Text(
             text = "Enrolled",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = QuizMuted
         )
@@ -539,7 +539,7 @@ private fun ScoreChip(quiz: QuizSummary) {
                 Text(
                     text = "${best ?: 0}%",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = QuizGreen
                 )
@@ -557,7 +557,7 @@ private fun ScoreChip(quiz: QuizSummary) {
                     Text(
                         text = "$best",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Color(0xFFB91C1C)
                     )
@@ -566,7 +566,7 @@ private fun ScoreChip(quiz: QuizSummary) {
                 Text(
                     text = "best",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.sp,
+                    fontSize = 10.5.sp,
                     color = QuizMuted
                 )
             }
@@ -610,7 +610,7 @@ private fun QuizCover(quiz: QuizSummary, modifier: Modifier = Modifier, dimmed: 
                 Text(
                     text = quiz.subject.take(1).uppercase().ifBlank { "Q" },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = tint
                 )
@@ -651,7 +651,7 @@ private fun QuizBadge(text: String, color: Color, background: Color) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1
@@ -674,7 +674,7 @@ private fun QuizPill(label: String, selected: Boolean, tag: String, onClick: () 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else QuizMuted,
                 maxLines = 1
@@ -762,7 +762,7 @@ private fun QuizEmptyState(error: String?, isOffline: Boolean, onRefresh: () -> 
         Text(
             text = error ?: "Quizzes published by your teachers will appear here.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             lineHeight = 17.sp,
             color = QuizMuted,
             modifier = Modifier.padding(horizontal = 10.dp)
@@ -780,7 +780,7 @@ private fun QuizEmptyState(error: String?, isOffline: Boolean, onRefresh: () -> 
                 Text(
                     text = "Try again",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.padding(horizontal = 26.dp)

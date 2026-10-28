@@ -308,7 +308,7 @@ private fun ProfileHeader(
                 Text(
                     text = "Your record",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ProfMuted
                 )
             }
@@ -436,7 +436,7 @@ private fun IdentityHero(
                     Text(
                         text = userProfile.email.ifBlank { "No e-mail on this account" },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         color = Color.White.copy(alpha = 0.78f),
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -488,7 +488,7 @@ private fun HeroChip(text: String, onClick: (() -> Unit)? = null) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = Color.White
         )
@@ -518,7 +518,7 @@ private fun HeroAction(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color.White
             )
@@ -575,7 +575,7 @@ private fun StatCell(value: String, label: String, modifier: Modifier = Modifier
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
+            fontSize = 11.5.sp,
             color = ProfMuted,
             maxLines = 1,
             textAlign = TextAlign.Center
@@ -622,7 +622,7 @@ private fun LevelCard(exp: UserExp, onOpenExp: () -> Unit) {
                     Text(
                         text = "Level ${exp.tier.level} · ${exp.tier.name}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = ProfInk
                     )
@@ -633,7 +633,7 @@ private fun LevelCard(exp: UserExp, onOpenExp: () -> Unit) {
                             "Top level reached"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         color = ProfMuted
                     )
                 }
@@ -687,7 +687,7 @@ private fun LevelCard(exp: UserExp, onOpenExp: () -> Unit) {
                         Text(
                             text = step.name,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 9.sp,
+                            fontSize = 10.5.sp,
                             fontWeight = if (earned) FontWeight.Bold else FontWeight.Medium,
                             color = if (earned) ProfInk else ProfFaint,
                             maxLines = 1
@@ -720,7 +720,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                 Text(
                     text = "Reputation",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = ProfInk,
                     modifier = Modifier.weight(1f)
@@ -758,14 +758,14 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                         Text(
                             text = "No ratings yet",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = ProfInk
                         )
                         Text(
                             text = "Help someone close a request and they can rate you.",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             color = ProfMuted
                         )
                     }
@@ -800,7 +800,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                         text = "${summary.count} rating" + (if (summary.count == 1) "" else "s") +
                             " from students",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = ProfMuted
                     )
                 }
@@ -816,7 +816,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                         Text(
                             text = "$star",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.sp,
+                            fontSize = 11.5.sp,
                             fontWeight = FontWeight.SemiBold,
                             color = ProfFaint,
                             modifier = Modifier.width(10.dp)
@@ -841,7 +841,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                         Text(
                             text = "${summary.breakdown[star] ?: 0}",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.sp,
+                            fontSize = 11.5.sp,
                             color = ProfFaint,
                             modifier = Modifier.width(16.dp),
                             textAlign = TextAlign.End
@@ -863,7 +863,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                         Text(
                             text = "“${note.note}”",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             color = ProfInk,
                             maxLines = 2,
                             overflow = TextOverflow.Ellipsis
@@ -876,7 +876,7 @@ private fun ReputationCard(myRatings: ChatMyRatings, isLoading: Boolean) {
                                 if (note.createdEpoch > 0) append(" · ${shortDate(note.createdEpoch)}")
                             },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
+                            fontSize = 12.sp,
                             color = ProfMuted,
                             maxLines = 1
                         )
@@ -910,7 +910,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                     Text(
                         text = "Studies",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = ProfInk
                     )
@@ -921,7 +921,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                             "Finish this to get matched with the right students"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = if (academic.isComplete) ProfMuted else EmeraldDark
                     )
                 }
@@ -934,7 +934,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                     Text(
                         text = if (academic.isComplete) "Edit" else "Complete",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (academic.isComplete) EmeraldDark else Color.White,
                         modifier = Modifier.padding(horizontal = 14.dp, vertical = 7.dp)
@@ -950,7 +950,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                         "details that go with it, so the chat can introduce you to someone " +
                         "who already sits the same papers.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     lineHeight = 16.sp,
                     color = ProfMuted
                 )
@@ -1011,7 +1011,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                     Text(
                         text = "Subjects",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Bold,
                         color = ProfFaint,
                         letterSpacing = 0.6.sp
@@ -1039,7 +1039,7 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                                 Text(
                                     text = subject,
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = ProfInk
                                 )
@@ -1063,14 +1063,14 @@ private fun InfoLine(label: String, value: String) {
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = ProfMuted,
             modifier = Modifier.width(84.dp)
         )
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = ProfInk,
             maxLines = 1,
@@ -1103,7 +1103,7 @@ private fun SectionHeading(title: String, trailing: String?) {
             Text(
                 text = trailing,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = ProfMuted
             )
@@ -1144,7 +1144,7 @@ private fun LibraryTabs(
                     Text(
                         text = if (count > 0) "$label · $count" else label,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) ProfInk else ProfMuted,
                         maxLines = 1
@@ -1175,7 +1175,7 @@ private fun SavedPaperRow(paper: SavedPaperEntity, onClick: () -> Unit) {
                 Text(
                     text = paper.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = ProfInk,
                     maxLines = 1,
@@ -1184,7 +1184,7 @@ private fun SavedPaperRow(paper: SavedPaperEntity, onClick: () -> Unit) {
                 Text(
                     text = "${paper.subject} · ${paper.examination} · ${paper.year}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ProfMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1215,7 +1215,7 @@ private fun SavedCourseRow(course: SavedCourseEntity, onClick: () -> Unit) {
                     Text(
                         text = course.title,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = ProfInk,
                         maxLines = 1,
@@ -1224,7 +1224,7 @@ private fun SavedCourseRow(course: SavedCourseEntity, onClick: () -> Unit) {
                     Text(
                         text = "${course.instructor} · ${course.institution}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = ProfMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -1233,7 +1233,7 @@ private fun SavedCourseRow(course: SavedCourseEntity, onClick: () -> Unit) {
                 Text(
                     text = "${course.progressPercent}%",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = EmeraldDark
                 )
@@ -1258,7 +1258,7 @@ private fun SavedCourseRow(course: SavedCourseEntity, onClick: () -> Unit) {
             Text(
                 text = "${course.completedLessons} of ${course.totalLessons} lessons",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = ProfFaint
             )
         }
@@ -1291,7 +1291,7 @@ private fun ActivityRow(activity: LearningActivityEntity) {
                 Text(
                     text = activity.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = ProfInk,
                     maxLines = 1,
@@ -1300,7 +1300,7 @@ private fun ActivityRow(activity: LearningActivityEntity) {
                 Text(
                     text = activity.description,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = ProfMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1310,14 +1310,14 @@ private fun ActivityRow(activity: LearningActivityEntity) {
                 Text(
                     text = activity.scoreOrDuration,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = EmeraldDark
                 )
                 Text(
                     text = shortDate(activity.timestamp / 1000L),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 11.5.sp,
                     color = ProfFaint
                 )
             }
@@ -1351,7 +1351,7 @@ private fun EmptyLibraryCard(icon: ImageVector, title: String, body: String) {
             Text(
                 text = title,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = ProfInk
             )
@@ -1359,7 +1359,7 @@ private fun EmptyLibraryCard(icon: ImageVector, title: String, body: String) {
             Text(
                 text = body,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 lineHeight = 16.sp,
                 color = ProfMuted,
                 textAlign = TextAlign.Center
@@ -1392,7 +1392,7 @@ private fun Pill(text: String, bg: Color, fg: Color) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.5.sp,
+            fontSize = 11.sp,
             fontWeight = FontWeight.Bold,
             color = fg
         )
@@ -1462,7 +1462,7 @@ private fun AccountCard(
                     Text(
                         text = if (isDarkTheme) "On" else "Off",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = if (isDarkTheme) EmeraldPrimary else ProfMuted,
                         modifier = Modifier
@@ -1522,14 +1522,14 @@ private fun SettingRow(
             Text(
                 text = title,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = if (destructive) tint else ProfInk
             )
             Text(
                 text = subtitle,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = ProfMuted,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
@@ -1586,7 +1586,7 @@ private fun SignOutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                     text = "Your saved papers, downloads and chat history stay on this phone. " +
                         "You can sign back in any time.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     lineHeight = 18.sp,
                     color = ProfMuted
                 )
@@ -1605,7 +1605,7 @@ private fun SignOutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                             Text(
                                 text = "Stay",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = ProfInk
                             )
@@ -1624,7 +1624,7 @@ private fun SignOutDialog(onDismiss: () -> Unit, onConfirm: () -> Unit) {
                             Text(
                                 text = "Sign out",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )

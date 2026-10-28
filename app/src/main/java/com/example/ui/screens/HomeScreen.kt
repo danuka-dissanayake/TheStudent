@@ -99,6 +99,7 @@ private val HBg = Color(0xFFF7F9FC)
 private val HCard = Color.White
 private val HGreen = EmeraldPrimary
 private val HGreenSoft = Color(0xFFECFDF5)
+private val HGreenDeep = Color(0xFF047857)
 private val HViolet = Color(0xFF7C3AED)
 private val HVioletSoft = Color(0xFFF5F3FF)
 private val HBlue = Color(0xFF2563EB)
@@ -108,12 +109,12 @@ private val HAmberSoft = Color(0xFFFFFBEB)
 private val HTrack = Color(0xFFEDF1F6)
 
 private object HT {
-    val screen: androidx.compose.ui.unit.TextUnit = 34.sp
-    val section: androidx.compose.ui.unit.TextUnit = 16.sp
-    val cardTitle: androidx.compose.ui.unit.TextUnit = 14.sp
-    val body: androidx.compose.ui.unit.TextUnit = 12.5.sp
-    val meta: androidx.compose.ui.unit.TextUnit = 11.5.sp
-    val micro: androidx.compose.ui.unit.TextUnit = 11.sp
+    val screen: androidx.compose.ui.unit.TextUnit = 38.sp
+    val section: androidx.compose.ui.unit.TextUnit = 18.sp
+    val cardTitle: androidx.compose.ui.unit.TextUnit = 15.sp
+    val body: androidx.compose.ui.unit.TextUnit = 14.sp
+    val meta: androidx.compose.ui.unit.TextUnit = 13.sp
+    val micro: androidx.compose.ui.unit.TextUnit = 12.sp
 }
 
 /**
@@ -156,7 +157,7 @@ fun HomeScreen(
 
     val summary = quizProgress.summary
     val practice = quizProgress.practice
-    val firstName = userProfile.name.trim().split(" ").firstOrNull().orEmpty()
+    val fullName = userProfile.name.trim()
     val streak = maxOf(summary.streakDays, userProfile.streakDays)
     val stage = listOf(userProfile.academicLevel, userProfile.streamOrDegree)
         .filter { it.isNotBlank() }
@@ -174,7 +175,7 @@ fun HomeScreen(
         // ── greeting ────────────────────────────────────────────────────────
         item(key = "greeting") {
             GreetingHeader(
-                firstName = firstName,
+                fullName = fullName,
                 subtitle = subtitle,
                 streakDays = streak,
                 modifier = Modifier
@@ -416,74 +417,79 @@ private fun greetingForNow(): String {
 
 @Composable
 private fun GreetingHeader(
-    firstName: String,
+    fullName: String,
     subtitle: String,
     streakDays: Int,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
+        // The greeting is the accent line, the name is the hero. Colour is what
+        // separates them, not size alone.
         Text(
             text = greetingForNow(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 15.5.sp,
+            fontSize = 17.sp,
             fontWeight = FontWeight.Medium,
-            color = HMuted
+            letterSpacing = 0.1.sp,
+            color = HGreenDeep
         )
-        Spacer(Modifier.height(2.dp))
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = fullName.ifBlank { "there" },
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 36.sp,
+            lineHeight = 42.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = HInk,
+            letterSpacing = (-0.9).sp,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.testTag("welcome_name")
+        )
+        Spacer(Modifier.height(6.dp))
         Row(verticalAlignment = Alignment.CenterVertically) {
-            Text(
-                text = firstName.ifBlank { "there" },
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = HT.screen,
-                fontWeight = FontWeight.ExtraBold,
-                color = HInk,
-                letterSpacing = (-1.2).sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.weight(1f, fill = false)
-            )
             if (streakDays > 0) {
-                Spacer(Modifier.width(10.dp))
                 Box(
                     modifier = Modifier
                         .clip(RoundedCornerShape(50))
                         .background(HAmberSoft)
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .padding(horizontal = 10.dp, vertical = 5.dp)
                         .testTag("home_streak_pill")
                 ) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         Icon(
                             imageVector = Icons.Default.LocalFireDepartment,
                             contentDescription = null,
                             tint = HAmber,
-                            modifier = Modifier.size(13.dp)
+                            modifier = Modifier.size(15.dp)
                         )
                         Text(
                             text = "$streakDays day streak",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
                             color = HAmber,
                             maxLines = 1
                         )
                     }
                 }
+                Spacer(Modifier.width(8.dp))
             }
-        }
-        if (subtitle.isNotBlank()) {
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = subtitle,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Medium,
-                color = HFaint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            if (subtitle.isNotBlank()) {
+                Text(
+                    text = subtitle,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 14.sp,
+                    fontWeight = FontWeight.Normal,
+                    color = HMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.weight(1f, fill = false)
+                )
+            }
         }
     }
 }
@@ -567,7 +573,7 @@ private fun ReportCard(
                         "Steady ${percentOf(steady, total)} · " +
                         "Needs work ${percentOf(weak, total)}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = HMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -593,7 +599,7 @@ private fun ReportCard(
                     Text(
                         text = if (hasData) "Keep practising" else "Take your first quiz",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -635,7 +641,7 @@ private fun KpiRow(value: String, label: String) {
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 18.sp,
+            fontSize = 19.sp,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = (-0.3).sp,
             color = HInk,
@@ -645,7 +651,7 @@ private fun KpiRow(value: String, label: String) {
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.sp,
             color = HFaint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -697,7 +703,7 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
             Text(
                 text = "$safe%",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 25.sp,
+                fontSize = 26.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.8).sp,
                 color = HInk
@@ -705,7 +711,7 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
             Text(
                 text = "accuracy",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
                 color = HMuted
             )
@@ -1062,7 +1068,7 @@ private fun WeekBars(counts: IntArray, modifier: Modifier = Modifier) {
                 Text(
                     text = label,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.sp,
                     color = HFaint,
                     maxLines = 1,
                     modifier = Modifier.weight(1f),
@@ -1092,7 +1098,7 @@ private fun StatChip(
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.Bold,
             color = tint,
             maxLines = 1
@@ -1131,7 +1137,7 @@ private fun PractiseNextCard(
                     Text(
                         text = subject?.let { SubjectCodes.of(it) } ?: "QUIZ",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = tint,
                         letterSpacing = 0.5.sp,
@@ -1263,7 +1269,7 @@ private fun CoursesPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifier) 
                 Text(
                     text = "${CourseCatalog.courses.size} free courses",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = 16.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White,
                     maxLines = 1
@@ -1271,7 +1277,7 @@ private fun CoursesPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifier) 
                 Text(
                     text = "Moratuwa, MIT and edX, all free",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     lineHeight = 14.sp,
                     color = Color.White.copy(alpha = 0.72f),
                     maxLines = 2
@@ -1325,7 +1331,7 @@ private fun ProviderTile(name: String) {
             Text(
                 text = name.take(1),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = HInk
             )
@@ -1361,7 +1367,7 @@ private fun LanguageLabPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifi
             Text(
                 text = "Language lab",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = HInk,
                 maxLines = 1
@@ -1369,7 +1375,7 @@ private fun LanguageLabPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifi
             Text(
                 text = "Speak, listen, correct",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = HMuted,
                 maxLines = 2
             )
@@ -1526,8 +1532,8 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                         Text(
                             text = course.category.uppercase(),
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
-                            lineHeight = 14.sp,
+                            fontSize = 12.5.sp,
+                            lineHeight = 15.sp,
                             fontWeight = FontWeight.ExtraBold,
                             letterSpacing = 0.2.sp,
                             color = Color.White,
@@ -1545,7 +1551,7 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                             Text(
                                 text = levelLabel(course.level),
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 9.5.sp,
+                                fontSize = 11.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White,
                                 maxLines = 1
@@ -1558,7 +1564,7 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                 Text(
                     text = course.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 14.sp,
                     lineHeight = 17.sp,
                     fontWeight = FontWeight.Bold,
                     color = HInk,
@@ -1569,7 +1575,7 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                 Text(
                     text = course.instructor,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = HMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1588,7 +1594,7 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                     Text(
                         text = "${course.totalLessons} lessons",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = HFaint,
                         maxLines = 1
                     )
@@ -1634,7 +1640,7 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
                 Text(
                     text = paper.year.toString(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = HInk,
                     maxLines = 1
@@ -1645,8 +1651,8 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
         Text(
             text = paper.title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
-            lineHeight = 14.sp,
+            fontSize = 12.5.sp,
+            lineHeight = 15.sp,
             fontWeight = FontWeight.Bold,
             color = HInk,
             maxLines = 2,
@@ -1656,8 +1662,8 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
         Text(
             text = "${SubjectCodes.of(paper.subject)} · ${paper.examination}",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
-            lineHeight = 12.sp,
+            fontSize = 11.5.sp,
+            lineHeight = 13.5.sp,
             color = HMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1665,132 +1671,152 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
     }
 }
 
+/**
+ * A quiz ticket.
+ *
+ * The rail is the one place a student jumps straight into a test, so the card is
+ * built like a ticket rather than a card-with-a-list: a coloured spine down the
+ * left, the subject and question count on the stub, the title in reading order,
+ * and one full-width action at the foot that can never be squeezed out.
+ */
 @Composable
 private fun QuizRailCard(quiz: QuizSummary, onClick: () -> Unit) {
     val tint = paperCoverTint(quiz.subject)
     val minutes = if (quiz.minutes > 0) quiz.minutes else quiz.timeLimitSeconds / 60
     Surface(
         onClick = onClick,
-        shape = RoundedCornerShape(18.dp),
+        shape = RoundedCornerShape(20.dp),
         color = HCard,
         border = BorderStroke(1.dp, HHairline),
         modifier = Modifier
-            .width(206.dp)
-            .height(164.dp)
+            .width(214.dp)
+            .height(184.dp)
             .testTag("home_quiz_${quiz.id}")
     ) {
-        Column(modifier = Modifier.padding(13.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(tint.copy(alpha = 0.12f))
-                        .padding(horizontal = 8.dp, vertical = 3.dp)
-                ) {
+        Row(modifier = Modifier.fillMaxSize()) {
+            // The spine: subject colour, so the rail reads as a set of tickets.
+            Box(
+                modifier = Modifier
+                    .width(5.dp)
+                    .fillMaxHeight()
+                    .background(
+                        Brush.verticalGradient(
+                            listOf(tint, tint.copy(alpha = 0.55f))
+                        )
+                    )
+            )
+            Column(modifier = Modifier.padding(13.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         text = SubjectCodes.of(quiz.subject),
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        letterSpacing = 0.3.sp,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
+                        letterSpacing = 0.6.sp,
+                        color = tint,
+                        maxLines = 1
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    Box(modifier = Modifier.width(1.dp).height(10.dp).background(HHairline))
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = quiz.grade.ifBlank { quiz.category },
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Normal,
+                        color = HMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
+                    )
+                    if (quiz.passed) {
+                        Icon(
+                            imageVector = Icons.Default.EmojiEvents,
+                            contentDescription = null,
+                            tint = HGreen,
+                            modifier = Modifier.size(16.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = quiz.title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 16.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = HInk,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.weight(1f))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Text(
+                        text = "${quiz.questionCount} questions",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        color = HMuted,
+                        maxLines = 1
+                    )
+                    if (minutes > 0) {
+                        Text(
+                            text = "${minutes}m",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            color = HMuted,
+                            maxLines = 1
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text(
+                        text = "+${quiz.expReward} XP",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Bold,
                         color = tint,
                         maxLines = 1
                     )
                 }
-                Spacer(Modifier.weight(1f))
-                if (quiz.passed) {
-                    Icon(
-                        imageVector = Icons.Default.EmojiEvents,
-                        contentDescription = null,
-                        tint = HGreen,
-                        modifier = Modifier.size(15.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = quiz.title,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
-                lineHeight = 17.sp,
-                fontWeight = FontWeight.Bold,
-                color = HInk,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.weight(1f))
-            // The pills wrap onto one line and share the width, so a long EXP
-            // reward or a three-digit question count can never push the row past
-            // the card edge.
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                MiniPill("${quiz.questionCount} Qs", modifier = Modifier.weight(1f))
-                if (minutes > 0) {
-                    MiniPill("${minutes}m", modifier = Modifier.weight(1f))
-                }
-                MiniPill("+${quiz.expReward} XP", modifier = Modifier.weight(1f))
-            }
-            Spacer(Modifier.height(9.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = quiz.bestPercent?.let { "Best $it%" }
-                        ?: if (quiz.isEnrolled) "Completed" else "${quiz.attemptsLeft} left",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = if (quiz.isEnrolled) HFaint else HMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f)
-                )
-                Spacer(Modifier.width(6.dp))
-                Box(
+                Spacer(Modifier.height(9.dp))
+                // One full-width action: the label and the best score share the
+                // row, and neither can push the other off the card.
+                Row(
                     modifier = Modifier
-                        .heightIn(min = 26.dp)
+                        .fillMaxWidth()
                         .clip(RoundedCornerShape(50))
                         .background(if (quiz.isEnrolled) HTrack else HGreen)
-                        .padding(horizontal = 13.dp, vertical = 5.dp),
-                    contentAlignment = Alignment.Center
+                        .padding(horizontal = 12.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = if (quiz.isEnrolled) "Done" else "Start",
+                        text = when {
+                            quiz.isEnrolled -> "All attempts used"
+                            quiz.bestPercent != null -> "Best ${quiz.bestPercent}% · retake"
+                            else -> "${quiz.attemptsLeft} attempts left"
+                        },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
                         color = if (quiz.isEnrolled) HMuted else Color.White,
-                        maxLines = 1
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f)
                     )
+                    if (!quiz.isEnrolled) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                            contentDescription = null,
+                            tint = Color.White,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
                 }
             }
         }
-    }
-}
-
-@Composable
-private fun MiniPill(text: String, modifier: Modifier = Modifier) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(50))
-            .background(HBg)
-            .padding(horizontal = 6.dp, vertical = 4.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        Text(
-            text = text,
-            fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
-            fontWeight = FontWeight.Bold,
-            color = HMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Clip,
-            textAlign = TextAlign.Center
-        )
     }
 }
 
@@ -1851,7 +1877,7 @@ private fun CompactNoteCard(note: StudyNote, modifier: Modifier = Modifier) {
                 Text(
                     text = SubjectCodes.of(note.subject),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = tint,
                     maxLines = 1,
@@ -1889,7 +1915,7 @@ private fun CompactNoteCard(note: StudyNote, modifier: Modifier = Modifier) {
                 Text(
                     text = "${note.readTimeMinutes} min",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = HMuted,
                     maxLines = 1
@@ -1922,14 +1948,14 @@ fun NoteCard(note: StudyNote) {
                 Text(
                     text = note.subject,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = HGreen,
                     fontWeight = FontWeight.Bold
                 )
                 Text(
                     text = "${note.readTimeMinutes} min read",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = HMuted
                 )
             }
@@ -1937,7 +1963,7 @@ fun NoteCard(note: StudyNote) {
             Text(
                 text = note.title,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.5.sp,
+                fontSize = 14.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = HInk
             )
@@ -1945,7 +1971,7 @@ fun NoteCard(note: StudyNote) {
             Text(
                 text = note.contentSummary,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 lineHeight = 16.sp,
                 color = HMuted,
                 maxLines = 2,
@@ -1960,7 +1986,7 @@ fun NoteCard(note: StudyNote) {
                 Text(
                     text = "By ${note.author}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = HMuted
                 )
                 Row(
@@ -1976,7 +2002,7 @@ fun NoteCard(note: StudyNote) {
                     Text(
                         text = "${note.downloads}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         fontWeight = FontWeight.Medium,
                         color = HInk
                     )

@@ -332,7 +332,7 @@ fun AiAssistantScreen(
                                     Text(
                                         text = "${selectedModel.displayName} (${selectedModel.providerBadge})",
                                         style = MaterialTheme.typography.labelSmall,
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         color = when (selectedModel) {
                                             AiModelChoice.GLM_4_7_FLASH -> if (isDark) Color(0xFF86EFAC) else Color(0xFF15803D)
@@ -516,7 +516,7 @@ fun AiAssistantScreen(
                             ) {
                                 Text(
                                     text = "Today • " + SimpleDateFormat("h:mm a", Locale.getDefault()).format(Date()),
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
                                     fontWeight = FontWeight.Medium
                                 )
@@ -762,7 +762,7 @@ fun AiAssistantScreen(
                                     Text(
                                         text = currentPlaceholder,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        fontSize = 13.5.sp,
+                                        fontSize = 14.sp,
                                         color = if (isDark) Color(0xFF94A3B8) else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.55f),
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -784,7 +784,7 @@ fun AiAssistantScreen(
                             ),
                             maxLines = 4,
                             textStyle = MaterialTheme.typography.bodyMedium.copy(
-                                fontSize = 14.sp,
+                                fontSize = 14.5.sp,
                                 color = if (isDark) Color.White else Color(0xFF0F172A)
                             )
                         )
@@ -854,7 +854,7 @@ fun AiAssistantScreen(
                 Text(
                     text = "AI can make mistakes. Please verify important study facts & formulas with syllabus materials.",
                     style = MaterialTheme.typography.bodySmall,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.65f),
                     textAlign = TextAlign.Center,
                     modifier = Modifier
@@ -933,12 +933,12 @@ fun AiAssistantScreen(
                             Text(
                                 text = "Question Photo",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Diagrams & formulas",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -979,12 +979,12 @@ fun AiAssistantScreen(
                             Text(
                                 text = "PDF Notes",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Text(
                                 text = "Past papers & slides",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
@@ -1111,7 +1111,7 @@ private fun AiAssistantHomeDiscoveryView(
                                     ) {
                                         Text(
                                             text = "in 3h",
-                                            fontSize = 10.sp,
+                                            fontSize = 11.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = Color.White,
                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -1158,7 +1158,7 @@ private fun AiAssistantHomeDiscoveryView(
                                     Text(
                                         text = "2 OF 6",
                                         color = Color.White.copy(alpha = 0.75f),
-                                        fontSize = 10.sp,
+                                        fontSize = 11.5.sp,
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
@@ -1277,13 +1277,13 @@ private fun ScheduleDotItem(time: String, label: String, dotColor: Color) {
         Text(
             text = time,
             color = Color.White.copy(alpha = 0.8f),
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             fontWeight = FontWeight.SemiBold
         )
         Text(
             text = label,
             color = Color.White,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             fontWeight = FontWeight.Medium,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
@@ -1356,7 +1356,7 @@ private fun ForYouTile(
                     text = subtitle,
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -1438,7 +1438,7 @@ private fun UserChatBubbleDesign(message: AiAssistantMessage) {
                                         text = message.attachment.sizeFormatted,
                                         style = MaterialTheme.typography.bodySmall,
                                         color = Color.White.copy(alpha = 0.85f),
-                                        fontSize = 10.sp
+                                        fontSize = 11.5.sp
                                     )
                                 }
                             }
@@ -1810,14 +1810,14 @@ private fun ChatGptDocumentCard(
                         style = MaterialTheme.typography.titleSmall,
                         color = Color.White,
                         fontWeight = FontWeight.Bold,
-                        fontSize = 14.5.sp,
+                        fontSize = 15.sp,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = "Verified G.C.E. Document • $sourceDomain",
                         color = Color(0xFFA1A1AA),
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -1848,7 +1848,7 @@ private fun ChatGptDocumentCard(
                     Text(
                         text = "Medium: $medium Medium",
                         color = Color(0xFFE4E4E7),
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1867,7 +1867,7 @@ private fun ChatGptDocumentCard(
                     Text(
                         text = "Type: $docType & Marking Scheme",
                         color = Color(0xFFE4E4E7),
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1886,7 +1886,7 @@ private fun ChatGptDocumentCard(
                     Text(
                         text = "Pages: $pages Pages (Verified Curriculum Content)",
                         color = Color(0xFFE4E4E7),
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -1905,7 +1905,7 @@ private fun ChatGptDocumentCard(
                     Text(
                         text = "Destination: Download > TheStudent",
                         color = Color(0xFFE4E4E7),
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -2008,7 +2008,7 @@ private fun ChatGptDocumentCard(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "Download",
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
@@ -2023,7 +2023,7 @@ private fun ChatGptDocumentCard(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "Downloading...",
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
@@ -2038,7 +2038,7 @@ private fun ChatGptDocumentCard(
                                     Spacer(modifier = Modifier.width(6.dp))
                                     Text(
                                         text = "Downloaded",
-                                        fontSize = 13.sp,
+                                        fontSize = 13.5.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
@@ -2318,7 +2318,7 @@ private fun ResponseSourcesDropdown(
                     Text(
                         text = "Sources (${sources.size})",
                         color = Color(0xFFF4F4F5),
-                        fontSize = 12.5.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Medium
                     )
                 }
@@ -2405,7 +2405,7 @@ private fun ResponseSourcesDropdown(
                                     Text(
                                         text = source.title,
                                         color = Color.White,
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = FontWeight.SemiBold,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
@@ -2413,7 +2413,7 @@ private fun ResponseSourcesDropdown(
                                     Text(
                                         text = source.domain,
                                         color = Color(0xFFA1A1AA),
-                                        fontSize = 10.5.sp,
+                                        fontSize = 12.sp,
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
@@ -2491,7 +2491,7 @@ private fun ChatGptLinkButton(
                 ),
                 color = if (isPdf) Color(0xFFFCA5A5) else Color(0xFF4ADE80),
                 fontWeight = FontWeight.SemiBold,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
             )
@@ -2755,7 +2755,7 @@ private fun RichMarkdownContentDark(content: String) {
                                     Text(
                                         text = langTag.uppercase(),
                                         color = Color(0xFFA1A1AA),
-                                        fontSize = 11.sp,
+                                        fontSize = 12.sp,
                                         fontFamily = FontFamily.Monospace,
                                         fontWeight = FontWeight.Bold
                                     )
@@ -2781,7 +2781,7 @@ private fun RichMarkdownContentDark(content: String) {
                                         Text(
                                             text = "Copy",
                                             color = Color(0xFF22C55E),
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             fontWeight = FontWeight.SemiBold
                                         )
                                     }
@@ -2798,7 +2798,7 @@ private fun RichMarkdownContentDark(content: String) {
                                     text = codeContent,
                                     color = Color(0xFF4ADE80),
                                     fontFamily = FontFamily.Monospace,
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     lineHeight = 18.sp
                                 )
                             }
@@ -2964,7 +2964,7 @@ private fun RichMarkdownContentDark(content: String) {
                                     text = displayNumber,
                                     color = Color(0xFF22C55E), // Vibrant Green number
                                     fontWeight = FontWeight.Bold,
-                                    fontSize = 14.sp
+                                    fontSize = 14.5.sp
                                 )
                                 MarkdownLineWithLinks(rawText = bText, modifier = Modifier.weight(1f, fill = false))
                             }
@@ -3084,7 +3084,7 @@ private fun ResponsiveMarkdownTableDark(tableLines: List<String>) {
                                 text = buildFormattedAnnotatedString(cellText, isDarkOnLight = true),
                                 color = Color(0xFF15803D), // Deep rich green for header text on white table
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp,
+                                fontSize = 13.5.sp,
                                 textAlign = align
                             )
                         }
@@ -3125,7 +3125,7 @@ private fun ResponsiveMarkdownTableDark(tableLines: List<String>) {
                                 Text(
                                     text = buildFormattedAnnotatedString(cellText, isDarkOnLight = true),
                                     color = Color(0xFF0F172A), // Crisp high-contrast dark text on white table
-                                    fontSize = 12.5.sp,
+                                    fontSize = 13.5.sp,
                                     lineHeight = 18.sp,
                                     textAlign = align
                                 )
@@ -3403,7 +3403,7 @@ private fun SystemNoticeBubble(message: AiAssistantMessage) {
             Text(
                 text = message.text,
                 style = MaterialTheme.typography.bodySmall,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier.padding(horizontal = 12.dp, vertical = 4.dp)
             )
@@ -3914,7 +3914,7 @@ fun ChainOfThoughtStep(
         ) {
             Text(
                 text = step.label,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Medium,
                 color = when (step.status) {
                     StepStatus.ACTIVE -> Color(0xFFF4F4F5)
@@ -3926,7 +3926,7 @@ fun ChainOfThoughtStep(
             if (!step.description.isNullOrBlank()) {
                 Text(
                     text = step.description,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     lineHeight = 17.5.sp,
                     color = Color(0xFF71717A)
                 )
@@ -3951,7 +3951,7 @@ fun ChainOfThoughtStep(
                     Text(
                         text = step.codeSnippet,
                         color = Color(0xFFF4F4F5),
-                        fontSize = 12.sp,
+                        fontSize = 13.sp,
                         fontFamily = FontFamily.Monospace,
                         lineHeight = 17.sp,
                         modifier = Modifier.padding(10.dp)
@@ -4006,7 +4006,7 @@ fun ChainOfThoughtSearchResult(
         ) {
             Text(
                 text = text,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Normal,
                 color = Color(0xFFD4D4D8)
             )
@@ -4074,14 +4074,14 @@ fun ChainOfThought(
             if (isThinking) {
                 ReasoningShimmerText(
                     text = "Thinking...",
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.Medium
                 )
             } else {
                 Text(
                     text = durationLabel,
                     color = primaryTextColor,
-                    fontSize = 14.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.Normal
                 )
             }
@@ -4119,7 +4119,7 @@ fun ChainOfThought(
                     Text(
                         text = if (isThinking) "Analyzing query and formulating answer..." else "No detailed thought steps recorded.",
                         color = primaryTextColor.copy(alpha = 0.7f),
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         lineHeight = 19.sp,
                         fontStyle = FontStyle.Italic,
                         modifier = Modifier.padding(start = 24.dp, top = 4.dp)
@@ -4347,7 +4347,7 @@ fun AiModelSelectionDialog(
                                         Text(
                                             text = model.providerBadge,
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 10.sp,
+                                            fontSize = 11.5.sp,
                                             fontWeight = FontWeight.SemiBold,
                                             color = if (isSelected) Color(0xFF22C55E) else MaterialTheme.colorScheme.onSurfaceVariant,
                                             modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
@@ -4360,7 +4360,7 @@ fun AiModelSelectionDialog(
                                 Text(
                                     text = model.description,
                                     style = MaterialTheme.typography.bodySmall,
-                                    fontSize = 11.5.sp,
+                                    fontSize = 12.5.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
 
@@ -4379,7 +4379,7 @@ fun AiModelSelectionDialog(
                                         Text(
                                             text = "Supports mathematical tools & curriculum lookup",
                                             style = MaterialTheme.typography.labelSmall,
-                                            fontSize = 11.sp,
+                                            fontSize = 12.sp,
                                             color = Color(0xFF22C55E),
                                             fontWeight = FontWeight.Medium
                                         )
@@ -4425,7 +4425,7 @@ fun AiModelSelectionDialog(
                             TextButton(onClick = { isEditingKey = !isEditingKey }) {
                                 Text(
                                     text = if (isEditingKey) "Cancel" else if (customZaiApiKey.isNotBlank()) "Change" else "Configure",
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     color = Color(0xFF22C55E)
                                 )
                             }
@@ -4435,7 +4435,7 @@ fun AiModelSelectionDialog(
                             OutlinedTextField(
                                 value = tempKey,
                                 onValueChange = { tempKey = it },
-                                placeholder = { Text("Paste Z.AI API Key", fontSize = 12.sp) },
+                                placeholder = { Text("Paste Z.AI API Key", fontSize = 13.sp) },
                                 singleLine = true,
                                 modifier = Modifier.fillMaxWidth(),
                                 textStyle = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace)
@@ -4456,7 +4456,7 @@ fun AiModelSelectionDialog(
                         Text(
                             text = "💡 Tip: You can also configure ZAI_API_KEY in your environment configuration.",
                             style = MaterialTheme.typography.bodySmall,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }

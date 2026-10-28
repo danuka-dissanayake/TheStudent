@@ -261,7 +261,7 @@ fun PapersScreen(
                             }
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = 12.sp,
                         color = PaperMuted
                     )
                 }
@@ -311,7 +311,7 @@ fun PapersScreen(
                     Text(
                         text = "Search papers, subjects, years",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         color = PaperFaint
                     )
                 },
@@ -339,7 +339,7 @@ fun PapersScreen(
                 shape = RoundedCornerShape(26.dp),
                 textStyle = androidx.compose.ui.text.TextStyle(
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
+                    fontSize = 14.sp,
                     color = PaperInk
                 ),
                 colors = OutlinedTextFieldDefaults.colors(
@@ -391,7 +391,7 @@ fun PapersScreen(
                         else -> "${visible.size} papers"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.SemiBold,
                     color = PaperMuted,
                     modifier = Modifier.weight(1f)
@@ -400,7 +400,7 @@ fun PapersScreen(
                     Text(
                         text = "Clear",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = PaperGreen,
                         modifier = Modifier
@@ -432,7 +432,7 @@ fun PapersScreen(
                     Text(
                         text = sort.label,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.SemiBold,
                         color = PaperInk
                     )
@@ -544,7 +544,7 @@ fun PapersScreen(
                         Text(
                             text = option.label,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.5.sp,
+                            fontSize = 14.sp,
                             fontWeight = if (sort == option) FontWeight.Bold else FontWeight.Normal,
                             color = PaperInk,
                             modifier = Modifier.weight(1f)
@@ -593,7 +593,7 @@ fun PapersScreen(
                         Text(
                             text = "Reset",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = PaperMuted
                         )
@@ -646,7 +646,7 @@ fun PapersScreen(
                     Text(
                         text = "Only papers with a marking scheme",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         color = PaperInk,
                         modifier = Modifier.weight(1f)
                     )
@@ -667,7 +667,7 @@ fun PapersScreen(
                         Text(
                             text = if (visible.isEmpty()) "Show results" else "Show ${visible.size} papers",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.sp,
+                            fontSize = 14.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -694,7 +694,7 @@ private fun SegmentPill(label: String, selected: Boolean, tag: String, onClick: 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else PaperMuted,
                 maxLines = 1
@@ -740,7 +740,7 @@ private fun PaperRow(
                 Text(
                     text = paper.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = PaperInk,
                     maxLines = 2,
@@ -752,7 +752,7 @@ private fun PaperRow(
                         .filter { it.isNotBlank() }
                         .joinToString(" · "),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = PaperMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -812,14 +812,14 @@ private fun OfflineNotice(onRefresh: () -> Unit) {
         Text(
             text = "Showing the last papers this phone loaded.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = Color(0xFF92400E),
             modifier = Modifier.weight(1f)
         )
         Text(
             text = "Refresh",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF92400E),
             modifier = Modifier
@@ -877,7 +877,7 @@ private fun LibraryOfflineState(
         Text(
             text = "The library returned nothing. If you are on a new server, check the connection; otherwise pull again.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             lineHeight = 17.sp,
             color = PaperMuted,
             modifier = Modifier.padding(horizontal = 10.dp)
@@ -895,7 +895,7 @@ private fun LibraryOfflineState(
                 Text(
                     text = "Try again",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.padding(horizontal = 26.dp)
@@ -906,7 +906,7 @@ private fun LibraryOfflineState(
         Text(
             text = if (showServer) "Hide server settings" else "Server settings",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             fontWeight = FontWeight.SemiBold,
             color = PaperMuted,
             modifier = Modifier
@@ -920,7 +920,7 @@ private fun LibraryOfflineState(
                 onValueChange = { urlDraft = it },
                 singleLine = true,
                 label = {
-                    Text("Server URL", fontSize = 11.sp, fontFamily = MaisonNeueFontFamily)
+                    Text("Server URL", fontSize = 12.sp, fontFamily = MaisonNeueFontFamily)
                 },
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -942,7 +942,7 @@ private fun LibraryOfflineState(
                         Text(
                             text = "Save & retry",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             modifier = Modifier.padding(horizontal = 18.dp)
@@ -952,7 +952,7 @@ private fun LibraryOfflineState(
                 Text(
                     text = if (isLiveDatabase) "Connected" else "Not connected",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     color = PaperMuted,
                     modifier = Modifier.align(Alignment.CenterVertically)
                 )
@@ -981,7 +981,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
         Text(
             text = "Try a different subject, year or medium.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.sp,
+            fontSize = 13.sp,
             color = PaperMuted
         )
         Spacer(Modifier.height(16.dp))
@@ -996,7 +996,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
                 Text(
                     text = "Clear filters",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = PaperInk,
                     modifier = Modifier.padding(horizontal = 22.dp)
@@ -1044,7 +1044,7 @@ private fun CircleIconButton(
                 Text(
                     text = badge.toString(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 8.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
@@ -1068,7 +1068,7 @@ private fun PillChip(label: String, selected: Boolean, tag: String, onClick: () 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 13.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else PaperMuted,
                 maxLines = 1
@@ -1088,7 +1088,7 @@ private fun MiniBadge(text: String, color: Color, background: Color) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1
@@ -1145,7 +1145,7 @@ private fun FilterGroup(title: String, content: @Composable () -> Unit) {
         Text(
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.sp,
+            fontSize = 11.5.sp,
             fontWeight = FontWeight.ExtraBold,
             color = PaperInk,
             letterSpacing = 1.sp,

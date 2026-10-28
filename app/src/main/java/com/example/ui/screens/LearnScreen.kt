@@ -147,7 +147,7 @@ fun LearnScreen(
                                         EducationLevel.UNDERGRADUATE -> "Undergrad"
                                         EducationLevel.GRADUATE -> "Graduate"
                                     },
-                                    fontSize = 12.sp,
+                                    fontSize = 13.sp,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                 )
                             },

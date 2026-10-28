@@ -188,7 +188,7 @@ fun AdminPanelScreen(
                         )
                         Text(
                             text = if (isLiveConnected) "DirectAdmin MySQL Connected" else "App Catalog Mode",
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = Color.White.copy(alpha = 0.85f)
                         )
                     }
@@ -230,7 +230,7 @@ fun AdminPanelScreen(
                     FilterChip(
                         selected = activeTab == AdminTab.UPLOAD,
                         onClick = { activeTab = AdminTab.UPLOAD },
-                        label = { Text("Upload", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Upload", fontSize = 13.5.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
@@ -243,7 +243,7 @@ fun AdminPanelScreen(
                     FilterChip(
                         selected = activeTab == AdminTab.CATALOG,
                         onClick = { activeTab = AdminTab.CATALOG },
-                        label = { Text("Papers (${papersList.size})", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Papers (${papersList.size})", fontSize = 13.5.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
@@ -256,7 +256,7 @@ fun AdminPanelScreen(
                     FilterChip(
                         selected = activeTab == AdminTab.QUIZZES,
                         onClick = { activeTab = AdminTab.QUIZZES },
-                        label = { Text("Quizzes", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Quizzes", fontSize = 13.5.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.Quiz, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
@@ -269,7 +269,7 @@ fun AdminPanelScreen(
                     FilterChip(
                         selected = activeTab == AdminTab.DATABASE_SETTINGS,
                         onClick = { activeTab = AdminTab.DATABASE_SETTINGS },
-                        label = { Text("Server", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Server", fontSize = 13.5.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
@@ -338,7 +338,7 @@ fun AdminPanelScreen(
                                                 "Paper uploaded successfully! It is now live in the app.",
                                                 color = EmeraldDark,
                                                 fontWeight = FontWeight.SemiBold,
-                                                fontSize = 13.sp
+                                                fontSize = 13.5.sp
                                             )
                                         }
                                     }
@@ -356,7 +356,7 @@ fun AdminPanelScreen(
                                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                                         ) {
                                             Icon(Icons.Default.Error, contentDescription = null, tint = RedError, modifier = Modifier.size(18.dp))
-                                            Text(formError!!, color = RedError, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
+                                            Text(formError!!, color = RedError, fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold)
                                         }
                                     }
                                 }
@@ -381,7 +381,7 @@ fun AdminPanelScreen(
                                                         else -> "Grade 9"
                                                     }
                                                 },
-                                                label = { Text(if (cat == "A/L") "A/L (උසස් පෙළ)" else if (cat == "O/L") "O/L (සා/පෙළ)" else if (cat == "Scholarship") "Grade 5" else "Grades 6-9", fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                                                label = { Text(if (cat == "A/L") "A/L (උසස් පෙළ)" else if (cat == "O/L") "O/L (සා/පෙළ)" else if (cat == "Scholarship") "Grade 5" else "Grades 6-9", fontSize = 12.sp, fontWeight = FontWeight.Medium) },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     selectedContainerColor = PureLightGreenButton,
                                                     selectedLabelColor = Color.White
@@ -405,7 +405,7 @@ fun AdminPanelScreen(
                                                 FilterChip(
                                                     selected = stream == s,
                                                     onClick = { stream = s },
-                                                    label = { Text(s, fontSize = 12.sp) },
+                                                    label = { Text(s, fontSize = 13.sp) },
                                                     colors = FilterChipDefaults.filterChipColors(
                                                         selectedContainerColor = PureLightGreenButton,
                                                         selectedLabelColor = Color.White
@@ -440,7 +440,7 @@ fun AdminPanelScreen(
                                                     title = "$yearText G.C.E. $category $subj ($medium Medium)"
                                                     formError = null
                                                 },
-                                                label = { Text(subj, fontSize = 11.sp, fontWeight = FontWeight.Medium) },
+                                                label = { Text(subj, fontSize = 12.sp, fontWeight = FontWeight.Medium) },
                                                 colors = SuggestionChipDefaults.suggestionChipColors(
                                                     containerColor = if (subject == subj) PureLightGreenButton.copy(alpha = 0.15f) else Color(0xFFF1F5F9),
                                                     labelColor = if (subject == subj) EmeraldDark else Color(0xFF334155)
@@ -479,7 +479,7 @@ fun AdminPanelScreen(
                                     ) {
                                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(13.dp), tint = EmeraldDark)
                                         Spacer(modifier = Modifier.width(3.dp))
-                                        Text("Auto Title", fontSize = 11.sp, color = EmeraldDark, fontWeight = FontWeight.Bold)
+                                        Text("Auto Title", fontSize = 12.sp, color = EmeraldDark, fontWeight = FontWeight.Bold)
                                     }
                                 }
 
@@ -537,7 +537,7 @@ fun AdminPanelScreen(
                                             FilterChip(
                                                 selected = isSelected,
                                                 onClick = { medium = med },
-                                                label = { Text(med, fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                                                label = { Text(med, fontSize = 13.5.sp, fontWeight = FontWeight.Medium) },
                                                 colors = FilterChipDefaults.filterChipColors(
                                                     selectedContainerColor = PureLightGreenButton,
                                                     selectedLabelColor = Color.White
@@ -586,8 +586,8 @@ fun AdminPanelScreen(
                                                     )
                                                 }
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text("Thumbnail Selected", fontWeight = FontWeight.Bold, fontSize = 13.sp, color = EmeraldDark)
-                                                    Text(selectedThumbnailUri?.lastPathSegment ?: "Image file", fontSize = 11.sp, color = Color.Gray, maxLines = 1)
+                                                    Text("Thumbnail Selected", fontWeight = FontWeight.Bold, fontSize = 13.5.sp, color = EmeraldDark)
+                                                    Text(selectedThumbnailUri?.lastPathSegment ?: "Image file", fontSize = 12.sp, color = Color.Gray, maxLines = 1)
                                                 }
                                                 IconButton(onClick = { selectedThumbnailUri = null }) {
                                                     Icon(Icons.Default.Close, contentDescription = "Remove", tint = Color.Gray)
@@ -603,8 +603,8 @@ fun AdminPanelScreen(
                                                     Icon(Icons.Default.AddPhotoAlternate, contentDescription = null, tint = PureLightGreenButton)
                                                 }
                                                 Column(modifier = Modifier.weight(1f)) {
-                                                    Text("Upload Thumbnail Image", fontWeight = FontWeight.Bold, fontSize = 13.sp)
-                                                    Text("Tap to browse gallery (JPG, PNG)", fontSize = 11.sp, color = Color.Gray)
+                                                    Text("Upload Thumbnail Image", fontWeight = FontWeight.Bold, fontSize = 13.5.sp)
+                                                    Text("Tap to browse gallery (JPG, PNG)", fontSize = 12.sp, color = Color.Gray)
                                                 }
                                                 Icon(Icons.Default.Upload, contentDescription = null, tint = Color.Gray)
                                             }
@@ -648,12 +648,12 @@ fun AdminPanelScreen(
                                                 Text(
                                                     text = if (selectedPdfUri != null) "PDF File Attached" else "Upload Paper PDF *",
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
+                                                    fontSize = 13.5.sp,
                                                     color = if (selectedPdfUri != null) EmeraldDark else MaterialTheme.colorScheme.onSurface
                                                 )
                                                 Text(
                                                     text = if (selectedPdfUri != null) (detectedFileName ?: (selectedPdfUri?.lastPathSegment ?: "PDF Selected")) else "Tap to select past paper PDF file",
-                                                    fontSize = 11.sp,
+                                                    fontSize = 12.sp,
                                                     color = Color.Gray,
                                                     maxLines = 1
                                                 )
@@ -665,7 +665,7 @@ fun AdminPanelScreen(
                                                     ) {
                                                         Text(
                                                             text = "Real Size: $detectedFileSize (Auto detected)",
-                                                            fontSize = 10.sp,
+                                                            fontSize = 11.5.sp,
                                                             fontWeight = FontWeight.Bold,
                                                             color = EmeraldDark,
                                                             modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -736,11 +736,11 @@ fun AdminPanelScreen(
                                                     Text(
                                                         text = if (selectedMarkingSchemeUri != null) "Marking Scheme PDF Attached" else "Upload Marking Scheme PDF",
                                                         fontWeight = FontWeight.Bold,
-                                                        fontSize = 13.sp
+                                                        fontSize = 13.5.sp
                                                     )
                                                     Text(
                                                         text = if (selectedMarkingSchemeUri != null) (detectedSchemeName ?: (selectedMarkingSchemeUri?.lastPathSegment ?: "Scheme Selected")) else "Tap to select answer guide PDF",
-                                                        fontSize = 11.sp,
+                                                        fontSize = 12.sp,
                                                         color = Color.Gray,
                                                         maxLines = 1
                                                     )
@@ -752,7 +752,7 @@ fun AdminPanelScreen(
                                                         ) {
                                                             Text(
                                                                 text = "Real Size: $detectedSchemeSize (Auto detected)",
-                                                                fontSize = 10.sp,
+                                                                fontSize = 11.5.sp,
                                                                 fontWeight = FontWeight.Bold,
                                                                 color = EmeraldDark,
                                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -906,7 +906,7 @@ fun AdminPanelScreen(
                                                 ) {
                                                     Text(
                                                         text = paper.category,
-                                                        fontSize = 11.sp,
+                                                        fontSize = 12.sp,
                                                         fontWeight = FontWeight.Bold,
                                                         color = EmeraldDark,
                                                         modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
@@ -914,7 +914,7 @@ fun AdminPanelScreen(
                                                 }
                                                 Text(
                                                     text = "${paper.year} • ${paper.medium}",
-                                                    fontSize = 12.sp,
+                                                    fontSize = 13.sp,
                                                     color = Color.Gray
                                                 )
                                             }
@@ -922,12 +922,12 @@ fun AdminPanelScreen(
                                             Text(
                                                 text = paper.title,
                                                 fontWeight = FontWeight.Bold,
-                                                fontSize = 14.sp,
+                                                fontSize = 14.5.sp,
                                                 maxLines = 1
                                             )
                                             Text(
                                                 text = "${paper.subject} | ${paper.grade} ${paper.stream?.let { "($it)" } ?: ""}",
-                                                fontSize = 12.sp,
+                                                fontSize = 13.sp,
                                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                                             )
                                         }
@@ -1045,12 +1045,12 @@ fun AdminPanelScreen(
                                                 Text(
                                                     text = if (isSuccess) "API Connection Verified" else "API Connection Failed",
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 13.sp,
+                                                    fontSize = 13.5.sp,
                                                     color = if (isSuccess) EmeraldDark else RedError
                                                 )
                                                 Text(
                                                     text = message,
-                                                    fontSize = 12.sp,
+                                                    fontSize = 13.sp,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
@@ -1123,7 +1123,7 @@ fun ModernFormField(
         OutlinedTextField(
             value = value,
             onValueChange = onValueChange,
-            placeholder = { Text(placeholder, color = Color.LightGray, fontSize = 13.sp) },
+            placeholder = { Text(placeholder, color = Color.LightGray, fontSize = 13.5.sp) },
             singleLine = singleLine,
             minLines = minLines,
             modifier = Modifier.fillMaxWidth(),

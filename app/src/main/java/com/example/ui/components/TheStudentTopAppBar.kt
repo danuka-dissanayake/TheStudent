@@ -8,14 +8,12 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.LocalFireDepartment
@@ -34,7 +32,6 @@ import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.R
 import com.example.ui.theme.AmberWarning
 import com.example.ui.theme.EmeraldPrimary
@@ -45,9 +42,9 @@ import com.example.ui.theme.MaisonNeueFontFamily
  *
  * Left: the hamburger that opens the sidebar, then the real TheStudent wordmark
  * (the same artwork as the store listing), so the bar is the brand rather than a
- * page title. Right: the streak capsule and the avatar, which opens the profile.
- * Search and the language lab live in the Papers header and the sidebar — the
- * bar keeps only what a student uses on every screen.
+ * page title. Right: the streak capsule — nothing else. The avatar was removed
+ * so the bar stays a header and nothing competes with the logo; the profile is
+ * one tap away in the bottom bar and the sidebar.
  */
 @Suppress("UNUSED_PARAMETER")
 @Composable
@@ -55,10 +52,7 @@ fun TheStudentTopAppBar(
     currentTab: TheStudentNavTab,
     streakDays: Int,
     onNavigationClick: () -> Unit,
-    modifier: Modifier = Modifier,
-    userName: String = "",
-    avatarUrl: String = "",
-    onProfileClick: () -> Unit = {}
+    modifier: Modifier = Modifier
 ) {
     val isDark = isSystemInDarkTheme()
     val barBg = if (isDark) MaterialTheme.colorScheme.surface else Color.White
@@ -127,7 +121,7 @@ fun TheStudentTopAppBar(
                     shape = RoundedCornerShape(50),
                     color = AmberWarning.copy(alpha = 0.13f),
                     modifier = Modifier
-                        .height(34.dp)
+                        .height(36.dp)
                         .clip(RoundedCornerShape(50))
                         .testTag("top_bar_streak_pill")
                 ) {
@@ -140,12 +134,12 @@ fun TheStudentTopAppBar(
                             imageVector = Icons.Default.LocalFireDepartment,
                             contentDescription = "Streak",
                             tint = AmberWarning,
-                            modifier = Modifier.size(15.dp)
+                            modifier = Modifier.size(17.dp)
                         )
                         Text(
                             text = "$streakDays",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 14.sp,
                             fontWeight = FontWeight.ExtraBold,
                             color = if (isDark) ink else Color(0xFFB45309),
                             maxLines = 1
@@ -153,44 +147,6 @@ fun TheStudentTopAppBar(
                     }
                 }
                 Spacer(Modifier.width(8.dp))
-            }
-
-            // ── avatar ──────────────────────────────────────────────────────
-            Surface(
-                shape = CircleShape,
-                color = Color(0xFFECFDF5),
-                border = BorderStroke(1.5.dp, EmeraldPrimary.copy(alpha = 0.35f)),
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(CircleShape)
-                    .clickable(onClick = onProfileClick)
-                    .testTag("top_bar_avatar")
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    val initials = userName
-                        .trim()
-                        .split(" ")
-                        .filter { it.isNotBlank() }
-                        .take(2)
-                        .joinToString("") { it.take(1) }
-                        .uppercase()
-                    if (avatarUrl.isNotBlank()) {
-                        AsyncImage(
-                            model = avatarUrl,
-                            contentDescription = null,
-                            contentScale = ContentScale.Crop,
-                            modifier = Modifier.fillMaxSize().clip(CircleShape)
-                        )
-                    } else {
-                        Text(
-                            text = initials.ifBlank { "S" },
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = Color(0xFF047857)
-                        )
-                    }
-                }
             }
         }
     }

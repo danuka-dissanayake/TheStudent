@@ -504,12 +504,9 @@ class MainActivity : ComponentActivity() {
                                                  TheStudentTopAppBar(
                                                      currentTab = uiState.currentTab,
                                                      streakDays = userProfile.streakDays,
-                                                     userName = userProfile.name,
-                                                     avatarUrl = userProfile.avatarUrl,
                                                      onNavigationClick = {
                                                          coroutineScope.launch { drawerState.open() }
-                                                     },
-                                                     onProfileClick = { viewModel.setTab(TheStudentNavTab.PROFILE) }
+                                                     }
                                                  )
                                              }
                                          },

@@ -199,7 +199,7 @@ fun QuizAdminList(
                     text = "${quizzes.count { it.isPublished }} published · " +
                         "${quizzes.count { it.isDraft }} drafts",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.sp,
                     color = AdmMuted
                 )
             }
@@ -237,7 +237,7 @@ fun QuizAdminList(
                     Text(
                         text = "New quiz",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 12.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -276,7 +276,7 @@ fun QuizAdminList(
                 Text(
                     text = "Create the first one — students see it the moment you publish.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     color = AdmMuted,
                     modifier = Modifier.padding(horizontal = 20.dp)
                 )
@@ -350,7 +350,7 @@ private fun QuizAdminRow(
                 Text(
                     text = quiz.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = AdmInk,
                     maxLines = 2,
@@ -370,7 +370,7 @@ private fun QuizAdminRow(
                     if (quiz.attemptCount > 0) "${quiz.attemptCount} submitted · avg ${quiz.averagePercent}%" else "no attempts yet"
                 ).filter { it.isNotBlank() }.joinToString(" · "),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = AdmMuted
             )
             Spacer(Modifier.height(8.dp))
@@ -410,7 +410,7 @@ private fun AdminAction(label: String, tint: Color, onClick: () -> Unit) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = tint,
                 modifier = Modifier.padding(horizontal = 10.dp)
@@ -435,7 +435,7 @@ private fun StatusBadge(quiz: QuizSummary) {
         Text(
             text = quiz.statusLabel,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = fg
         )
@@ -460,7 +460,7 @@ private fun ConfirmResetAttempts(quiz: QuizSummary, onCancel: () -> Unit, onConf
                         "deleted, so every student can take it again from scratch. Best scores and " +
                         "quiz badges go with them.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     lineHeight = 16.sp,
                     color = AdmMuted
                 )
@@ -478,7 +478,7 @@ private fun ConfirmResetAttempts(quiz: QuizSummary, onCancel: () -> Unit, onConf
                             Text(
                                 text = "Cancel",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AdmInk
                             )
@@ -496,7 +496,7 @@ private fun ConfirmResetAttempts(quiz: QuizSummary, onCancel: () -> Unit, onConf
                             Text(
                                 text = "Reset",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -525,7 +525,7 @@ private fun ConfirmDeleteQuiz(quiz: QuizSummary, onCancel: () -> Unit, onDelete:
                     text = "\"${quiz.title}\" and its questions will be removed. A quiz students have " +
                         "already attempted cannot be deleted — archive it instead.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
+                    fontSize = 12.5.sp,
                     lineHeight = 16.sp,
                     color = AdmMuted
                 )
@@ -543,7 +543,7 @@ private fun ConfirmDeleteQuiz(quiz: QuizSummary, onCancel: () -> Unit, onDelete:
                             Text(
                                 text = "Cancel",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AdmInk
                             )
@@ -561,7 +561,7 @@ private fun ConfirmDeleteQuiz(quiz: QuizSummary, onCancel: () -> Unit, onDelete:
                             Text(
                                 text = "Delete",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -654,7 +654,7 @@ fun QuizEditorScreen(
                     Text(
                         text = "Draft kept on this phone until you publish",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = 11.5.sp,
                         color = AdmMuted
                     )
                 }
@@ -695,7 +695,7 @@ fun QuizEditorScreen(
                         Text(
                             text = message,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
+                            fontSize = 12.5.sp,
                             lineHeight = 16.sp,
                             color = AdmRed
                         )
@@ -719,7 +719,7 @@ fun QuizEditorScreen(
                     Text(
                         text = "TIME LIMIT",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = AdmInk,
                         letterSpacing = 0.8.sp
@@ -740,7 +740,7 @@ fun QuizEditorScreen(
                     Text(
                         text = "PASS MARK · ${current.passPercent}%",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = 11.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = AdmInk,
                         letterSpacing = 0.8.sp
@@ -770,7 +770,7 @@ fun QuizEditorScreen(
                         text = "When every attempt is used the quiz moves to the student's " +
                             "Enrolled quizzes and closes.",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = 11.5.sp,
                         lineHeight = 14.sp,
                         color = AdmMuted,
                         modifier = Modifier.padding(bottom = 6.dp)
@@ -788,7 +788,7 @@ fun QuizEditorScreen(
                     Text(
                         text = "Questions",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = AdmInk,
                         modifier = Modifier.weight(1f)
@@ -797,7 +797,7 @@ fun QuizEditorScreen(
                         text = "${current.questions.size} · " +
                             "${current.questions.sumOf { it.marks }} marks",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
+                        fontSize = 12.sp,
                         color = AdmMuted
                     )
                 }
@@ -854,7 +854,7 @@ fun QuizEditorScreen(
                         Text(
                             text = "Add question",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = AdmGreen
                         )
@@ -887,7 +887,7 @@ fun QuizEditorScreen(
                         Text(
                             text = "Save draft",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             fontWeight = FontWeight.Bold,
                             color = AdmInk
                         )
@@ -914,7 +914,7 @@ fun QuizEditorScreen(
                             Text(
                                 text = "Publish",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Color.White
                             )
@@ -948,7 +948,7 @@ private fun QuestionEditor(
                 Text(
                     text = "QUESTION ${index + 1}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = AdmGreen,
                     letterSpacing = 0.8.sp,
@@ -994,7 +994,7 @@ private fun QuestionEditor(
                             Text(
                                 text = ('A' + optionIndex).toString(),
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 10.sp,
+                                fontSize = 11.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = AdmMuted
                             )
@@ -1034,7 +1034,7 @@ private fun QuestionEditor(
             Text(
                 text = "+ Add option",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
                 color = AdmGreen,
                 modifier = Modifier
@@ -1076,7 +1076,7 @@ private fun EditorCard(title: String, content: @Composable () -> Unit) {
             Text(
                 text = title.uppercase(),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
+                fontSize = 11.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = AdmInk,
                 letterSpacing = 0.8.sp
@@ -1103,13 +1103,13 @@ private fun EditorField(
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = 12.sp,
                 color = AdmMuted
             )
         },
         textStyle = androidx.compose.ui.text.TextStyle(
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 13.5.sp,
             color = AdmInk
         ),
         shape = RoundedCornerShape(12.dp),
@@ -1130,7 +1130,7 @@ private fun EditorChips(
     Text(
         text = label.uppercase(),
         fontFamily = MaisonNeueFontFamily,
-        fontSize = 9.5.sp,
+        fontSize = 11.sp,
         fontWeight = FontWeight.ExtraBold,
         color = AdmInk,
         letterSpacing = 0.8.sp,
@@ -1162,7 +1162,7 @@ private fun EditorPill(label: String, selected: Boolean, onClick: () -> Unit) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else AdmMuted,
                 maxLines = 1
@@ -1183,7 +1183,7 @@ private fun ToggleRow(label: String, checked: Boolean, onChange: (Boolean) -> Un
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = AdmInk,
             modifier = Modifier.weight(1f)
         )

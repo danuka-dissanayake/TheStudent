@@ -194,7 +194,7 @@ fun ExpHeroCard(
                 Text(
                     text = "Total EXP",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Medium,
                     color = Color.White.copy(alpha = 0.72f)
                 )
@@ -210,7 +210,7 @@ fun ExpHeroCard(
                 Text(
                     text = if (compact) "Level ${tier.level} · ${tier.name}" else tier.epithet,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 13.sp,
                     color = Color.White.copy(alpha = 0.85f)
                 )
             }
@@ -251,7 +251,7 @@ fun ExpBadgeLadder(
                     Text(
                         text = step.name,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = 11.5.sp,
                         fontWeight = if (earned) FontWeight.Bold else FontWeight.Medium,
                         color = if (earned) Color(0xFF0F172A) else Color(0xFF94A3B8),
                         maxLines = 1,
@@ -260,7 +260,7 @@ fun ExpBadgeLadder(
                     Text(
                         text = if (earned) "Earned" else formatExp(step.min),
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.sp,
+                        fontSize = 10.5.sp,
                         color = if (earned) EmeraldPrimary else Color(0xFF94A3B8),
                         maxLines = 1,
                         textAlign = TextAlign.Center

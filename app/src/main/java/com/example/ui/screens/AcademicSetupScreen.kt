@@ -116,7 +116,7 @@ fun AcademicSetupScreen(
                             Text(
                                 text = "Used to match you with students who can help",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = AcademicMuted
                             )
                         }
@@ -145,7 +145,7 @@ fun AcademicSetupScreen(
                             Text(
                                 text = errorMessage,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 color = Color(0xFFDC2626),
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
@@ -153,7 +153,7 @@ fun AcademicSetupScreen(
                             Text(
                                 text = todo,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 color = AcademicMuted,
                                 modifier = Modifier.padding(bottom = 8.dp)
                             )
@@ -176,7 +176,7 @@ fun AcademicSetupScreen(
                                 Text(
                                     text = if (isSaving) "Saving…" else "Save details",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )

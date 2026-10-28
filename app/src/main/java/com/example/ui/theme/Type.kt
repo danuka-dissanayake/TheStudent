@@ -8,90 +8,145 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.sp
 import com.example.R
 
-// Roboto Font Family with dedicated TrueType font weights for high visual punch
-val RobotoFontFamily = FontFamily(
-    Font(R.font.roboto_400, FontWeight.Normal),
-    Font(R.font.roboto_500, FontWeight.Medium),
-    Font(R.font.roboto_700, FontWeight.SemiBold),
-    Font(R.font.roboto_700, FontWeight.Bold),
-    Font(R.font.roboto_900, FontWeight.ExtraBold),
-    Font(R.font.roboto_900, FontWeight.Black)
+/**
+ * Ubuntu — the app's one typeface.
+ *
+ * The four weights shipped in `res/font` are the real Ubuntu cut (Light 300,
+ * Regular 400, Medium 500, Bold 700), so headings, labels and body copy all
+ * come from the same family instead of the platform default. `SemiBold`,
+ * `ExtraBold` and `Black` borrow the closest shipped weight: Ubuntu has no 600
+ * or 800, and Android would otherwise synthesise a smeared fake bold.
+ */
+val UbuntuFontFamily = FontFamily(
+    Font(R.font.ubuntu_light, FontWeight.Light),
+    Font(R.font.ubuntu_regular, FontWeight.Normal),
+    Font(R.font.ubuntu_medium, FontWeight.Medium),
+    Font(R.font.ubuntu_medium, FontWeight.SemiBold),
+    Font(R.font.ubuntu_bold, FontWeight.Bold),
+    Font(R.font.ubuntu_bold, FontWeight.ExtraBold),
+    Font(R.font.ubuntu_bold, FontWeight.Black)
 )
 
-// Main font family alias to Roboto to guarantee Roboto everywhere throughout the app
-val MaisonNeueFontFamily = RobotoFontFamily
+/**
+ * Kept as the app-wide alias: every screen already asks for this family, so
+ * switching it here switches the whole app to Ubuntu in one line.
+ */
+val MaisonNeueFontFamily = UbuntuFontFamily
 
-// Set of Material typography styles powered by Roboto
+/** Legacy alias — the Roboto faces are no longer shipped or used. */
+val RobotoFontFamily = UbuntuFontFamily
+
+/**
+ * The Material 3 type scale, at Material 3 sizes.
+ *
+ * The previous ramp was compressed (32sp display, 12sp body) which made every
+ * screen read smaller than the platform it runs on. These are the standard
+ * roles and sizes — 57/45/36 display, 32/28/24 headline, 22/16/14 title,
+ * 16/14/12 body, 14/12/11 label — so text is legible at a glance and any
+ * screen that leans on `MaterialTheme.typography` inherits the same rhythm.
+ */
 val Typography = Typography(
     displayLarge = TextStyle(
-        fontFamily = RobotoFontFamily,
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 32.sp,
-        lineHeight = 38.sp,
+        fontSize = 57.sp,
+        lineHeight = 64.sp,
+        letterSpacing = (-0.6).sp
+    ),
+    displayMedium = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 45.sp,
+        lineHeight = 52.sp,
         letterSpacing = (-0.5).sp
     ),
-    headlineMedium = TextStyle(
-        fontFamily = RobotoFontFamily,
+    displaySmall = TextStyle(
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 26.sp,
-        lineHeight = 32.sp,
+        fontSize = 36.sp,
+        lineHeight = 44.sp,
+        letterSpacing = (-0.4).sp
+    ),
+    headlineLarge = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 32.sp,
+        lineHeight = 40.sp,
+        letterSpacing = (-0.4).sp
+    ),
+    headlineMedium = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Bold,
+        fontSize = 28.sp,
+        lineHeight = 36.sp,
         letterSpacing = (-0.3).sp
     ),
     headlineSmall = TextStyle(
-        fontFamily = RobotoFontFamily,
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Bold,
-        fontSize = 22.sp,
-        lineHeight = 28.sp,
+        fontSize = 24.sp,
+        lineHeight = 32.sp,
         letterSpacing = (-0.2).sp
     ),
     titleLarge = TextStyle(
-        fontFamily = RobotoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 20.sp,
-        lineHeight = 26.sp
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 22.sp,
+        lineHeight = 28.sp
     ),
     titleMedium = TextStyle(
-        fontFamily = RobotoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 16.sp,
-        lineHeight = 22.sp
-    ),
-    bodyLarge = TextStyle(
-        fontFamily = RobotoFontFamily,
-        fontWeight = FontWeight.Normal,
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 16.sp,
         lineHeight = 24.sp,
-        letterSpacing = 0.15.sp
+        letterSpacing = 0.1.sp
     ),
-    bodyMedium = TextStyle(
-        fontFamily = RobotoFontFamily,
-        fontWeight = FontWeight.Normal,
+    titleSmall = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Medium,
         fontSize = 14.sp,
         lineHeight = 20.sp
     ),
+    bodyLarge = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 16.sp,
+        lineHeight = 24.sp,
+        letterSpacing = 0.2.sp
+    ),
+    bodyMedium = TextStyle(
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Normal,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.15.sp
+    ),
     bodySmall = TextStyle(
-        fontFamily = RobotoFontFamily,
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Normal,
         fontSize = 12.sp,
-        lineHeight = 16.sp
+        lineHeight = 16.sp,
+        letterSpacing = 0.2.sp
     ),
     labelLarge = TextStyle(
-        fontFamily = RobotoFontFamily,
-        fontWeight = FontWeight.SemiBold,
-        fontSize = 15.sp,
-        lineHeight = 20.sp
+        fontFamily = UbuntuFontFamily,
+        fontWeight = FontWeight.Medium,
+        fontSize = 14.sp,
+        lineHeight = 20.sp,
+        letterSpacing = 0.1.sp
     ),
     labelMedium = TextStyle(
-        fontFamily = RobotoFontFamily,
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Medium,
-        fontSize = 13.sp,
-        lineHeight = 18.sp
+        fontSize = 12.sp,
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
     ),
     labelSmall = TextStyle(
-        fontFamily = RobotoFontFamily,
+        fontFamily = UbuntuFontFamily,
         fontWeight = FontWeight.Medium,
         fontSize = 11.sp,
-        lineHeight = 16.sp
+        lineHeight = 16.sp,
+        letterSpacing = 0.4.sp
     )
 )
-

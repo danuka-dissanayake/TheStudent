@@ -122,7 +122,7 @@ fun CourseDetailDialog(
                                         } else {
                                             Text(
                                                 text = "${lesson.number}",
-                                                fontSize = 12.sp,
+                                                fontSize = 13.sp,
                                                 fontWeight = FontWeight.Bold
                                             )
                                         }

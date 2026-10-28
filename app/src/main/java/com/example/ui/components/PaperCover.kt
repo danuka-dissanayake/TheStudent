@@ -92,8 +92,8 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
             Text(
                 text = paper.subject,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 8.5.sp,
-                lineHeight = 10.sp,
+                fontSize = 10.sp,
+                lineHeight = 12.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
                 textAlign = TextAlign.Center,
@@ -112,7 +112,7 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
             Text(
                 text = SubjectCodes.of(paper.subject),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.2).sp,
                 color = tint,
@@ -157,7 +157,7 @@ fun PaperYearPill(paper: PastPaper, modifier: Modifier = Modifier) {
         Text(
             text = paper.year.toString(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = tint,
             maxLines = 1,

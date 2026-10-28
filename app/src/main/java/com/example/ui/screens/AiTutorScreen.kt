@@ -306,7 +306,7 @@ fun AiTutorScreen(
                                     text = scenario,
                                     fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
                                     color = if (isSelected) OnEmeraldContainer else MaterialTheme.colorScheme.onSurface,
-                                    fontSize = 14.sp
+                                    fontSize = 14.5.sp
                                 )
                             }
                         }
@@ -440,18 +440,18 @@ fun AiTutorScreen(
                             Text(
                                 text = "Deployed HuggingFace Space:",
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = OnEmeraldContainer
                             )
                             Text(
                                 text = "TheStudent AI Model Engine",
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 color = EmeraldDark,
                                 fontWeight = FontWeight.Medium
                             )
                             Text(
                                 text = "Status: $hfStatusMessage",
-                                fontSize = 11.sp,
+                                fontSize = 12.sp,
                                 color = OnEmeraldContainer,
                                 modifier = Modifier.padding(top = 4.dp)
                             )
@@ -476,7 +476,7 @@ fun AiTutorScreen(
                     )
                     Text(
                         text = "Tip: You can configure your Hugging Face API Token in App Settings.",
-                        fontSize = 10.sp,
+                        fontSize = 11.5.sp,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
 
@@ -581,7 +581,7 @@ fun ScenarioSelectorRow(
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
                         color = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface,
-                        fontSize = 12.sp
+                        fontSize = 13.sp
                     )
                 }
             }

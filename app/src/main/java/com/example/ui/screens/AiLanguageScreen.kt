@@ -200,7 +200,7 @@ fun VoiceConversationTab(
                                             1 -> "Tech Job"
                                             else -> "Library"
                                         },
-                                        fontSize = 12.sp,
+                                        fontSize = 13.sp,
                                         fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal
                                     )
                                 },
@@ -320,7 +320,7 @@ fun VoiceConversationTab(
                                 text = speaker.take(1),
                                 color = Color.White,
                                 fontWeight = FontWeight.Bold,
-                                fontSize = 12.sp
+                                fontSize = 13.sp
                             )
                         }
                     }
@@ -443,7 +443,7 @@ fun VocabularyTab(
                             Text(
                                 text = "සිංහල: ${word.translationSinhala}",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = OnEmeraldContainer
                             )
@@ -455,7 +455,7 @@ fun VocabularyTab(
                             Text(
                                 text = "தமிழ்: ${word.translationTamil}",
                                 modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = OnTealContainer
                             )
@@ -604,7 +604,7 @@ fun GrammarTab(
                                     Box(contentAlignment = Alignment.Center) {
                                         Text(
                                             text = ('A' + index).toString(),
-                                            fontSize = 12.sp,
+                                            fontSize = 13.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = if (isSelected || (isSubmitted && isCorrect)) EmeraldPrimary else MaterialTheme.colorScheme.onSurface
                                         )

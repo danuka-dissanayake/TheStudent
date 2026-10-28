@@ -150,7 +150,7 @@ fun PaperDetailDialog(
 
                             Text(
                                 text = "Paper I · ${if (paper.hasMarkingScheme) "Marking scheme included" else "Answers included"}",
-                                fontSize = 12.5.sp,
+                                fontSize = 13.5.sp,
                                 color = Color(0xFF64748B),
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis
@@ -221,14 +221,14 @@ fun PaperDetailDialog(
                             ) {
                                 Text(
                                     text = "MEDIUM",
-                                    fontSize = 10.sp,
+                                    fontSize = 11.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF15803D)
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = paper.medium,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF15803D),
                                     maxLines = 1,
@@ -280,7 +280,7 @@ fun PaperDetailDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = if (isDownloaded) "PDF Downloaded" else "Download PDF",
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
@@ -310,7 +310,7 @@ fun PaperDetailDialog(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Ask AI",
-                                    fontSize = 14.sp,
+                                    fontSize = 14.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
@@ -344,14 +344,14 @@ private fun PaperStatCard(
         ) {
             Text(
                 text = label,
-                fontSize = 10.sp,
+                fontSize = 11.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF64748B)
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = value,
-                fontSize = 13.5.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.Bold,
                 color = if (isDark) Color.White else Color(0xFF0F172A),
                 maxLines = 1,

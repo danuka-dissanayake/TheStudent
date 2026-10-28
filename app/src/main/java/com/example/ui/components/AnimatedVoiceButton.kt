@@ -216,7 +216,7 @@ fun AnimatedVoiceButton(
             },
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            fontSize = 11.sp,
+            fontSize = 12.sp,
             modifier = Modifier.padding(bottom = 6.dp)
         )
     }

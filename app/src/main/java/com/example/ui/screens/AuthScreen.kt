@@ -769,7 +769,7 @@ fun AuthScreen(
                     Text(
                         text = subheadline,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.sp,
+                        fontSize = 14.5.sp,
                         color = Color(0xFF64748B),
                         lineHeight = 20.sp
                     )
@@ -899,7 +899,7 @@ fun AuthScreen(
                                                 Text(
                                                     text = "Remember me",
                                                     fontFamily = MaisonNeueFontFamily,
-                                                    fontSize = 13.sp,
+                                                    fontSize = 13.5.sp,
                                                     color = Color(0xFF475569)
                                                 )
                                             }
@@ -907,7 +907,7 @@ fun AuthScreen(
                                             Text(
                                                 text = "Forgot password?",
                                                 fontFamily = MaisonNeueFontFamily,
-                                                fontSize = 13.sp,
+                                                fontSize = 13.5.sp,
                                                 fontWeight = FontWeight.Bold,
                                                 color = EmeraldPrimary,
                                                 modifier = Modifier
@@ -1063,7 +1063,7 @@ fun AuthScreen(
                                             text = "Enter the email linked to your account and we'll send " +
                                                 "you a 6-digit reset code.",
                                             fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 13.5.sp,
+                                            fontSize = 14.sp,
                                             lineHeight = 19.sp,
                                             color = Color(0xFF64748B)
                                         )
@@ -1094,7 +1094,7 @@ fun AuthScreen(
                                         Text(
                                             text = "Back to sign in",
                                             fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 13.sp,
+                                            fontSize = 13.5.sp,
                                             fontWeight = FontWeight.Bold,
                                             color = AuthModernDarkGreen,
                                             textAlign = TextAlign.Center,
@@ -1118,7 +1118,7 @@ fun AuthScreen(
                                                 pendingVerificationEmail.ifBlank { email }.ifBlank { "your email" } +
                                                 ". All other devices will be signed out.",
                                             fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 13.5.sp,
+                                            fontSize = 14.sp,
                                             lineHeight = 19.sp,
                                             color = Color(0xFF64748B)
                                         )
@@ -1189,14 +1189,14 @@ fun AuthScreen(
                                     "Already have an account?"
                                 },
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 color = Color(0xFF64748B)
                             )
                             Spacer(Modifier.width(6.dp))
                             Text(
                                 text = if (authMode == AuthMode.SIGN_IN) "Create account" else "Sign in",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.5.sp,
+                                fontSize = 14.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = EmeraldPrimary,
                                 modifier = Modifier
@@ -1228,7 +1228,7 @@ fun AuthScreen(
                         Text(
                             text = "Secure connection · email verification required",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = 12.sp,
                             color = Color(0xFF94A3B8)
                         )
                     }
@@ -1401,7 +1401,7 @@ fun PasswordStrengthHint(
             Spacer(modifier = Modifier.width(10.dp))
             Text(
                 text = label,
-                fontSize = 11.5.sp,
+                fontSize = 12.5.sp,
                 fontWeight = FontWeight.Bold,
                 color = color
             )
@@ -1413,7 +1413,7 @@ fun PasswordStrengthHint(
             } else {
                 "Add " + missing.joinToString(", ")
             },
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = Color(0xFF64748B)
         )
     }
@@ -1463,7 +1463,7 @@ fun SignUpConsentRow(
             verticalAlignment = Alignment.CenterVertically
         ) {
             ConsentLink(text = "Read terms", enabled = enabled) { uriHandler.openUri(TERMS_URL) }
-            Text(text = "·", color = Color(0xFF94A3B8), fontSize = 12.sp)
+            Text(text = "·", color = Color(0xFF94A3B8), fontSize = 13.sp)
             ConsentLink(text = "Read privacy policy", enabled = enabled) { uriHandler.openUri(PRIVACY_URL) }
         }
     }
@@ -1477,7 +1477,7 @@ private fun ConsentLink(
 ) {
     Text(
         text = text,
-        fontSize = 12.sp,
+        fontSize = 13.sp,
         fontWeight = FontWeight.SemiBold,
         color = if (enabled) AuthModernDarkGreen else Color(0xFF94A3B8),
         textDecoration = androidx.compose.ui.text.style.TextDecoration.Underline,
@@ -1543,7 +1543,7 @@ private fun SegmentedAuthOption(
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.5.sp,
+            fontSize = 14.sp,
             fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
             color = when {
                 selected -> Color.White
@@ -1591,7 +1591,7 @@ fun AuthErrorBanner(
             Text(
                 text = message,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 lineHeight = 17.sp,
                 color = Color(0xFFB91C1C),
                 modifier = Modifier.weight(1f)
@@ -1601,7 +1601,7 @@ fun AuthErrorBanner(
                 Text(
                     text = "Retry",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Color(0xFFDC2626),
                     modifier = Modifier
@@ -1637,7 +1637,7 @@ fun AuthOrDivider(
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             color = Color(0xFF94A3B8),
             modifier = Modifier.padding(horizontal = 10.dp)
         )
@@ -1999,7 +1999,7 @@ fun KeypadGrid(
                                 if (sub.isNotEmpty()) {
                                     Text(
                                         text = sub,
-                                        fontSize = 7.5.sp,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = MaterialTheme.colorScheme.outline
                                     )
@@ -2123,7 +2123,7 @@ fun ModernEmailVerificationScreen(
                                     else -> "Secure connection"
                                 },
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 12.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = if (infoIsWarning) Color(0xFF92400E) else AuthModernDarkGreen
                             )
@@ -2184,7 +2184,7 @@ fun ModernEmailVerificationScreen(
                     text = "Enter the 6-digit confirmation code sent to",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color(0xFF64748B),
-                    fontSize = 13.sp
+                    fontSize = 13.5.sp
                 )
 
                 Spacer(modifier = Modifier.height(6.dp))
@@ -2206,7 +2206,7 @@ fun ModernEmailVerificationScreen(
                             text = targetEmail,
                             fontFamily = MaisonNeueFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             color = AuthModernDarkGreen,
                             maxLines = 1
                         )
@@ -2314,21 +2314,21 @@ fun ModernEmailVerificationScreen(
                             text = "Resend code in ",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF64748B),
-                            fontSize = 12.5.sp
+                            fontSize = 13.5.sp
                         )
                         Text(
                             text = formatCooldown(resendCooldownSeconds),
                             fontFamily = MaisonNeueFontFamily,
                             fontWeight = FontWeight.Bold,
                             color = AuthModernDarkGreen,
-                            fontSize = 12.5.sp
+                            fontSize = 13.5.sp
                         )
                     } else {
                         Text(
                             text = "Didn't receive code? ",
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFF64748B),
-                            fontSize = 12.5.sp
+                            fontSize = 13.5.sp
                         )
                         Row(
                             verticalAlignment = Alignment.CenterVertically,
@@ -2348,7 +2348,7 @@ fun ModernEmailVerificationScreen(
                                 fontFamily = MaisonNeueFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 color = AuthModernDarkGreen,
-                                fontSize = 12.5.sp
+                                fontSize = 13.5.sp
                             )
                         }
                     }
@@ -2378,7 +2378,7 @@ fun ModernEmailVerificationScreen(
                             )
                             Text(
                                 text = errorMessage,
-                                fontSize = 12.sp,
+                                fontSize = 13.sp,
                                 color = Color(0xFF991B1B),
                                 lineHeight = 16.sp,
                                 maxLines = 3
@@ -2516,7 +2516,7 @@ fun ModernPasscodeKeypad(
                                 Text(
                                     text = "Clear",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.sp,
+                                    fontSize = 13.5.sp,
                                     fontWeight = FontWeight.SemiBold,
                                     color = Color(0xFF64748B)
                                 )

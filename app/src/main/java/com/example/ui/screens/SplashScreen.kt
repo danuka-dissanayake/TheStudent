@@ -282,7 +282,7 @@ private fun SplashFeatureChip(
                 text = label,
                 fontFamily = RobotoFontFamily,
                 fontWeight = FontWeight.Bold,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 color = Color(0xFF1E293B)
             )
         }
@@ -460,7 +460,7 @@ fun SplashScreen(
                             text = "Everything a Student Needs",
                             fontFamily = RobotoFontFamily,
                             fontWeight = FontWeight.Bold,
-                            fontSize = 12.5.sp,
+                            fontSize = 13.5.sp,
                             color = Color(0xFF16A34A),
                             letterSpacing = 0.2.sp
                         )

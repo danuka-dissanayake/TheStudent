@@ -340,7 +340,7 @@ fun ProfileSetupScreen(
                             "Sign out",
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             fontWeight = FontWeight.Medium,
-                            fontSize = 13.sp
+                            fontSize = 13.5.sp
                         )
                     }
                 }
@@ -697,7 +697,7 @@ private fun AvatarPicker(
                             fontWeight = FontWeight.SemiBold,
                             color = EmeraldPrimary,
                             textAlign = TextAlign.Center,
-                            lineHeight = 15.sp
+                            lineHeight = 19.sp
                         )
                     }
                 }

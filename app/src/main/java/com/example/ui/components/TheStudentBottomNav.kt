@@ -252,7 +252,7 @@ private fun NavTabItem(
         Spacer(modifier = Modifier.height(3.dp))
         Text(
             text = tab.title,
-            fontSize = 11.5.sp,
+            fontSize = 12.5.sp,
             fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Medium,
             color = iconColor,
             maxLines = 1
