@@ -356,7 +356,7 @@ private fun CourseCatalogBrowse(
 
             if (isLoading) {
                 item(key = "skeleton") {
-                    CatalogSkeleton(shimmer = shimmer, showRails = !filtering)
+                    CatalogSkeleton(brush = shimmer, showRails = !filtering)
                 }
             } else {
                 if (!filtering && featured.isNotEmpty()) {
