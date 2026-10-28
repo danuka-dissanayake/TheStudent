@@ -136,6 +136,21 @@ object TheStudentChatClient {
         post(backendBaseUrl, token, "set_key", payload) { identity.publicKeyBase64 }
     }
 
+    /**
+     * The chat API version this host is running.
+     *
+     * `?action=version` is deliberately public (no token needed), so the same
+     * URL can be opened in a browser to confirm which file was actually
+     * uploaded. The app uses it to warn once when the host is behind the build
+     * instead of silently missing features.
+     */
+    suspend fun fetchApiVersion(
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<String> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "version") { json -> json.optString("api_version") }
+    }
+
     // -----------------------------------------------------------------------
     // Help requests
     // -----------------------------------------------------------------------

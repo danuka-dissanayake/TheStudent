@@ -194,6 +194,7 @@ fun ChatScreen(
                 viewModel.closeChatProfile()
                 viewModel.openChat(viewedProfile.peer)
             },
+            onAskForHelp = { viewModel.openChatForHelp(viewedProfile.peer) },
             modifier = modifier
         )
         return
@@ -223,6 +224,7 @@ fun ChatScreen(
             onAcceptHelp = { viewModel.acceptHelpRequest() },
             onCompleteHelp = { viewModel.completeHelpRequest() },
             onCancelHelp = { viewModel.cancelHelpRequest() },
+            onOpenIntent = { viewModel.openChatIntent() },
             modifier = modifier
         )
 
@@ -654,6 +656,7 @@ private fun ChatPeerProfileScreen(
     isLoading: Boolean,
     onBack: () -> Unit,
     onMessage: () -> Unit,
+    onAskForHelp: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val peer = profile.peer
@@ -757,35 +760,82 @@ private fun ChatPeerProfileScreen(
                         textAlign = TextAlign.Center
                     )
                     Spacer(Modifier.height(20.dp))
-                    // Only the Message button: there is no block / mute on the
-                    // relay yet, so the "..." of the mockup would be a dead tap.
-                    Surface(
-                        onClick = onMessage,
-                        shape = RoundedCornerShape(50),
-                        color = EmeraldPrimary,
-                        shadowElevation = 8.dp,
+                    // Message plus Ask for help, side by side and equal
+                    // width so they fit any phone: two fixed-width capsules
+                    // overflowed the hero on a 360 dp screen. There is still no
+                    // block / mute on the relay, so the mockup's "..." stays
+                    // out — the help request is a real, server-backed action.
+                    Row(
                         modifier = Modifier
-                            .height(46.dp)
-                            .testTag("chat_profile_message")
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 26.dp)
+                        Surface(
+                            onClick = onMessage,
+                            shape = RoundedCornerShape(50),
+                            color = EmeraldPrimary,
+                            shadowElevation = 8.dp,
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("chat_profile_message")
                         ) {
-                            Icon(
-                                Icons.AutoMirrored.Filled.Send,
-                                contentDescription = null,
-                                tint = Color.White,
-                                modifier = Modifier.size(16.dp)
-                            )
-                            Spacer(Modifier.width(9.dp))
-                            Text(
-                                text = "Message",
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Color.White
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Message",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+
+                        Surface(
+                            onClick = onAskForHelp,
+                            shape = RoundedCornerShape(50),
+                            color = Color.White,
+                            border = BorderStroke(1.5.dp, Color(0xFFA7F3D0)),
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(46.dp)
+                                .testTag("chat_profile_help")
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.Center,
+                                modifier = Modifier.fillMaxSize()
+                            ) {
+                                Icon(
+                                    Icons.Default.Forum,
+                                    contentDescription = null,
+                                    tint = EmeraldDark,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(8.dp))
+                                Text(
+                                    text = "Ask for help",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 13.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldDark,
+                                    maxLines = 1
+                                )
+                            }
                         }
                     }
                 }
@@ -1576,6 +1626,7 @@ private fun ChatConversationScreen(
     onAcceptHelp: () -> Unit = {},
     onCompleteHelp: () -> Unit = {},
     onCancelHelp: () -> Unit = {},
+    onOpenIntent: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -1887,6 +1938,23 @@ private fun ChatConversationScreen(
                             expanded = showMenu,
                             onDismissRequest = { showMenu = false }
                         ) {
+                            // Reachable at any time, not only on a brand-new
+                            // conversation: a student often realises mid-chat
+                            // that the question needs tracking.
+                            DropdownMenuItem(
+                                text = { Text("Ask for help", fontFamily = MaisonNeueFontFamily) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Forum,
+                                        contentDescription = null,
+                                        tint = EmeraldDark
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onOpenIntent()
+                                }
+                            )
                             DropdownMenuItem(
                                 text = { Text("Clear chat", fontFamily = MaisonNeueFontFamily) },
                                 leadingIcon = {

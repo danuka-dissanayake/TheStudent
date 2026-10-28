@@ -1702,7 +1702,9 @@ switch ($action) {
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
-                'threads', 'inbox', 'send', 'read', 'typing', 'ack_safety',
+                'threads', 'profile', 'help_request', 'help_state',
+                'help_accept', 'help_close', 'help_cancel',
+                'inbox', 'send', 'read', 'typing', 'ack_safety',
                 'heartbeat', 'set_key', 'version',
             ],
         ], 400);

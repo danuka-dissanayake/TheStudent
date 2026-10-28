@@ -518,6 +518,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatPresenceJob: Job? = null
     private var chatMessagesJob: Job? = null
     private var profileJob: Job? = null
+
+    /** Set once the deployed chat API has been compared with this build. */
+    private var chatServerVersionChecked = false
     private var chatTypingJob: Job? = null
     private var chatBackgroundJob: Job? = null
     private var chatIsDirectoryVisible = false
@@ -554,6 +557,44 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
+     * Warn once when the deployed `api/chat.php` is older than this build.
+     *
+     * Every chat feature added since 2.6.0 (help requests, subjects on the
+     * profile) simply never appears on an older host, and "Unknown action" is a
+     * useless thing to show a student. One snackbar naming the file to upload is
+     * worth more than a silent missing card.
+     */
+    private suspend fun verifyChatServerVersion() {
+        if (chatServerVersionChecked) return
+        val session = chatSession() ?: return
+        val (baseUrl, token) = session
+        val version = TheStudentChatClient.fetchApiVersion(baseUrl, token).dataOrNull()
+            ?: return
+        chatServerVersionChecked = true
+        if (compareVersions(version, CHAT_MIN_SERVER_VERSION) < 0) {
+            _uiState.update {
+                it.copy(
+                    snackbarMessage = "Chat server is v$version but this build needs " +
+                        "$CHAT_MIN_SERVER_VERSION. Upload backend/api/chat.php."
+                )
+            }
+        }
+    }
+
+    /** "2.10.1" vs "2.6.0" by numeric segment. Unknown shapes count as newer. */
+    private fun compareVersions(a: String, b: String): Int {
+        val left = a.split(".").mapNotNull { it.trim().toIntOrNull() }
+        val right = b.split(".").mapNotNull { it.trim().toIntOrNull() }
+        if (left.isEmpty() || right.isEmpty()) return 0
+        for (index in 0 until maxOf(left.size, right.size)) {
+            val l = left.getOrElse(index) { 0 }
+            val r = right.getOrElse(index) { 0 }
+            if (l != r) return l.compareTo(r)
+        }
+        return 0
+    }
+
+    /**
      * Called when the chat tab becomes visible: publishes the encryption key,
      * loads the directory and starts the relay + presence loops.
      */
@@ -563,6 +604,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         chatDirectoryJob?.cancel()
         chatDirectoryJob = viewModelScope.launch {
+            verifyChatServerVersion()
             publishChatIdentityIfNeeded()
             refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty())
             while (true) {
@@ -1003,6 +1045,25 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Open the intent sheet for the conversation that is already on screen. */
+    fun openChatIntent() {
+        val peer = _chatState.value.activePeer ?: return
+        _chatState.update { it.copy(chatIntentPeer = peer) }
+    }
+
+    /**
+     * Open a conversation straight into the help composer.
+     *
+     * Used by the "Ask for help" button on a student's profile, so a student who
+     * already knows who they want to ask does not have to find the conversation
+     * menu afterwards.
+     */
+    fun openChatForHelp(peer: ChatPeer) {
+        closeChatProfile()
+        openChat(peer)
+        _chatState.update { it.copy(chatIntentPeer = peer) }
+    }
+
     /** Dismiss the intent sheet without opening a help request. */
     fun dismissChatIntent() {
         _chatState.update { it.copy(chatIntentPeer = null) }
@@ -1045,12 +1106,24 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 is ChatResult.Failure -> {
                     _chatState.update { it.copy(isHelpBusy = false) }
                     if (!result.isNetworkFailure) {
-                        _uiState.update { it.copy(snackbarMessage = result.message) }
+                        _uiState.update { it.copy(snackbarMessage = chatFailureMessage(result.message)) }
                     }
                 }
             }
         }
     }
+
+    /**
+     * Turn an "unknown action" reply into something actionable: it means the
+     * uploaded api/chat.php predates this build, not that the tap was wrong.
+     */
+    private fun chatFailureMessage(raw: String): String =
+        if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
+            "This server is running an older chat API. Upload backend/api/chat.php " +
+                "(needs version 2.6.0 or newer)."
+        } else {
+            raw
+        }
 
     /** Helper accepts the request. */
     fun acceptHelpRequest() {
@@ -1094,7 +1167,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 is ChatResult.Failure -> {
                     _chatState.update { it.copy(isHelpBusy = false) }
                     if (!result.isNetworkFailure) {
-                        _uiState.update { it.copy(snackbarMessage = result.message) }
+                        _uiState.update { it.copy(snackbarMessage = chatFailureMessage(result.message)) }
                     }
                 }
             }
@@ -1857,6 +1930,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         const val CHAT_MAX_ATTACHMENT_BYTES = 25L * 1024L * 1024L
         /** How long to wait before retrying a blob the relay no longer has. */
         const val CHAT_ATTACHMENT_RETRY_MS = 60_000L
+        /**
+         * Oldest `api/chat.php` this build works with. Bump it whenever a new
+         * action is added, so a host that was never updated says so out loud
+         * instead of silently hiding the feature.
+         */
+        const val CHAT_MIN_SERVER_VERSION = "2.6.0"
     }
 
     fun uploadNewPaper(paper: PastPaper) {
@@ -2190,8 +2269,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 is AuthApiResult.Error -> {
+                    // The usual cause of this exact message is a host still
+                    // serving an older api/auth.php. Say so instead of leaving
+                    // the student with "Invalid API action".
+                    val message = if (result.message.contains("Invalid API action", true)) {
+                        "Your server is running an older API. Upload backend/api/auth.php " +
+                            "(needs version 3.3.0 or newer), then try again."
+                    } else {
+                        result.message
+                    }
                     _uiState.update {
-                        it.copy(isSavingAcademic = false, academicSetupError = result.message)
+                        it.copy(isSavingAcademic = false, academicSetupError = message)
                     }
                     if (result.invalidatesSession) {
                         endSession(result.message, revokeOnServer = false)
