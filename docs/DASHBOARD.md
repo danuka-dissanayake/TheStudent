@@ -13,7 +13,7 @@ with dots, paper codes, quizzes rail) and `designs/23-sidebar-new.png` (drawer).
 | Block | What it shows | Where the data comes from |
 |---|---|---|
 | Greeting | 17sp emerald greeting, then the student's **full name** at 36sp — no streak, date, exam or stream line underneath | `UserProfile.name / academicLevel / streamOrDegree`, `StudyMetrics.today()`, `max(summary.streakDays, userProfile.streakDays)` |
-| EXP medals | the same `ExpMedalsCard` the profile shows: current medallion, `Level N · Name`, EXP to the next rung, a gradient progress bar and the five-rung ladder (earned in colour, the rest greyed); taps open the EXP page | `UserExp` (`expState`) |
+| EXP medals | the same `ExpMedalsCard` the profile shows: current medallion, `Level N · Name`, EXP to the next rung, a gradient progress bar and the five-rung ladder (earned in colour, the rest greyed); earned medals carry a slow sheen that ripples along the ladder; taps open the EXP page | `UserExp` (`expState`) |
 | Report card | white card: 104dp emerald accuracy ring, three KPI rows (`4 of 6` passed · `2h 15m` studied · `240 XP`), a three-segment accuracy bar with legend, the emerald CTA and `Full report` | `QuizProgressSummary.averagePercent / quizzesPassed / quizzesPublished / durationSeconds / expFromQuizzes`; segments from `subjects[].accuracy` |
 | Quick actions | Ask AI · Courses · Papers · **Quizzes** | `onOpenAiAssistant`, `onOpenCourseCollection`, `onNavigateTab(PAPERS)`, `onOpenQuizzes` |
 | This week | up to four subject accuracy bars, seven weekday bars on pale tracks, `best` / `attempts` / `time` chips | `QuizProgress.subjects[].accuracy`, `QuizProgress.recent[].submittedAt`, `summary.bestPercent / attempts` |

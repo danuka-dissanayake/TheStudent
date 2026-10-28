@@ -19,11 +19,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -67,13 +69,18 @@ fun formatExp(value: Int): String {
 /**
  * A hexagon badge with a star, drawn rather than an icon so it can glow, carry a
  * tier colour and grey out when it is still locked.
+ *
+ * [shinePhase] paints a sheen that sweeps across an earned badge. It is read
+ * inside the draw scope (`shinePhase()`), so animating it only invalidates the
+ * pixels — nothing recomposes.
  */
 @Composable
 fun TierMedallion(
     code: String,
     size: Dp,
     glow: Boolean,
-    earned: Boolean = true
+    earned: Boolean = true,
+    shinePhase: (() -> Float)? = null
 ) {
     val base = if (earned) expBadgeColor(code) else Color(0xFFCBD5E1)
     val light = if (earned) lerp(base, Color.White, 0.42f) else Color(0xFFE7EDF3)
@@ -134,6 +141,30 @@ fun TierMedallion(
             outer = hexRadius * 0.46f,
             color = if (earned) Color.White.copy(alpha = 0.96f) else Color(0xFFF8FAFC)
         )
+
+        // The sheen: a narrow white band travelling across the face of an earned
+        // badge, clipped to the hexagon so it reads as light on the metal.
+        if (earned && shinePhase != null) {
+            val phase = shinePhase().coerceIn(0f, 1f)
+            val travel = hexRadius * 3.2f
+            val bandCentre = center.x - hexRadius * 1.6f + travel * phase
+            val band = hexRadius * 1.1f
+            clipPath(hex) {
+                drawRect(
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            Color.Transparent,
+                            Color.White.copy(alpha = 0.62f),
+                            Color.Transparent
+                        ),
+                        start = Offset(bandCentre - band / 2f, center.y - hexRadius),
+                        end = Offset(bandCentre + band / 2f, center.y + hexRadius)
+                    ),
+                    topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
+                    size = Size(maxRadius * 2f, maxRadius * 2f)
+                )
+            }
+        }
     }
 }
 

@@ -201,7 +201,9 @@ fun HomeScreen(
                 onOpenProgress = onOpenProgress,
                 onOpenExp = onOpenExp,
                 onPractise = { if (practice != null) onContinueLearning() else onOpenQuizzes() },
-                modifier = Modifier.padding(horizontal = 18.dp)
+                modifier = Modifier
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 16.dp)
             )
         }
 

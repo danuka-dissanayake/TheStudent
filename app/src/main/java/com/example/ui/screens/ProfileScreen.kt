@@ -149,7 +149,12 @@ fun ProfileScreen(
             }
 
             item(key = "level") {
-                ExpMedalsCard(exp = exp, onOpenExp = onOpenExp)
+                // Same 16dp gutter as the cards above and below it.
+                ExpMedalsCard(
+                    exp = exp,
+                    onOpenExp = onOpenExp,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
             }
 
             item(key = "reputation") {

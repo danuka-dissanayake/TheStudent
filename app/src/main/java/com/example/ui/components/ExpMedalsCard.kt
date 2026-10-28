@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -61,6 +64,20 @@ fun ExpMedalsCard(
         label = "exp_medals_progress"
     )
 
+    // One clock for the whole card. Each earned medal reads it inside its draw
+    // scope with its own offset, so the sheen ripples along the ladder without a
+    // single recomposition.
+    val shine = rememberInfiniteTransition(label = "exp_medals_shine")
+    val shinePhase by shine.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 2400, easing = LinearEasing)
+        ),
+        label = "exp_medals_shine_phase"
+    )
+    val shinePhaseProvider: () -> Float = { shinePhase }
+
     Surface(
         shape = RoundedCornerShape(22.dp),
         color = Color.White,
@@ -71,7 +88,13 @@ fun ExpMedalsCard(
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                TierMedallion(code = exp.tier.code, size = 40.dp, glow = true)
+                TierMedallion(
+                    code = exp.tier.code,
+                    size = 40.dp,
+                    glow = true,
+                    earned = true,
+                    shinePhase = shinePhaseProvider
+                )
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
@@ -134,7 +157,7 @@ fun ExpMedalsCard(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                ExpTier.LADDER.forEach { step ->
+                ExpTier.LADDER.forEachIndexed { index, step ->
                     val earned = exp.total >= step.min
                     Column(
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -144,7 +167,13 @@ fun ExpMedalsCard(
                             code = step.code,
                             size = 32.dp,
                             glow = false,
-                            earned = earned
+                            earned = earned,
+                            // Offset per rung so the light travels along the row.
+                            shinePhase = if (earned) {
+                                { (shinePhase + index * 0.16f) % 1f }
+                            } else {
+                                null
+                            }
                         )
                         Spacer(Modifier.height(4.dp))
                         Text(

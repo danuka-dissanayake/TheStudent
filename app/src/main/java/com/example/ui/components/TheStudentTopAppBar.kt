@@ -80,7 +80,7 @@ fun TheStudentTopAppBar(
                 .fillMaxWidth()
                 .statusBarsPadding()
                 .padding(horizontal = 14.dp, vertical = 8.dp)
-                .height(48.dp),
+                .height(54.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             // ── hamburger ───────────────────────────────────────────────────
@@ -109,7 +109,7 @@ fun TheStudentTopAppBar(
                 alignment = Alignment.CenterStart,
                 modifier = Modifier
                     .weight(1f)
-                    .height(30.dp)
+                    .height(38.dp)
                     .testTag("top_bar_wordmark")
             )
 
