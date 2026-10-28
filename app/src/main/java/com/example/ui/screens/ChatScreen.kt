@@ -225,6 +225,9 @@ fun ChatScreen(
             onCompleteHelp = { viewModel.completeHelpRequest() },
             onCancelHelp = { viewModel.cancelHelpRequest() },
             onOpenIntent = { viewModel.openChatIntent() },
+            onTrackQuestion = { viewModel.trackQuestionAsHelp() },
+            onDismissQuestionOffer = { viewModel.dismissQuestionOffer() },
+            onAskAgain = { viewModel.askForHelp() },
             modifier = modifier
         )
 
@@ -236,9 +239,10 @@ fun ChatScreen(
             ChatIntentSheet(
                 peer = intentPeer,
                 suggestedSubject = chatState.mySubjects.firstOrNull().orEmpty(),
-                isBusy = chatState.isHelpBusy,
-                onStart = { purposes, wantsHelp, subject ->
-                    viewModel.startChatWithIntents(intentPeer, purposes, wantsHelp, subject)
+                currentPurpose = chatState.chatPurpose,
+                isBusy = chatState.isHelpBusy || chatState.isAskingHelp,
+                onChoose = { purpose, subject ->
+                    viewModel.applyChatPurpose(purpose, subject)
                 },
                 onDismiss = { viewModel.dismissChatIntent() }
             )
@@ -261,36 +265,124 @@ fun ChatScreen(
 //  Help requests (intent sheet + the card in the thread)
 // ─────────────────────────────────────────────────────────────────────────────
 
-private const val INTENT_HELP = "I have a question and need help from this student"
-private const val INTENT_TALK = "I just want to talk"
-private const val INTENT_NOTES = "I want to share notes / past papers"
-private const val INTENT_PARTNER = "I'm looking for a study partner"
-
-private val ChatIntentOptions = listOf(INTENT_HELP, INTENT_TALK, INTENT_NOTES, INTENT_PARTNER)
+/** Purpose code -> the words shown under the student's name in a chat. */
+private fun chatPurposeLabel(purpose: String, subject: String): String = when (purpose) {
+    "help" -> if (subject.isBlank()) "Question" else "Question · $subject"
+    "notes" -> "Notes & papers"
+    "partner" -> "Study partner"
+    "talk" -> "Chatting"
+    else -> "Just talking"
+}
 
 /**
- * The sheet shown when a conversation has no history yet.
+ * Small tappable line under the student's name in the conversation header.
  *
- * Multi-select on purpose: "I need help" and "I just want to talk" are not
- * exclusive, and a chat can be both. Only the help option creates a request —
- * the rest are context the matcher will learn from later.
+ * This is the *home* of the conversation purpose: always visible, always
+ * changeable, and it is what replaces the old blocking sheet. A student can see
+ * what this chat is and fix it in one tap without ever being interrupted while
+ * typing.
+ */
+@Composable
+private fun ChatPurposeChip(
+    purpose: String,
+    subject: String,
+    onClick: () -> Unit
+) {
+    val isHelp = purpose == "help"
+    Row(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(
+                if (isHelp) Color(0xFFE9F8F0) else Color(0xFFF1F5F9)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .testTag("chat_purpose_chip"),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Icon(
+            imageVector = if (isHelp) Icons.Default.Forum else Icons.Default.Edit,
+            contentDescription = null,
+            tint = if (isHelp) EmeraldDark else ChatMuted,
+            modifier = Modifier.size(11.dp)
+        )
+        Spacer(Modifier.width(4.dp))
+        Text(
+            text = chatPurposeLabel(purpose, subject),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 10.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (isHelp) EmeraldDark else ChatMuted,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.width(2.dp))
+        Icon(
+            Icons.Default.KeyboardArrowDown,
+            contentDescription = null,
+            tint = if (isHelp) EmeraldDark else ChatFaint,
+            modifier = Modifier.size(12.dp)
+        )
+    }
+}
+
+/** One row of the purpose sheet. */
+private data class PurposeOption(
+    val code: String,
+    val title: String,
+    val subtitle: String,
+    val icon: androidx.compose.ui.graphics.vector.ImageVector
+)
+
+/**
+ * The purpose sheet — now three rows instead of four checkboxes.
+ *
+ * Opening it is always a deliberate act (the chip, or the ⋯ menu); it never
+ * appears by itself, so the keyboard is never taken away from a student who is
+ * mid-sentence. Choosing "help" also files the request, so there is no second
+ * confirmation step.
  */
 @Composable
 private fun ChatIntentSheet(
     peer: ChatPeer,
     suggestedSubject: String,
+    currentPurpose: String,
     isBusy: Boolean,
-    onStart: (purposes: List<String>, wantsHelp: Boolean, subject: String) -> Unit,
+    onChoose: (purpose: String, subject: String) -> Unit,
     onDismiss: () -> Unit
 ) {
-    var selected by remember { mutableStateOf(emptySet<Int>()) }
+    var choice by remember(currentPurpose) {
+        mutableStateOf(
+            when (currentPurpose) {
+                "help", "talk", "notes" -> currentPurpose
+                else -> ""
+            }
+        )
+    }
     var subject by remember(suggestedSubject) { mutableStateOf(suggestedSubject) }
 
-    val wantsHelp = selected.contains(0)
-    val canStart = selected.isNotEmpty()
+    val options = listOf(
+        PurposeOption(
+            code = "help",
+            title = "I need help with something",
+            subtitle = "Tracked, so they can be rated for it",
+            icon = Icons.Default.Forum
+        ),
+        PurposeOption(
+            code = "talk",
+            title = "Just talking",
+            subtitle = "No tracking, no ratings",
+            icon = Icons.Default.EmojiEmotions
+        ),
+        PurposeOption(
+            code = "notes",
+            title = "Sharing notes or papers",
+            subtitle = "Files and past papers",
+            icon = Icons.Default.AttachFile
+        )
+    )
 
     Box(modifier = Modifier.fillMaxSize()) {
-        // Scrim: tapping outside is "not now", never a hidden help request.
         Box(
             modifier = Modifier
                 .fillMaxSize()
@@ -321,7 +413,6 @@ private fun ChatIntentSheet(
                         .background(ChatHairline, RoundedCornerShape(2.dp))
                 )
                 Spacer(Modifier.height(14.dp))
-
                 Text(
                     text = "What's this chat about?",
                     fontFamily = MaisonNeueFontFamily,
@@ -330,15 +421,15 @@ private fun ChatIntentSheet(
                     color = ChatInk
                 )
                 Text(
-                    text = "Choose any that apply · ${peer.name}",
+                    text = "Only you see this label · ${peer.name}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = 11.5.sp,
                     color = ChatMuted
                 )
-                Spacer(Modifier.height(14.dp))
+                Spacer(Modifier.height(12.dp))
 
-                ChatIntentOptions.forEachIndexed { index, label ->
-                    val isSelected = selected.contains(index)
+                options.forEach { option ->
+                    val isSelected = choice == option.code
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -347,46 +438,59 @@ private fun ChatIntentSheet(
                             .background(
                                 if (isSelected) Color(0xFFE9F8F0) else Color(0xFFF6F8FA)
                             )
-                            .clickable {
-                                selected = if (isSelected) selected - index else selected + index
-                            }
+                            .clickable { choice = option.code }
                             .padding(horizontal = 12.dp, vertical = 11.dp)
-                            .testTag("chat_intent_$index"),
+                            .testTag("chat_intent_${option.code}"),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(20.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(if (isSelected) EmeraldPrimary else Color.White),
+                                .size(34.dp)
+                                .clip(RoundedCornerShape(11.dp))
+                                .background(if (isSelected) Color(0xFFD1FAE5) else Color.White),
                             contentAlignment = Alignment.Center
                         ) {
-                            if (isSelected) {
-                                Icon(
-                                    Icons.Default.Done,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                            }
+                            Icon(
+                                imageVector = option.icon,
+                                contentDescription = null,
+                                tint = if (isSelected) EmeraldDark else ChatMuted,
+                                modifier = Modifier.size(16.dp)
+                            )
                         }
                         Spacer(Modifier.width(10.dp))
-                        Text(
-                            text = label,
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
-                            color = ChatInk
-                        )
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = option.title,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                                color = ChatInk
+                            )
+                            Text(
+                                text = option.subtitle,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 10.5.sp,
+                                color = ChatFaint
+                            )
+                        }
+                        if (isSelected) {
+                            Icon(
+                                Icons.Default.Done,
+                                contentDescription = null,
+                                tint = EmeraldPrimary,
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
                     }
                 }
 
-                if (wantsHelp) {
+                if (choice == "help") {
                     Spacer(Modifier.height(10.dp))
                     OutlinedTextField(
                         value = subject,
                         onValueChange = { subject = it.take(80) },
                         label = { Text("Subject") },
+                        placeholder = { Text("e.g. Science for Technology") },
                         singleLine = true,
                         shape = RoundedCornerShape(14.dp),
                         modifier = Modifier
@@ -398,14 +502,15 @@ private fun ChatIntentSheet(
                 Spacer(Modifier.height(16.dp))
                 Surface(
                     onClick = {
-                        if (canStart && !isBusy) {
-                            val purposes = selected.sorted().map { ChatIntentOptions[it] }
-                            onStart(purposes, wantsHelp, if (wantsHelp) subject.trim() else "")
+                        if (choice.isNotBlank() && !isBusy) {
+                            onChoose(choice, if (choice == "help") subject.trim() else "")
+                        } else {
+                            onDismiss()
                         }
                     },
-                    enabled = canStart && !isBusy,
+                    enabled = !isBusy,
                     shape = RoundedCornerShape(50),
-                    color = if (canStart && !isBusy) EmeraldPrimary else Color(0xFFCBD5E1),
+                    color = if (choice.isNotBlank() && !isBusy) EmeraldPrimary else Color(0xFFCBD5E1),
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(48.dp)
@@ -413,7 +518,12 @@ private fun ChatIntentSheet(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = if (isBusy) "Starting…" else "Start chat",
+                            text = when {
+                                isBusy -> "Saving…"
+                                choice == "help" -> "Save & ask for help"
+                                choice.isBlank() -> "Choose one"
+                                else -> "Save"
+                            },
                             fontFamily = MaisonNeueFontFamily,
                             fontSize = 14.sp,
                             fontWeight = FontWeight.Bold,
@@ -423,17 +533,115 @@ private fun ChatIntentSheet(
                 }
                 TextButton(
                     onClick = onDismiss,
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .testTag("chat_intent_skip")
+                    modifier = Modifier.align(Alignment.CenterHorizontally)
                 ) {
                     Text(
-                        text = "Just say hi",
+                        text = "Not now",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 13.sp,
                         fontWeight = FontWeight.SemiBold,
-                        color = EmeraldDark
+                        color = ChatMuted
                     )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The offer that appears **after** a message that reads like a question.
+ *
+ * Deliberately small and skippable: the message has already been sent, so the
+ * only thing asked is whether the student wants this tracked as a help request.
+ * "Not now" is remembered for the pair, forever.
+ */
+@Composable
+private fun QuestionOfferCard(
+    peerName: String,
+    isBusy: Boolean,
+    onTrack: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val firstName = peerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "they" }
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color(0xFFFFFBEB),
+        border = BorderStroke(1.dp, Color(0xFFFDE68A)),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 2.dp, bottom = 4.dp)
+            .testTag("chat_question_offer")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    Icons.Default.Forum,
+                    contentDescription = null,
+                    tint = Color(0xFFB45309),
+                    modifier = Modifier.size(16.dp)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "This looks like a question for $firstName",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ChatInk
+                )
+            }
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = "Track it so $firstName gets credit for the help — and you can rate them after.",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.sp,
+                lineHeight = 15.sp,
+                color = ChatMuted
+            )
+            Spacer(Modifier.height(10.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Surface(
+                    onClick = { if (!isBusy) onTrack() },
+                    enabled = !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = EmeraldPrimary,
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("chat_question_track")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            text = if (isBusy) "Sending…" else "Ask for help",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+                Surface(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(50),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, ChatHairline),
+                    modifier = Modifier
+                        .height(34.dp)
+                        .testTag("chat_question_dismiss")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            text = "Not now",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ChatMuted
+                        )
+                    }
                 }
             }
         }
@@ -450,10 +658,12 @@ private fun ChatIntentSheet(
 private fun HelpRequestCard(
     request: ChatHelpRequest,
     peerName: String,
+    completedCount: Int,
     isBusy: Boolean,
     onAccept: () -> Unit,
     onComplete: () -> Unit,
-    onCancel: () -> Unit
+    onCancel: () -> Unit,
+    onAskAgain: () -> Unit
 ) {
     val firstName = peerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "They" }
     val title: String
@@ -461,7 +671,11 @@ private fun HelpRequestCard(
     when {
         request.isCompleted -> {
             title = "Help completed"
-            subtitle = "You were helped with ${request.subjectLine}."
+            subtitle = if (completedCount > 1) {
+                "You've been helped $completedCount times — last one: ${request.subjectLine}."
+            } else {
+                "You were helped with ${request.subjectLine}."
+            }
         }
         request.status == "accepted" -> {
             title = if (request.isSeeker) "Help accepted" else "You're helping with ${request.subjectLine}"
@@ -633,6 +847,44 @@ private fun HelpRequestCard(
                     fontSize = 11.sp,
                     color = ChatFaint
                 )
+            } else if (request.isCompleted) {
+                // Closed once does not mean closed forever: students come back
+                // to the same person with the next question, so the loop has to
+                // be reopenable from the same card.
+                Spacer(Modifier.height(10.dp))
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = { if (!isBusy) onAskAgain() },
+                        enabled = !isBusy,
+                        shape = RoundedCornerShape(50),
+                        color = EmeraldPrimary,
+                        modifier = Modifier
+                            .height(34.dp)
+                            .testTag("chat_help_again")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 14.dp)
+                        ) {
+                            Text(
+                                text = if (isBusy) "Sending…" else "Ask again",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Text(
+                        text = "Next question, same student",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        color = ChatMuted
+                    )
+                }
             }
         }
     }
@@ -1542,15 +1794,40 @@ private fun ChatThreadRow(
                     overflow = TextOverflow.Ellipsis
                 )
                 Spacer(Modifier.height(3.dp))
-                Text(
-                    text = preview,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
-                    color = if (peer.isTyping) EmeraldPrimary else ChatMuted,
-                    fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    // What this chat is about, so fifteen rows are readable at a
+                    // glance instead of fifteen identical previews.
+                    if (thread.purposeLine.isNotBlank() && !peer.isTyping) {
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (thread.purpose == "help") Color(0xFFE9F8F0)
+                                    else Color(0xFFF1F5F9)
+                                )
+                                .padding(horizontal = 6.dp, vertical = 1.dp)
+                        ) {
+                            Text(
+                                text = thread.purposeLine,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 9.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = if (thread.purpose == "help") EmeraldDark else ChatMuted,
+                                maxLines = 1
+                            )
+                        }
+                        Spacer(Modifier.width(6.dp))
+                    }
+                    Text(
+                        text = preview,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.5.sp,
+                        color = if (peer.isTyping) EmeraldPrimary else ChatMuted,
+                        fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
             }
 
             Spacer(Modifier.width(10.dp))
@@ -1627,6 +1904,9 @@ private fun ChatConversationScreen(
     onCompleteHelp: () -> Unit = {},
     onCancelHelp: () -> Unit = {},
     onOpenIntent: () -> Unit = {},
+    onTrackQuestion: () -> Unit = {},
+    onDismissQuestionOffer: () -> Unit = {},
+    onAskAgain: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -1881,18 +2161,31 @@ private fun ChatConversationScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Text(
-                            text = peer.presenceLabel,
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
-                            fontWeight = FontWeight.Medium,
-                            color = when {
-                                peer.isTyping -> EmeraldPrimary
-                                peer.isOnline -> ChatOnline
-                                else -> ChatMuted
-                            },
-                            maxLines = 1
-                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = peer.presenceLabel,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = when {
+                                    peer.isTyping -> EmeraldPrimary
+                                    peer.isOnline -> ChatOnline
+                                    else -> ChatMuted
+                                },
+                                maxLines = 1,
+                                // Shrink the presence text before the purpose chip:
+                                // the label is the thing that must stay readable.
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(Modifier.width(6.dp))
+                            // The purpose lives here, one tap away, for the whole
+                            // life of the conversation — no gate before typing.
+                            ChatPurposeChip(
+                                purpose = state.chatPurpose,
+                                subject = state.chatPurposeSubject,
+                                onClick = onOpenIntent
+                            )
+                        }
                     }
 
                     Surface(
@@ -2162,10 +2455,12 @@ private fun ChatConversationScreen(
                                             HelpRequestCard(
                                                 request = help,
                                                 peerName = peer.name,
-                                                isBusy = state.isHelpBusy,
+                                                completedCount = state.helpCompletedWithPeer,
+                                                isBusy = state.isHelpBusy || state.isAskingHelp,
                                                 onAccept = onAcceptHelp,
                                                 onComplete = onCompleteHelp,
-                                                onCancel = onCancelHelp
+                                                onCancel = onCancelHelp,
+                                                onAskAgain = onAskAgain
                                             )
                                         }
                                     }
@@ -2198,6 +2493,19 @@ private fun ChatConversationScreen(
 
                                 if (peer.isTyping) {
                                     item { TypingIndicator() }
+                                }
+
+                                // Offered only after a question was sent, and
+                                // only once per pair: the message already went.
+                                if (state.questionOfferVisible) {
+                                    item(key = "question-offer") {
+                                        QuestionOfferCard(
+                                            peerName = peer.name,
+                                            isBusy = state.isAskingHelp,
+                                            onTrack = onTrackQuestion,
+                                            onDismiss = onDismissQuestionOffer
+                                        )
+                                    }
                                 }
                             }
                         }

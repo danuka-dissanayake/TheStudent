@@ -107,6 +107,34 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getString(KEY_USER_NAME, null)
         set(value) = prefs.edit().putString(KEY_USER_NAME, value).apply()
 
+    /**
+     * Peers whose "looks like a question — track it?" offer was dismissed.
+     *
+     * Persisted so the app never nags the same person twice *ever*, not just
+     * until the next restart. Newest ids are kept at the front and the list is
+     * trimmed, because this only ever needs to remember recent chats.
+     */
+    var questionOfferDismissals: Set<Int>
+        get() = prefs.getString(KEY_QUESTION_DISMISSALS, "")
+            .orEmpty()
+            .split(',')
+            .mapNotNull { it.trim().toIntOrNull() }
+            .toSet()
+        set(value) {
+            prefs.edit()
+                .putString(KEY_QUESTION_DISMISSALS, value.joinToString(","))
+                .apply()
+        }
+
+    /** Remember that a student said "not now" for this peer (newest first). */
+    fun rememberQuestionOfferDismissal(peerId: Int) {
+        val ordered = (listOf(peerId) + questionOfferDismissals.filterNot { it == peerId })
+            .take(LAST_DISMISSALS_KEPT)
+        prefs.edit()
+            .putString(KEY_QUESTION_DISMISSALS, ordered.joinToString(","))
+            .apply()
+    }
+
     fun hasUsableSession(): Boolean {
         val token = sessionToken
         return !token.isNullOrBlank() && isLoggedIn
@@ -142,6 +170,8 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_USER_ROLE = "user_role"
         private const val KEY_USER_EMAIL = "user_email"
         private const val KEY_USER_NAME = "user_name"
+        private const val KEY_QUESTION_DISMISSALS = "question_offer_dismissals"
+        private const val LAST_DISMISSALS_KEPT = 40
 
         const val ROLE_STUDENT = "student"
         const val ROLE_ADMIN = "admin"

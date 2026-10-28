@@ -6,6 +6,7 @@ import com.example.data.local.ChatCrypto
 import com.example.data.model.ChatDirectory
 import com.example.data.model.ChatEnvelope
 import com.example.data.model.ChatHelpRequest
+import com.example.data.model.ChatHelpState
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
@@ -178,15 +179,44 @@ object TheStudentChatClient {
         }
     }
 
-    /** Latest request between me and [peerId], or null when there is none. */
+    /** Latest request between me and [peerId] plus the surrounding counts. */
     suspend fun fetchHelpState(
         backendBaseUrl: String,
         token: String,
         peerId: Int
-    ): ChatResult<ChatHelpRequest?> = withContext(Dispatchers.IO) {
+    ): ChatResult<ChatHelpState> = withContext(Dispatchers.IO) {
         get(backendBaseUrl, token, "help_state", query = "peer_id=$peerId") { json ->
-            parseHelpRequest(json.optJSONObject("request"))
+            ChatHelpState(
+                request = parseHelpRequest(json.optJSONObject("request")),
+                completedWithPeer = json.optInt("completed_with_peer", 0),
+                myOpenRequests = json.optInt("my_open_requests", 0),
+                purpose = json.optString("purpose"),
+                purposeSubject = json.optString("purpose_subject")
+            )
         }
+    }
+
+    /**
+     * Declare what a conversation is about. Fire-and-forget from the UI's point
+     * of view: a failure is logged, never shown, because the label is a nicety
+     * and the chat itself must not be interrupted.
+     */
+    suspend fun setPurpose(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int,
+        purpose: String,
+        subjectLabel: String
+    ): ChatResult<Unit> = withContext(Dispatchers.IO) {
+        post(
+            backendBaseUrl,
+            token,
+            "set_purpose",
+            JSONObject()
+                .put("peer_id", peerId)
+                .put("purpose", purpose)
+                .put("subject_label", subjectLabel)
+        ) { }
     }
 
     /** accept / close / cancel — the server decides who is allowed to. */
@@ -256,7 +286,9 @@ object TheStudentChatClient {
                 threads += ChatThread(
                     peer = parsePeer(obj.optJSONObject("peer") ?: JSONObject()).copy(
                         isTyping = obj.optBoolean("is_typing", false)
-                    )
+                    ),
+                    purpose = obj.optString("purpose"),
+                    purposeSubject = obj.optString("purpose_subject")
                 )
             }
             ChatDirectory(

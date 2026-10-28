@@ -142,6 +142,10 @@ plus a local Room table that owns the actual history.
   transaction; the app owns the catalog (`AcademicCatalog`), the server owns
   the shape (exactly 3 distinct subjects, one per O/L bucket, sane year).
   Matching must JOIN `user_subjects`, never `LIKE` on the free text.
+* **The chat purpose is a label, never a gate.** It lives in `chat_purposes`
+  (per owner + peer) and is mirrored into the chat list. The ask is always
+  *after* the action: the app never blocks the composer, and the offer to track
+  a question appears only once the message has been sent.
 * **Help requests are the only path to a rating.** `chat_help_requests`:
   pending → accepted → completed (or cancelled / expired). The helper accepts,
   **only the seeker can close** (they are the only person who knows whether the

@@ -198,6 +198,15 @@ data class ChatUiState(
     val mySubjects: List<String> = emptyList(),
     /** True while accept / close / cancel is in flight. */
     val isHelpBusy: Boolean = false,
+    /** What this conversation is about: "" | help | talk | notes | partner. */
+    val chatPurpose: String = "",
+    val chatPurposeSubject: String = "",
+    /** How many help requests this pair has already closed (drives "ask again"). */
+    val helpCompletedWithPeer: Int = 0,
+    /** The "this looks like a question — track it?" offer is on screen. */
+    val questionOfferVisible: Boolean = false,
+    /** True while a help request is being created (auto or from the sheet). */
+    val isAskingHelp: Boolean = false,
     /** True once this device's encryption key is what the server published. */
     val isEncryptionReady: Boolean = false,
     /** Image or document picked in the composer, not sent yet. */
@@ -521,6 +530,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Set once the deployed chat API has been compared with this build. */
     private var chatServerVersionChecked = false
+
+    /** Purpose per peer, mirrored from the directory so rows keep their label. */
+    private var chatPurposes: Map<Int, Pair<String, String>> = emptyMap()
+
+    /** Day bucket + count for the "track this question?" offer budget. */
+    private var offerBudgetDay = 0L
+    private var offersMadeToday = 0
     private var chatTypingJob: Job? = null
     private var chatBackgroundJob: Job? = null
     private var chatIsDirectoryVisible = false
@@ -729,6 +745,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val directory = result.dataOrNull()
         if (directory != null) {
             chatPeers = directory.threads.map { it.peer }
+            // Purposes come with the directory; cached so rebuilding the rows
+            // (after a local change) does not need another round trip.
+            chatPurposes = directory.threads.associate {
+                it.peer.id to (it.purpose to it.purposeSubject)
+            }
             val localKey = ChatCrypto.publicKeyBase64(appContext, chatAccountKey)
             val encryptionReady = !localKey.isNullOrBlank() &&
                 (directory.myPublicKey.isNullOrBlank() || directory.myPublicKey == localKey)
@@ -775,12 +796,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     "📎 " + (summary.lastAttachmentName ?: "Attachment")
                 else -> summary.lastBody
             }
+            val purpose = chatPurposes[peer.id]
             ChatThread(
                 peer = peer,
                 lastMessage = preview,
                 lastMessageIsMine = summary?.lastIsMine ?: false,
                 lastMessageEpoch = summary?.lastEpoch ?: 0L,
-                unreadCount = summary?.unreadCount ?: 0
+                unreadCount = summary?.unreadCount ?: 0,
+                purpose = purpose?.first.orEmpty(),
+                purposeSubject = purpose?.second.orEmpty()
             )
         }.sortedWith(
             compareByDescending<ChatThread> { it.lastMessageEpoch > 0L }
@@ -937,7 +961,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 activePeer = peer,
                 messages = emptyList(),
                 isLoadingMessages = true,
-                errorMessage = null
+                errorMessage = null,
+                questionOfferVisible = false,
+                isAskingHelp = false
             )
         }
         _uiState.update { it.copy(isChatConversationOpen = true) }
@@ -951,9 +977,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val openedAt = System.currentTimeMillis()
             var firstEmission = true
             chatDao.observeConversation(peer.id).collect { rows ->
-                // Read the flag before clearing it: the intent sheet decision
-                // below depends on "is this the very first emission".
-                val isFirstEmission = firstEmission
                 if (firstEmission) {
                     firstEmission = false
                     val elapsed = System.currentTimeMillis() - openedAt
@@ -962,10 +985,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 _chatState.update {
                     it.copy(
                         isLoadingMessages = false,
-                        messages = rows.map { row -> row.toChatMessage() },
-                        // Only a conversation with no history gets the
-                        // "what's this chat about?" sheet, and only once.
-                        chatIntentPeer = if (isFirstEmission && rows.isEmpty()) peer else it.chatIntentPeer
+                        messages = rows.map { row -> row.toChatMessage() }
                     )
                 }
             }
@@ -1037,11 +1057,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val session = chatSession() ?: return
         viewModelScope.launch {
             val (baseUrl, token) = session
-            val request = TheStudentChatClient.fetchHelpState(baseUrl, token, peerId)
-                .dataOrNull()
+            val state = TheStudentChatClient.fetchHelpState(baseUrl, token, peerId)
+                .dataOrNull() ?: return@launch
             // Ignore a response that lands after the student closed the chat.
             if (chatActivePeerId != peerId) return@launch
-            _chatState.update { it.copy(helpRequest = request) }
+            _chatState.update {
+                it.copy(
+                    helpRequest = state.request,
+                    helpCompletedWithPeer = state.completedWithPeer,
+                    chatPurpose = state.purpose,
+                    chatPurposeSubject = state.purposeSubject,
+                    // A tracked request means the offer has been taken up.
+                    questionOfferVisible = if (state.request != null) false
+                        else it.questionOfferVisible
+                )
+            }
         }
     }
 
@@ -1061,7 +1091,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun openChatForHelp(peer: ChatPeer) {
         closeChatProfile()
         openChat(peer)
-        _chatState.update { it.copy(chatIntentPeer = peer) }
+        // No sheet, no subject field: the student already said what they want by
+        // tapping "Ask for help", and the subject comes from their profile.
+        askForHelp()
     }
 
     /** Dismiss the intent sheet without opening a help request. */
@@ -1070,41 +1102,101 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Called by the intent sheet when the chat starts.
+     * Remember what this conversation is about.
      *
-     * A help request is only created when the student ticked "I have a question
-     * and need help" — the other purposes are just context, and creating a
-     * request nobody asked for would pollute the helper's screen.
+     * The label is a nicety, so a failure is only logged into the snackbar-free
+     * path: the chat itself must never be interrupted by it.
      */
-    fun startChatWithIntents(
-        peer: ChatPeer,
-        purposes: List<String>,
-        wantsHelp: Boolean,
-        subjectLabel: String
-    ) {
-        _chatState.update { it.copy(chatIntentPeer = null) }
-        if (!wantsHelp) return
+    fun setChatPurpose(purpose: String, subjectLabel: String = "") {
+        val peer = _chatState.value.activePeer ?: return
+        val session = chatSession() ?: return
+        _chatState.update {
+            it.copy(
+                chatPurpose = purpose,
+                chatPurposeSubject = subjectLabel,
+                chatIntentPeer = null
+            )
+        }
+        // The chat list shows the same label, so refresh it without waiting for
+        // the next directory poll.
+        chatPurposes = chatPurposes + (peer.id to (purpose to subjectLabel))
+        rebuildChatThreads()
+        viewModelScope.launch {
+            TheStudentChatClient.setPurpose(
+                backendBaseUrl = session.first,
+                token = session.second,
+                peerId = peer.id,
+                purpose = purpose,
+                subjectLabel = subjectLabel
+            )
+        }
+    }
+
+    /**
+     * The purpose sheet answered: label the chat, and for "help" also open a
+     * tracked request so the student does not have to confirm twice.
+     */
+    fun applyChatPurpose(purpose: String, subjectLabel: String = "") {
+        setChatPurpose(purpose, subjectLabel)
+        if (purpose == "help") askForHelp(subjectLabel)
+    }
+
+    /**
+     * Create a help request for the open conversation.
+     *
+     * Called from three places that all mean the same thing — the student
+     * confirmed they want help tracked: the offer after a question, the
+     * conversation menu, and the profile's "Ask for help". The subject comes
+     * from the student's own profile, so there is nothing to fill in.
+     */
+    fun askForHelp(subjectLabel: String? = null) {
+        val peer = _chatState.value.activePeer ?: return
+        if (_chatState.value.isAskingHelp) return
+
+        val subject = subjectLabel?.trim().orEmpty()
+            .ifBlank { _chatState.value.mySubjects.firstOrNull().orEmpty() }
 
         val session = chatSession() ?: return
+        _chatState.update { it.copy(isAskingHelp = true, questionOfferVisible = false) }
+
         viewModelScope.launch {
-            val (baseUrl, token) = session
-            _chatState.update { it.copy(isHelpBusy = true) }
             val result = TheStudentChatClient.createHelpRequest(
-                backendBaseUrl = baseUrl,
-                token = token,
+                backendBaseUrl = session.first,
+                token = session.second,
                 peerId = peer.id,
-                subjectCode = subjectLabel.trim().lowercase(Locale.US)
+                subjectCode = subject.lowercase(Locale.US)
                     .replace(Regex("[^a-z0-9]+"), "_")
                     .trim('_'),
-                subjectLabel = subjectLabel.trim(),
-                purposes = purposes
+                subjectLabel = subject,
+                purposes = listOf(INTENT_HELP_LABEL)
             )
             when (result) {
                 is ChatResult.Success -> {
-                    _chatState.update { it.copy(isHelpBusy = false, helpRequest = result.data) }
+                    _chatState.update {
+                        it.copy(
+                            isAskingHelp = false,
+                            helpRequest = result.data ?: it.helpRequest,
+                            chatPurpose = "help",
+                            chatPurposeSubject = subject
+                        )
+                    }
+                    _uiState.update {
+                        it.copy(
+                            snackbarMessage = "${peer.name.split(" ").firstOrNull().orEmpty()} " +
+                                "will see your request — close it once it's answered."
+                        )
+                    }
+                    // Keep the server-side label in step with the request.
+                    TheStudentChatClient.setPurpose(
+                        backendBaseUrl = session.first,
+                        token = session.second,
+                        peerId = peer.id,
+                        purpose = "help",
+                        subjectLabel = subject
+                    )
                 }
                 is ChatResult.Failure -> {
-                    _chatState.update { it.copy(isHelpBusy = false) }
+                    _chatState.update { it.copy(isAskingHelp = false) }
                     if (!result.isNetworkFailure) {
                         _uiState.update { it.copy(snackbarMessage = chatFailureMessage(result.message)) }
                     }
@@ -1113,17 +1205,74 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** The offer under a sent question: yes, track it. */
+    fun trackQuestionAsHelp() {
+        askForHelp()
+    }
+
     /**
-     * Turn an "unknown action" reply into something actionable: it means the
-     * uploaded api/chat.php predates this build, not that the tap was wrong.
+     * The offer under a sent question: not now.
+     *
+     * Remembered per peer on the device, so the same student is never asked
+     * twice — the whole point of moving the question out of the way.
      */
-    private fun chatFailureMessage(raw: String): String =
-        if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
-            "This server is running an older chat API. Upload backend/api/chat.php " +
-                "(needs version 2.6.0 or newer)."
-        } else {
-            raw
+    fun dismissQuestionOffer() {
+        val peer = _chatState.value.activePeer ?: return
+        preferences.rememberQuestionOfferDismissal(peer.id)
+        _chatState.update { it.copy(questionOfferVisible = false) }
+    }
+
+    /**
+     * After a message is stored: is this the first thing that clearly reads like
+     * a question, in a pair with no help request yet?
+     *
+     * Deliberately conservative — a few strong signals only, because a false
+     * positive costs a card the student has to dismiss:
+     *   • it ends with "?"  OR  starts with a request word ("can you", "help",
+     *     "how do i", "explain", …),
+     *   • the conversation has no request at all,
+     *   • the student has never dismissed the offer for this peer,
+     *   • at most two offers per day, app-wide.
+     */
+    private fun maybeOfferQuestionTracking(text: String, peerId: Int) {
+        if (_chatState.value.helpRequest != null) return
+        if (_chatState.value.questionOfferVisible) return
+        if (preferences.questionOfferDismissals.contains(peerId)) return
+        if (!looksLikeQuestion(text)) return
+        if (!rollOfferBudget()) return
+        _chatState.update { it.copy(questionOfferVisible = true) }
+    }
+
+    /** True when [text] reads like a request for help rather than small talk. */
+    private fun looksLikeQuestion(text: String): Boolean {
+        val trimmed = text.trim()
+        if (trimmed.length < 8) return false
+        val lower = trimmed.lowercase(Locale.US)
+        if (lower.endsWith("?")) return true
+        val openers = listOf(
+            "can you", "could you", "can u", "help me", "help with", "how do i",
+            "how to", "explain", "what is", "why is", "solve", "machan can",
+            "any idea", "do you know", "need help", "teach me"
+        )
+        return openers.any { lower.startsWith(it) || lower.contains(" $it") }
+    }
+
+    /**
+     * At most two offers a day across every conversation.
+     *
+     * Stored in memory: a restart granting two more is harmless, and it avoids
+     * another preferences key for something this soft.
+     */
+    private fun rollOfferBudget(): Boolean {
+        val today = System.currentTimeMillis() / 86_400_000L
+        if (offerBudgetDay != today) {
+            offerBudgetDay = today
+            offersMadeToday = 0
         }
+        if (offersMadeToday >= MAX_OFFERS_PER_DAY) return false
+        offersMadeToday += 1
+        return true
+    }
 
     /** Helper accepts the request. */
     fun acceptHelpRequest() {
@@ -1198,7 +1347,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 voiceNoteElapsedMs = 0L,
                 helpRequest = null,
                 chatIntentPeer = null,
-                isHelpBusy = false
+                isHelpBusy = false,
+                questionOfferVisible = false,
+                isAskingHelp = false,
+                helpCompletedWithPeer = 0
             )
         }
         _uiState.update { it.copy(isChatConversationOpen = false) }
@@ -1322,6 +1474,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     replyToPreview = reply?.preview
                 )
             )
+
+            // Offer to track this as a help request *after* the message is on
+            // its way: the offer must never stand between the student and
+            // sending the question they came here to ask.
+            maybeOfferQuestionTracking(body, peer.id)
 
             val result = TheStudentChatClient.sendMessage(
                 context = appContext,
@@ -1936,6 +2093,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
          * instead of silently hiding the feature.
          */
         const val CHAT_MIN_SERVER_VERSION = "2.6.0"
+        /** Two "track this question?" offers a day, app-wide, is plenty. */
+        private const val MAX_OFFERS_PER_DAY = 2
+        /** Purpose string the server stores for a tracked question. */
+        const val INTENT_HELP_LABEL = "I have a question and need help from this student"
     }
 
     fun uploadNewPaper(paper: PastPaper) {

@@ -65,7 +65,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.6.0';
+const TS_CHAT_API_VERSION          = '2.7.0';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 600;  // accept -> complete cannot happen instantly
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
@@ -666,6 +666,25 @@ function ts_chat_ensure_schema(PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
+        // What a conversation is *about*, per side. One row per (owner, peer):
+        // 'help' when the owner is asking for help, 'talk', 'notes', 'partner',
+        // or '' when nothing has been declared yet. Kept out of the message
+        // stream on purpose — it is a label that can change without sending a
+        // message, and the chat list reads it to show 'Question · Physics'.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `chat_purposes` (
+                `user_id` INT UNSIGNED NOT NULL,
+                `peer_id` INT UNSIGNED NOT NULL,
+                `purpose` VARCHAR(16) NOT NULL DEFAULT '',
+                `subject_code` VARCHAR(64) NOT NULL DEFAULT '',
+                `subject_label` VARCHAR(120) NOT NULL DEFAULT '',
+                `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+                    ON UPDATE CURRENT_TIMESTAMP,
+                PRIMARY KEY (`user_id`, `peer_id`),
+                INDEX `idx_purpose_user` (`user_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
         // Help requests: the transaction that makes a rating meaningful.
         // A seeker opens one, the helper accepts, the seeker closes it when the
         // question is actually answered. Ratings (next step) hang off a
@@ -836,12 +855,32 @@ switch ($action) {
             error_log('[TheStudent] chat typing query failed: ' . $e->getMessage());
         }
 
+        // My own declared purposes, read once for the whole directory.
+        $purposes = [];
+        try {
+            $purposeStmt = $pdo->prepare(
+                'SELECT peer_id, purpose, subject_label
+                 FROM chat_purposes WHERE user_id = :me'
+            );
+            $purposeStmt->execute(['me' => $meId]);
+            foreach ($purposeStmt->fetchAll() as $row) {
+                $purposes[(int) $row['peer_id']] = [
+                    'purpose'       => (string) $row['purpose'],
+                    'subject_label' => (string) $row['subject_label'],
+                ];
+            }
+        } catch (Throwable $e) {
+            // Table missing on an older schema: threads simply carry no purpose.
+        }
+
         $threads = [];
         foreach ($peerRows as $peerRow) {
             $peerId = (int) $peerRow['id'];
             $threads[] = [
                 'peer'      => ts_chat_public_peer($peerRow, $now),
                 'is_typing' => isset($typingBy[$peerId]),
+                'purpose'   => $purposes[$peerId]['purpose'] ?? '',
+                'purpose_subject' => $purposes[$peerId]['subject_label'] ?? '',
             ];
         }
 
@@ -950,6 +989,60 @@ switch ($action) {
             ts_chat_json('error', 'Could not load that profile right now.', [], 500);
         }
         break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Conversation purpose ("what's this chat about")
+    // -----------------------------------------------------------------------
+    case 'set_purpose': {
+        ts_chat_require_post('set_purpose');
+        $body   = ts_chat_read_body();
+        $peerId = ts_chat_peer_id($body);
+
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'You cannot label a chat with yourself.', [], 422);
+        }
+
+        $purpose = strtolower(trim((string) ($body['purpose'] ?? '')));
+        $allowed = ['', 'help', 'talk', 'notes', 'partner'];
+        if (!in_array($purpose, $allowed, true)) {
+            ts_chat_json('error', 'That is not a chat purpose.', [], 422);
+        }
+
+        $subjectLabel = substr(trim((string) ($body['subject_label'] ?? '')), 0, 120);
+        $subjectCode = substr(trim((string) ($body['subject_code'] ?? '')), 0, 64);
+        if ($subjectCode === '' && $subjectLabel !== '') {
+            $subjectCode = substr(
+                strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '_', $subjectLabel)),
+                0,
+                64
+            );
+        }
+
+        try {
+            $pdo->prepare(
+                'INSERT INTO chat_purposes (user_id, peer_id, purpose, subject_code, subject_label)
+                 VALUES (:me, :peer, :purpose, :code, :label)
+                 ON DUPLICATE KEY UPDATE purpose = VALUES(purpose),
+                     subject_code = VALUES(subject_code),
+                     subject_label = VALUES(subject_label)'
+            )->execute([
+                'me'      => $meId,
+                'peer'    => $peerId,
+                'purpose' => $purpose,
+                'code'    => $subjectCode,
+                'label'   => $subjectLabel,
+            ]);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] set_purpose failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not save that right now.', [], 500);
+        }
+
+        ts_chat_json('success', 'Chat purpose saved.', [
+            'peer_id'         => $peerId,
+            'purpose'         => $purpose,
+            'subject_label'   => $subjectLabel,
+        ]);
     }
 
     // -----------------------------------------------------------------------
@@ -1066,8 +1159,50 @@ switch ($action) {
         $stmt->execute(['me' => $meId, 'peer' => $peerId]);
         $row = $stmt->fetch();
 
+        // Students need help more than once: show how often this pair has
+        // already closed a request, so the card can offer "ask again" instead of
+        // looking like a one-shot feature.
+        $closedWithPeer = 0;
+        $openForMe = 0;
+        $purpose = '';
+        $purposeSubject = '';
+        try {
+            $countStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM chat_help_requests
+                 WHERE status = 'completed'
+                   AND ((seeker_id = :me AND helper_id = :peer)
+                     OR (seeker_id = :peer AND helper_id = :me))"
+            );
+            $countStmt->execute(['me' => $meId, 'peer' => $peerId]);
+            $closedWithPeer = (int) $countStmt->fetchColumn();
+
+            $openStmt = $pdo->prepare(
+                "SELECT COUNT(*) FROM chat_help_requests
+                 WHERE seeker_id = :me AND status IN ('pending','accepted')"
+            );
+            $openStmt->execute(['me' => $meId]);
+            $openForMe = (int) $openStmt->fetchColumn();
+
+            $purposeStmt = $pdo->prepare(
+                'SELECT purpose, subject_label FROM chat_purposes
+                 WHERE user_id = :me AND peer_id = :peer LIMIT 1'
+            );
+            $purposeStmt->execute(['me' => $meId, 'peer' => $peerId]);
+            $purposeRow = $purposeStmt->fetch();
+            if ($purposeRow) {
+                $purpose = (string) $purposeRow['purpose'];
+                $purposeSubject = (string) $purposeRow['subject_label'];
+            }
+        } catch (Throwable $e) {
+            // Counts are a nicety; never fail the state read for them.
+        }
+
         ts_chat_json('success', 'Help state.', [
             'request' => $row ? ts_chat_help_public($row, $meId) : null,
+            'completed_with_peer' => $closedWithPeer,
+            'my_open_requests'    => $openForMe,
+            'purpose'             => $purpose,
+            'purpose_subject'     => $purposeSubject,
         ]);
     }
 
@@ -1702,7 +1837,8 @@ switch ($action) {
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
-                'threads', 'profile', 'help_request', 'help_state',
+                'threads', 'profile', 'set_purpose',
+                'help_request', 'help_state',
                 'help_accept', 'help_close', 'help_cancel',
                 'inbox', 'send', 'read', 'typing', 'ack_safety',
                 'heartbeat', 'set_key', 'version',

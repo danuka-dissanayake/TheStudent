@@ -86,9 +86,26 @@ data class ChatThread(
     val lastMessageIsMine: Boolean = false,
     val lastMessageEpoch: Long = 0L,
     /** Messages from this peer that I have not opened yet. */
-    val unreadCount: Int = 0
+    val unreadCount: Int = 0,
+    /**
+     * What I said this conversation is about: "help", "talk", "notes",
+     * "partner", or "" when nothing has been declared yet. Set by me (never by
+     * the peer) so the label in the list always reflects my own intent.
+     */
+    val purpose: String = "",
+    val purposeSubject: String = ""
 ) {
     val hasConversation: Boolean get() = lastMessageEpoch > 0L
+
+    /** "Question · Physics" when this chat is a help chat, else "". */
+    val purposeLine: String
+        get() = when (purpose) {
+            "help" -> if (purposeSubject.isBlank()) "Question" else "Question · $purposeSubject"
+            "notes" -> "Notes & papers"
+            "partner" -> "Study partner"
+            "talk" -> "Chatting"
+            else -> ""
+        }
 }
 
 /** Everything the chat UI needs for the directory + presence counters. */
@@ -111,6 +128,22 @@ data class ChatDirectory(
  * fill in, presence and the month they joined. E-mail, phone, role and every
  * login detail stay on the server — see `action=profile` in chat.php.
  */
+/**
+ * Everything the thread needs to render the help card, including the counts
+ * that make a *second* request with the same student feel natural.
+ *
+ * [completedWithPeer] is how many requests this pair has already closed — it
+ * drives "Ask again" and the "you have been helped N times" line.
+ */
+data class ChatHelpState(
+    val request: ChatHelpRequest? = null,
+    val completedWithPeer: Int = 0,
+    val myOpenRequests: Int = 0,
+    /** Purpose as stored on the server for (me, peer); "" when unset. */
+    val purpose: String = "",
+    val purposeSubject: String = ""
+)
+
 /**
  * A help request: the transaction behind a rating.
  *
