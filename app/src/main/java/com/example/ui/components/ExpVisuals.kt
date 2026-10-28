@@ -142,33 +142,32 @@ fun TierMedallion(
             color = if (earned) Color.White.copy(alpha = 0.96f) else Color(0xFFF8FAFC)
         )
 
-        // The sheen: two white bands half a cycle apart, travelling across the
-        // face of an earned badge. The second band is entering as the first
-        // leaves, so the metal is always catching light — a continuous shimmer
-        // rather than a sweep, a pause, and a sweep.
+        // The sheen, as a CSS gradient shine: one band exactly as wide as the
+        // badge, slid from fully off one side to fully off the other on a linear
+        // 1s loop. The gradient is clear → white → clear, so the whole face is
+        // washed with light as the band passes and the shimmer never stops.
         if (earned && shinePhase != null) {
             val phase = shinePhase().coerceIn(0f, 1f)
-            val band = hexRadius * 1.15f
-            val sweepStart = center.x - hexRadius - band * 0.5f
-            val sweepEnd = center.x + hexRadius + band * 0.5f
+            val band = maxRadius * 2f
+            val sweepStart = center.x - maxRadius * 2f
+            val sweepEnd = center.x + maxRadius * 2f
+            val bandCentre = sweepStart + (sweepEnd - sweepStart) * phase
             clipPath(hex) {
-                listOf(0f, 0.5f).forEach { gap ->
-                    val local = (phase + gap) % 1f
-                    val bandCentre = sweepStart + (sweepEnd - sweepStart) * local
-                    drawRect(
-                        brush = Brush.linearGradient(
-                            colors = listOf(
-                                Color.Transparent,
-                                Color.White.copy(alpha = 0.54f),
-                                Color.Transparent
-                            ),
-                            start = Offset(bandCentre - band / 2f, center.y - hexRadius),
-                            end = Offset(bandCentre + band / 2f, center.y + hexRadius)
+                drawRect(
+                    brush = Brush.linearGradient(
+                        // 0% clear · 50% white · 99% clear, as in the pen.
+                        colorStops = arrayOf(
+                            0f to Color.Transparent,
+                            0.5f to Color.White.copy(alpha = 0.8f),
+                            0.99f to Color.Transparent,
+                            1f to Color.Transparent
                         ),
-                        topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
-                        size = Size(maxRadius * 2f, maxRadius * 2f)
-                    )
-                }
+                        start = Offset(bandCentre - band / 2f, center.y),
+                        end = Offset(bandCentre + band / 2f, center.y)
+                    ),
+                    topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
+                    size = Size(maxRadius * 2f, maxRadius * 2f)
+                )
             }
         }
     }

@@ -65,15 +65,15 @@ fun ExpMedalsCard(
         label = "exp_medals_progress"
     )
 
-    // One clock for the whole card. Each earned medal reads it inside its draw
-    // scope with its own offset, so the sheen ripples along the ladder without a
-    // single recomposition.
+    // One clock for the whole card, a 1s linear loop matching the CSS shine.
+    // Each earned medal reads it inside its draw scope with a small offset, so
+    // the sheen ripples along the ladder without a single recomposition.
     val shine = rememberInfiniteTransition(label = "exp_medals_shine")
     val shinePhase by shine.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 1800, easing = LinearEasing)
+            animation = tween(durationMillis = 1000, easing = LinearEasing)
         ),
         label = "exp_medals_shine_phase"
     )
