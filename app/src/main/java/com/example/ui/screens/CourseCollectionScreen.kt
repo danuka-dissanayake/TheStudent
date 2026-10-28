@@ -299,6 +299,18 @@ private fun CourseCatalogBrowse(
         }
     }
 
+    // Paging is a page change like any other, so it shimmers too: the student
+    // taps "2", the pager scrolls them up to the results heading, and the new
+    // rows arrive behind a brief skeleton rather than snapping into place.
+    var isPageLoading by remember { mutableStateOf(false) }
+    LaunchedEffect(safePage) {
+        if (booted) {
+            isPageLoading = true
+            delay(380)
+            isPageLoading = false
+        }
+    }
+
     // Mirrors the item order below: search, filter row, then (when nothing is
     // filtered) the three rails, then the results heading.
     val resultsHeadingIndex = 2 +
@@ -462,12 +474,18 @@ private fun CourseCatalogBrowse(
                     item(key = "empty") {
                         NoCoursesState(onClear = clearAll)
                     }
+                } else if (isPageLoading) {
+                    item(key = "page_skeleton") {
+                        CourseRowsSkeleton(brush = shimmer, count = pageItems.size.coerceAtMost(6))
+                    }
                 } else {
                     items(pageItems, key = { it.id }) { course ->
                         CourseRow(course = course, onClick = { onOpenCourse(course) })
                         Spacer(Modifier.height(8.dp))
                     }
+                }
 
+                if (visible.isNotEmpty()) {
                     item(key = "pager") {
                         CoursePager(
                             page = safePage,
@@ -1569,6 +1587,27 @@ private fun CertificateBadge(certificate: CatalogCertificate) {
             color = tint,
             maxLines = 1
         )
+    }
+}
+
+/**
+ * The rows' loading state, used when the pager changes page. Same height as a
+ * real card, so the pager below it does not jump when the rows arrive.
+ */
+@Composable
+private fun CourseRowsSkeleton(brush: Brush, count: Int) {
+    Column(modifier = Modifier.testTag("courses_page_skeleton")) {
+        repeat(count) {
+            ShimmerBlock(
+                brush,
+                Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+                    .height(104.dp),
+                18
+            )
+            Spacer(Modifier.height(8.dp))
+        }
     }
 }
 

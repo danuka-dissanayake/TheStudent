@@ -115,9 +115,11 @@ Sections, top to bottom:
 6. **Where these come from** — provider tiles with their own logo, name, kind
    and course count; tapping one filters the list;
 7. the results — **15 courses per page**, with a numbered pager underneath
-   ("Showing 16–30 of 42", Prev / 1 2 3 / Next). The pager scrolls back to the
-   results heading when it changes page, and any filter resets to page 1. Tags:
-   `courses_pager`, `courses_page_1…n`, `courses_page_prev`, `courses_page_next`;
+   ("Showing 16–30 of 42", Prev / 1 2 3 / Next). Tapping a page scrolls back up
+   to the results heading and shows a brief row skeleton (~0.38s) while the new
+   page resolves, so a page change looks like one. Any filter resets to page 1.
+   Tags: `courses_pager`, `courses_page_1…n`, `courses_page_prev`,
+   `courses_page_next`, `courses_page_skeleton`;
 8. the credit block.
 
 ### Filters, pulled up from the bottom
@@ -148,6 +150,8 @@ nothing happened. So:
 - **on arrival**, ~0.7s of shimmer that mirrors the real layout (slider, video
   cards, provider tiles, course rows), so the content lands without a jump;
 - **on a filter change**, ~0.4s of shimmer over the results;
+- **when the pager changes page**, ~0.38s of row shimmer (`courses_page_skeleton`)
+  in place of the results, right after scrolling up to the heading;
 - **when a course card is opened**, ~0.4s of detail shimmer — coloured hero with
   white sweeps, facts card, certificate row, about lines, video block and the
   sticky button. The back button on that skeleton is real, so a loading state
@@ -294,3 +298,4 @@ mark is for; it is never used as TheStudent's own branding.
 | Detail skeleton vanished twice | both player rewrites replaced the *end* of the file, where it lived | moved above the player section, with a note saying why |
 | Background scrolled under the video card | the overlay drew on top but took no gestures | the overlay consumes pointer events, so nothing behind receives them |
 | List of 40+ cards made the page very tall | every course rendered at once | 15 per page with a numbered pager, and filters reset to page 1 |
+| Page change snapped | new rows replaced the old instantly | pager scrolls to the heading, then row skeletons for ~0.38s |
