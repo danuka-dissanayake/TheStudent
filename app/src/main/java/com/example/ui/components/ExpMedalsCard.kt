@@ -73,7 +73,7 @@ fun ExpMedalsCard(
         initialValue = 0f,
         targetValue = 1f,
         animationSpec = infiniteRepeatable(
-            animation = tween(durationMillis = 2400, easing = LinearEasing)
+            animation = tween(durationMillis = 1800, easing = LinearEasing)
         ),
         label = "exp_medals_shine_phase"
     )

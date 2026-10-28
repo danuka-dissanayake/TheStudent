@@ -142,27 +142,33 @@ fun TierMedallion(
             color = if (earned) Color.White.copy(alpha = 0.96f) else Color(0xFFF8FAFC)
         )
 
-        // The sheen: a narrow white band travelling across the face of an earned
-        // badge, clipped to the hexagon so it reads as light on the metal.
+        // The sheen: two white bands half a cycle apart, travelling across the
+        // face of an earned badge. The second band is entering as the first
+        // leaves, so the metal is always catching light — a continuous shimmer
+        // rather than a sweep, a pause, and a sweep.
         if (earned && shinePhase != null) {
             val phase = shinePhase().coerceIn(0f, 1f)
-            val travel = hexRadius * 3.2f
-            val bandCentre = center.x - hexRadius * 1.6f + travel * phase
-            val band = hexRadius * 1.1f
+            val band = hexRadius * 1.15f
+            val sweepStart = center.x - hexRadius - band * 0.5f
+            val sweepEnd = center.x + hexRadius + band * 0.5f
             clipPath(hex) {
-                drawRect(
-                    brush = Brush.linearGradient(
-                        colors = listOf(
-                            Color.Transparent,
-                            Color.White.copy(alpha = 0.62f),
-                            Color.Transparent
+                listOf(0f, 0.5f).forEach { gap ->
+                    val local = (phase + gap) % 1f
+                    val bandCentre = sweepStart + (sweepEnd - sweepStart) * local
+                    drawRect(
+                        brush = Brush.linearGradient(
+                            colors = listOf(
+                                Color.Transparent,
+                                Color.White.copy(alpha = 0.54f),
+                                Color.Transparent
+                            ),
+                            start = Offset(bandCentre - band / 2f, center.y - hexRadius),
+                            end = Offset(bandCentre + band / 2f, center.y + hexRadius)
                         ),
-                        start = Offset(bandCentre - band / 2f, center.y - hexRadius),
-                        end = Offset(bandCentre + band / 2f, center.y + hexRadius)
-                    ),
-                    topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
-                    size = Size(maxRadius * 2f, maxRadius * 2f)
-                )
+                        topLeft = Offset(center.x - maxRadius, center.y - maxRadius),
+                        size = Size(maxRadius * 2f, maxRadius * 2f)
+                    )
+                }
             }
         }
     }
