@@ -26,7 +26,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.PastPaper
-import com.example.ui.theme.MaisonNeueFontFamily
 
 /**
  * Paper Detail Bottom Sheet Card matching exact reference image (image_e6edf588.png):
@@ -247,10 +246,7 @@ fun PaperDetailDialog(
                         horizontalArrangement = Arrangement.spacedBy(10.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        // Solid ink Download PDF Button with Icon & Subtitle File Size.
-                        // Sized by its own content (min 56dp) and given a generous
-                        // share of the row, so the label never wraps or gets clipped
-                        // on a 320dp phone the way a fixed 54dp box did.
+                        // Solid Black Download PDF Button with Icon
                         Surface(
                             onClick = {
                                 onDownload()
@@ -265,14 +261,13 @@ fun PaperDetailDialog(
                             shape = RoundedCornerShape(16.dp),
                             color = if (isDownloaded) Color(0xFF059669) else Color(0xFF0F172A),
                             modifier = Modifier
-                                .weight(1.35f)
-                                .heightIn(min = 56.dp)
-                                .testTag("paper_download_button")
+                                .weight(1f)
+                                .height(54.dp)
                         ) {
                             Row(
                                 modifier = Modifier
-                                    .heightIn(min = 56.dp)
-                                    .padding(horizontal = 12.dp, vertical = 8.dp),
+                                    .fillMaxSize()
+                                    .padding(horizontal = 12.dp),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -280,47 +275,29 @@ fun PaperDetailDialog(
                                     imageVector = if (isDownloaded) Icons.Default.CheckCircle else Icons.Default.FileDownload,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(19.dp)
+                                    modifier = Modifier.size(20.dp)
                                 )
-                                Spacer(modifier = Modifier.width(7.dp))
-                                Column(verticalArrangement = Arrangement.Center) {
-                                    Text(
-                                        text = if (isDownloaded) "Downloaded" else "Download PDF",
-                                        fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 13.5.sp,
-                                        fontWeight = FontWeight.Bold,
-                                        color = Color.White,
-                                        maxLines = 1,
-                                        softWrap = false,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = paper.fileSize,
-                                        fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 10.5.sp,
-                                        fontWeight = FontWeight.Medium,
-                                        color = Color(0xFFCBD5E1),
-                                        maxLines = 1
-                                    )
-                                }
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = if (isDownloaded) "PDF Downloaded" else "Download PDF",
+                                    fontSize = 14.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
                             }
                         }
 
-                        // Green "Ask AI" button: same height as its neighbour, and
-                        // only as wide as its label needs.
+                        // Rich Darker Green "Ask AI" Button with Sparkles Icon + White Text
                         Surface(
                             onClick = onAskAi,
                             shape = RoundedCornerShape(16.dp),
                             color = Color(0xFF059669),
                             modifier = Modifier
-                                .weight(1f)
-                                .heightIn(min = 56.dp)
-                                .testTag("paper_ask_ai_button")
+                                .width(115.dp)
+                                .height(54.dp)
                         ) {
                             Row(
-                                modifier = Modifier
-                                    .heightIn(min = 56.dp)
-                                    .padding(horizontal = 10.dp, vertical = 8.dp),
+                                modifier = Modifier.fillMaxSize(),
                                 horizontalArrangement = Arrangement.Center,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
@@ -328,17 +305,14 @@ fun PaperDetailDialog(
                                     imageVector = Icons.Default.AutoAwesome,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(17.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
-                                Spacer(modifier = Modifier.width(5.dp))
+                                Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Ask AI",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 14.sp,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White,
-                                    maxLines = 1,
-                                    softWrap = false
+                                    color = Color.White
                                 )
                             }
                         }
