@@ -146,7 +146,7 @@ private fun DrawScope.drawStarAt(center: Offset, outer: Float, color: Color) {
         val radius = if (index % 2 == 0) outer else inner
         val x = center.x + radius * cos(angle)
         val y = center.y + radius * sin(angle)
-        if (index == 0) path.moveTo(x, y) else lineTo(x, y)
+        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
     }
     path.close()
     drawPath(path = path, color = color)
