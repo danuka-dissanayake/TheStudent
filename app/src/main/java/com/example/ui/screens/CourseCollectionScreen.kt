@@ -1,6 +1,15 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import android.annotation.SuppressLint
+import android.graphics.Color as AndroidColor
+import android.webkit.WebChromeClient
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebSettings
+import android.webkit.WebView
+import android.webkit.WebViewClient
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -10,6 +19,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.animateScrollBy
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -47,6 +57,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.WorkspacePremium
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -68,6 +79,8 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -79,7 +92,6 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import coil.compose.SubcomposeAsyncImage
 import com.example.data.model.CatalogCertificate
 import com.example.data.model.CatalogCourse
@@ -88,9 +100,6 @@ import com.example.data.model.CatalogVideo
 import com.example.data.model.CourseCatalog
 import com.example.ui.components.paperCoverTint
 import com.example.ui.theme.MaisonNeueFontFamily
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.YouTubePlayer
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.listeners.AbstractYouTubePlayerListener
-import com.pierfrancescosoffritti.androidyoutubeplayer.core.player.views.YouTubePlayerView
 import kotlinx.coroutines.delay
 
 private val CcInk = Color(0xFF0F172A)
@@ -634,112 +643,121 @@ private fun FiltersSheet(
         onDismissRequest = onDismiss,
         sheetState = sheetState,
         containerColor = Color.White,
+        dragHandle = { SheetDragHandle() },
         modifier = Modifier.testTag("courses_filter_sheet")
     ) {
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 20.dp)
-                .navigationBarsPadding()
-                .padding(bottom = 18.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "Filters",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 19.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = CcInk,
-                    modifier = Modifier.weight(1f)
-                )
+        // Header and the apply button are fixed; only the chips scroll, and the
+        // scroll area is capped so the sheet never grows into a full-screen page.
+        Column(modifier = Modifier.fillMaxWidth().navigationBarsPadding()) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(start = 20.dp, end = 12.dp, top = 0.dp, bottom = 2.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "Filters",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 17.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CcInk
+                    )
+                    Text(
+                        text = "$resultCount of $total courses shown",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.micro,
+                        color = CcMuted
+                    )
+                }
                 if (activeCount > 0) {
                     Text(
                         text = "Clear all",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = CT.body,
+                        fontSize = CT.meta,
                         fontWeight = FontWeight.Bold,
                         color = CcGreen,
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
                             .clickable(onClick = onClear)
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                    )
-                }
-            }
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = "$resultCount of $total courses shown",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = CT.meta,
-                color = CcMuted
-            )
-            Spacer(Modifier.height(16.dp))
-
-            FilterSection("Certificate") {
-                CatalogCertificate.entries.forEach { option ->
-                    SheetChip(
-                        label = option.label,
-                        selected = certificate == option,
-                        tag = "courses_chip_" + option.name.lowercase(),
-                        onClick = { onCertificate(option) }
+                            .padding(horizontal = 10.dp, vertical = 8.dp)
                     )
                 }
             }
 
-            FilterSection("Who it's for") {
-                STAGES.forEach { option ->
-                    SheetChip(
-                        label = option,
-                        selected = stage == option,
-                        tag = "courses_stage_" + option.lowercase().replace("/", "_"),
-                        onClick = { onStage(option) }
-                    )
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(max = 356.dp)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 20.dp)
+                    .padding(top = 12.dp, bottom = 4.dp)
+            ) {
+                FilterSection("Certificate") {
+                    CatalogCertificate.entries.forEach { option ->
+                        SheetChip(
+                            label = option.short,
+                            selected = certificate == option,
+                            tag = "courses_chip_" + option.name.lowercase(),
+                            onClick = { onCertificate(option) }
+                        )
+                    }
+                }
+
+                FilterSection("Who it's for") {
+                    STAGES.forEach { option ->
+                        SheetChip(
+                            label = option,
+                            selected = stage == option,
+                            tag = "courses_stage_" + option.lowercase().replace("/", "_"),
+                            onClick = { onStage(option) }
+                        )
+                    }
+                }
+
+                FilterSection("Level") {
+                    LEVELS.forEach { option ->
+                        SheetChip(
+                            label = option,
+                            selected = level == option,
+                            tag = "courses_level_" + option.lowercase(),
+                            onClick = { onLevel(option) }
+                        )
+                    }
+                }
+
+                FilterSection("Subject") {
+                    CourseCatalog.subjects.forEach { option ->
+                        SheetChip(
+                            label = option,
+                            selected = subject == option,
+                            tag = "courses_subject_" + option.lowercase().replace(' ', '_'),
+                            onClick = { onSubject(option) }
+                        )
+                    }
+                }
+
+                FilterSection("Provider", last = true) {
+                    CourseCatalog.usedProviders.forEach { option ->
+                        SheetChip(
+                            label = option.name,
+                            selected = provider == option.name,
+                            tag = "courses_chip_provider_" +
+                                option.name.lowercase().replace(' ', '_'),
+                            onClick = { onProvider(option.name) }
+                        )
+                    }
                 }
             }
 
-            FilterSection("Level") {
-                LEVELS.forEach { option ->
-                    SheetChip(
-                        label = option,
-                        selected = level == option,
-                        tag = "courses_level_" + option.lowercase(),
-                        onClick = { onLevel(option) }
-                    )
-                }
-            }
-
-            FilterSection("Subject") {
-                CourseCatalog.subjects.forEach { option ->
-                    SheetChip(
-                        label = option,
-                        selected = subject == option,
-                        tag = "courses_subject_" + option.lowercase().replace(' ', '_'),
-                        onClick = { onSubject(option) }
-                    )
-                }
-            }
-
-            FilterSection("Provider") {
-                CourseCatalog.usedProviders.forEach { option ->
-                    SheetChip(
-                        label = option.name,
-                        selected = provider == option.name,
-                        tag = "courses_chip_provider_" +
-                            option.name.lowercase().replace(' ', '_'),
-                        onClick = { onProvider(option.name) }
-                    )
-                }
-            }
-
-            Spacer(Modifier.height(20.dp))
             Surface(
                 onClick = onDismiss,
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(13.dp),
                 color = CcGreen,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(50.dp)
+                    .padding(start = 20.dp, end = 20.dp, top = 8.dp)
+                    .height(46.dp)
                     .testTag("courses_filters_apply")
             ) {
                 Row(
@@ -748,7 +766,8 @@ private fun FiltersSheet(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "Show $resultCount " + if (resultCount == 1) "course" else "courses",
+                        text = "Show $resultCount " +
+                            if (resultCount == 1) "course" else "courses",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = CT.cardTitle,
                         fontWeight = FontWeight.Bold,
@@ -756,26 +775,45 @@ private fun FiltersSheet(
                     )
                 }
             }
+            Spacer(Modifier.height(16.dp))
         }
     }
 }
 
+/** A slim handle — the default one plus 12dp of dead space is what made the
+ *  sheet feel tall before anything had been drawn. */
+@Composable
+private fun SheetDragHandle() {
+    Box(
+        modifier = Modifier
+            .padding(top = 8.dp, bottom = 8.dp)
+            .width(36.dp)
+            .height(4.dp)
+            .clip(CircleShape)
+            .background(Color(0xFFD8DFE8))
+    )
+}
+
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun FilterSection(title: String, content: @Composable () -> Unit) {
-    Column(modifier = Modifier.padding(bottom = 18.dp)) {
+private fun FilterSection(
+    title: String,
+    last: Boolean = false,
+    content: @Composable () -> Unit
+) {
+    Column(modifier = Modifier.padding(bottom = if (last) 8.dp else 14.dp)) {
         Text(
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = CT.micro,
+            fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,
             color = CcFaint,
             letterSpacing = 0.8.sp
         )
-        Spacer(Modifier.height(9.dp))
+        Spacer(Modifier.height(7.dp))
         FlowRow(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
+            horizontalArrangement = Arrangement.spacedBy(7.dp),
+            verticalArrangement = Arrangement.spacedBy(7.dp)
         ) {
             content()
         }
@@ -793,26 +831,26 @@ private fun SheetChip(label: String, selected: Boolean, tag: String, onClick: ()
             if (selected) CcGreen.copy(alpha = 0.45f) else CcHairline
         ),
         modifier = Modifier
-            .heightIn(min = 36.dp)
+            .heightIn(min = 32.dp)
             .testTag(tag)
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+            modifier = Modifier.padding(horizontal = 11.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
+            horizontalArrangement = Arrangement.spacedBy(4.dp)
         ) {
             if (selected) {
                 Icon(
                     Icons.Default.Check,
                     contentDescription = null,
                     tint = CcGreen,
-                    modifier = Modifier.size(13.dp)
+                    modifier = Modifier.size(12.dp)
                 )
             }
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = CT.chip,
+                fontSize = CT.micro,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) CcGreen else CcMuted,
                 maxLines = 1
@@ -963,18 +1001,40 @@ private fun CatalogSkeleton(brush: Brush, showRails: Boolean) {
 
 @Composable
 private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (CatalogCourse) -> Unit) {
-    val state = rememberLazyListState()
+    val loop = featured.size > 1
+    // The same cards three times over. The rail starts in the middle copy, so
+    // there is always another card to the right; when it drifts into the third
+    // copy we slide back one copy — identical pixels, so the reset is invisible.
+    // That is what makes the rail loop forward instead of snapping back to the
+    // first card after a long reverse scroll.
+    val items = remember(featured) {
+        if (loop) featured + featured + featured else featured
+    }
+    val state = rememberLazyListState(
+        initialFirstVisibleItemIndex = if (loop) featured.size else 0
+    )
+    val stepPx = with(LocalDensity.current) { (276 + 10).dp.toPx() }
 
-    // Auto-advance, pausing whenever a finger is on the slider (or the previous
-    // animation is still running) so it never fights the student.
-    LaunchedEffect(featured.size) {
-        if (featured.size <= 1) return@LaunchedEffect
+    LaunchedEffect(featured) {
+        if (!loop) return@LaunchedEffect
         while (true) {
-            delay(4500)
+            delay(4200)
+            // Never fight a finger, and let the previous slide finish.
             if (!state.isScrollInProgress) {
-                val next = (state.firstVisibleItemIndex + 1) % featured.size
-                state.animateScrollToItem(next)
+                state.animateScrollBy(stepPx, tween(700, easing = FastOutSlowInEasing))
             }
+        }
+    }
+
+    LaunchedEffect(state.firstVisibleItemIndex, state.firstVisibleItemScrollOffset) {
+        if (!loop) return@LaunchedEffect
+        val index = state.firstVisibleItemIndex
+        val offset = state.firstVisibleItemScrollOffset
+        when {
+            index >= featured.size * 2 ->
+                state.scrollToItem(index - featured.size, offset)
+            index < featured.size / 2 ->
+                state.scrollToItem(index + featured.size, offset)
         }
     }
 
@@ -984,11 +1044,12 @@ private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (Catalog
             contentPadding = PaddingValues(horizontal = 16.dp),
             horizontalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            items(featured, key = { it.id }) { course ->
+            items(count = items.size) { index ->
+                val course = items[index]
                 FeaturedCard(course = course, onClick = { onOpenCourse(course) })
             }
         }
-        if (featured.size > 1) {
+        if (loop) {
             Spacer(Modifier.height(10.dp))
             Row(
                 modifier = Modifier
@@ -996,7 +1057,7 @@ private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (Catalog
                     .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.Center
             ) {
-                val active = state.firstVisibleItemIndex.coerceIn(0, featured.lastIndex)
+                val active = ((state.firstVisibleItemIndex % featured.size) + featured.size) % featured.size
                 featured.indices.forEach { index ->
                     Box(
                         modifier = Modifier
@@ -1975,23 +2036,36 @@ private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * A real player, not a thumbnail that leaves the app.
+ * A real player, inside the app.
  *
- * The previous WebView embed rendered an empty black box: YouTube refuses to
- * configure a player for an iframe whose page has no proper origin/referer, and
- * a `loadUrl("…/embed/…")` from an app WebView has none. `YouTubePlayerView`
- * exists precisely to own that plumbing — it builds the iframe with the rights
- * origin, handles fullscreen and cleanup — so playback is its job, not ours.
- * The channel stays credited underneath, and "Watch on YouTube" is still there
- * for anyone who wants the original page.
+ * YouTube now refuses to configure a player (error 152/153, "video player
+ * configuration error") for an embed that arrives without a **Referer**: the
+ * iframe has to be able to say which app is hosting it. A plain
+ * `loadUrl("…/embed/…")` sends none, which is exactly how the first two attempts
+ * failed — first as a black box, then through a library that cannot set the
+ * header either.
+ *
+ * So the WebView loads the embed URL *with an explicit `Referer` header* whose
+ * origin is the app's own package (`https://com.thestudent.sl`), and passes the
+ * same value as `origin=` on the URL so the player's postMessage handshake
+ * matches. That pair is what the player needs; nothing else about the embed is
+ * unusual, ads and attribution stay intact, and the channel is credited
+ * underneath with a "Watch on YouTube" exit.
  */
+@SuppressLint("SetJavaScriptEnabled")
 @Composable
 private fun YouTubeEmbedDialog(
     video: CatalogVideo,
     onDismiss: () -> Unit,
     onOpenYouTube: () -> Unit
 ) {
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val context = LocalContext.current
+    // A syntactically valid https origin that belongs to this app. Used for both
+    // the Referer header and the player's `origin` parameter, so they agree.
+    val origin = remember(context) { "https://" + context.packageName }
+
+    var loading by remember(video.videoId) { mutableStateOf(true) }
+    var failed by remember(video.videoId) { mutableStateOf(false) }
 
     Dialog(
         onDismissRequest = onDismiss,
@@ -2011,25 +2085,124 @@ private fun YouTubeEmbedDialog(
                         .background(Color.Black)
                         .testTag("course_video_player")
                 ) {
-                    AndroidView(
-                        modifier = Modifier.fillMaxSize(),
-                        factory = { context ->
-                            YouTubePlayerView(context).apply {
-                                lifecycleOwner.lifecycle.addObserver(this)
-                                addYouTubePlayerListener(
-                                    object : AbstractYouTubePlayerListener() {
-                                        override fun onReady(youTubePlayer: YouTubePlayer) {
-                                            youTubePlayer.loadVideo(video.videoId, 0f)
+                    if (failed) {
+                        // The player could not start: show the thumbnail and a
+                        // way out instead of an empty rectangle.
+                        SubcomposeAsyncImage(
+                            model = video.thumbnailUrl,
+                            contentDescription = null,
+                            contentScale = ContentScale.Crop,
+                            modifier = Modifier.fillMaxSize(),
+                            loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
+                            error = { Box(Modifier.fillMaxSize().background(CcInk)) }
+                        )
+                        Box(
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .background(Color(0xCC0F172A)),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = "This video will not play here",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = CT.body,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Spacer(Modifier.height(10.dp))
+                                Surface(
+                                    onClick = onOpenYouTube,
+                                    shape = RoundedCornerShape(50),
+                                    color = Color(0xFFDC2626),
+                                    modifier = Modifier
+                                        .height(40.dp)
+                                        .testTag("course_video_fallback")
+                                ) {
+                                    Box(contentAlignment = Alignment.Center) {
+                                        Text(
+                                            text = "Open in YouTube",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = CT.meta,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White,
+                                            modifier = Modifier.padding(horizontal = 18.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    } else {
+                        AndroidView(
+                            modifier = Modifier.fillMaxSize(),
+                            factory = { ctx ->
+                                WebView(ctx).apply {
+                                    setBackgroundColor(AndroidColor.BLACK)
+                                    settings.apply {
+                                        javaScriptEnabled = true
+                                        domStorageEnabled = true
+                                        databaseEnabled = true
+                                        mediaPlaybackRequiresUserGesture = false
+                                        loadWithOverviewMode = true
+                                        useWideViewPort = true
+                                        mixedContentMode =
+                                            WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                                    }
+                                    webChromeClient = WebChromeClient()
+                                    webViewClient = object : WebViewClient() {
+                                        override fun onPageFinished(
+                                            view: WebView,
+                                            url: String?
+                                        ) {
+                                            loading = false
+                                        }
+
+                                        override fun onReceivedError(
+                                            view: WebView,
+                                            request: WebResourceRequest,
+                                            error: WebResourceError
+                                        ) {
+                                            // Only the main document matters; a
+                                            // failed sub-resource is not fatal.
+                                            if (request.isForMainFrame) {
+                                                loading = false
+                                                failed = true
+                                            }
                                         }
                                     }
+                                    loadUrl(
+                                        "https://www.youtube.com/embed/" +
+                                            video.videoId +
+                                            "?autoplay=1&playsinline=1&rel=0" +
+                                            "&modestbranding=1&origin=" + origin,
+                                        mapOf("Referer" to origin)
+                                    )
+                                }
+                            },
+                            onRelease = { webView ->
+                                webView.stopLoading()
+                                webView.loadUrl("about:blank")
+                                webView.destroy()
+                            }
+                        )
+
+                        if (loading) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(Color.Black),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                CircularProgressIndicator(
+                                    color = Color.White,
+                                    strokeWidth = 2.dp,
+                                    modifier = Modifier.size(26.dp)
                                 )
                             }
-                        },
-                        onRelease = { playerView ->
-                            playerView.release()
                         }
-                    )
+                    }
                 }
+
                 Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = video.title,
@@ -2094,115 +2267,6 @@ private fun YouTubeEmbedDialog(
                     }
                 }
             }
-        }
-    }
-}
-
-/**
- * The detail page's loading state. It mirrors the real page — coloured hero,
- * facts card, certificate row, about text, video, sticky button — so nothing
- * jumps when the content arrives. The back button is real from the first frame:
- * a loading state must never trap you on a screen.
- */
-@Composable
-private fun CourseDetailSkeleton(course: CatalogCourse, onBack: () -> Unit) {
-    val tint = paperCoverTint(course.subject)
-    val light = rememberShimmerBrush()
-    val dark = rememberShimmerBrush(onDark = true)
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .testTag("course_detail_skeleton")
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        listOf(tint.copy(alpha = 0.9f), tint.copy(alpha = 0.6f))
-                    )
-                )
-                .statusBarsPadding()
-                .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 18.dp)
-        ) {
-            Column {
-                Surface(
-                    onClick = onBack,
-                    shape = CircleShape,
-                    color = Color.White.copy(alpha = 0.18f),
-                    modifier = Modifier
-                        .size(40.dp)
-                        .testTag("course_detail_back")
-                ) {
-                    Box(contentAlignment = Alignment.Center) {
-                        Icon(
-                            Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
-                            tint = Color.White,
-                            modifier = Modifier.size(19.dp)
-                        )
-                    }
-                }
-                Spacer(Modifier.height(18.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.92f)
-                        .height(24.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(dark)
-                )
-                Spacer(Modifier.height(9.dp))
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(0.6f)
-                        .height(24.dp)
-                        .clip(RoundedCornerShape(8.dp))
-                        .background(dark)
-                )
-                Spacer(Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Box(
-                        modifier = Modifier
-                            .size(24.dp)
-                            .clip(RoundedCornerShape(7.dp))
-                            .background(dark)
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Box(
-                        modifier = Modifier
-                            .width(150.dp)
-                            .height(13.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(dark)
-                    )
-                }
-            }
-        }
-
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp),
-            verticalArrangement = Arrangement.spacedBy(12.dp)
-        ) {
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(108.dp), 16)
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(64.dp), 16)
-            ShimmerBlock(light, Modifier.width(150.dp).height(16.dp), 6)
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(38.dp), 10)
-            ShimmerBlock(light, Modifier.fillMaxWidth().height(16.dp), 6)
-            ShimmerBlock(light, Modifier.fillMaxWidth().aspectRatio(16f / 9f), 16)
-        }
-
-        Spacer(Modifier.weight(1f))
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(16.dp)
-                .height(48.dp)
-        ) {
-            ShimmerBlock(light, Modifier.fillMaxSize(), 14)
         }
     }
 }

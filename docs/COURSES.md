@@ -97,8 +97,13 @@ Sections, top to bottom:
 2. search (scrolls) — title, subject, provider and skills;
 3. a single **filter row** (scrolls): a `Filters (n)` button plus the currently
    applied filters as chips, with a **Clear** action;
-4. **Editor's picks** — a sliding rail that advances itself every 4.5s, pausing
-   while a finger is on it, dots following the visible card;
+4. **Editor's picks** — a rail that slides itself every 4.2s with a 700ms eased
+   scroll, pausing while a finger is on it. It **loops forward**: the card list is
+   laid out three times over and the rail starts in the middle copy, so after the
+   last card it slides straight into the first instead of reversing back through
+   everything. When it drifts into the third copy it silently slides back one
+   copy — the pixels are identical, so the jump is invisible. Dots follow the
+   card;
 5. **Watch first** — YouTube rail: real thumbnails, runtime badge, channel name;
 6. **Where these come from** — provider tiles with their own logo, name, kind
    and course count; tapping one filters the list;
@@ -114,6 +119,13 @@ for** (A/L, Undergraduate, Postgraduate), **Level** (beginner → advanced),
 **Subject** and **Provider** — all 16. Chips apply immediately and the button at
 the bottom reads "Show N courses", so the count always describes the list behind
 the sheet. Tapping a selected chip removes it; **Clear all** empties everything.
+
+**The sheet is compact, not a page.** Header and the apply button are fixed; the
+chips scroll inside a `heightIn(max = 356.dp)` area, so the sheet tops out at
+roughly 60% of the screen however many subjects are added later. Section labels
+are 10.5sp caps, chips are 32dp, and the drag handle is a 4dp pill — the default
+handle plus its padding was most of the reason the earlier version opened at
+nearly full height.
 
 Slider, video rail and provider rail hide while a filter is active, so results
 are never pushed below three screens of browsing furniture.
@@ -154,25 +166,41 @@ with no browser cannot crash the screen).
 
 ### Video player
 
-`YouTubeEmbedDialog` uses **`android-youtube-player`**
-(`com.pierfrancescosoffritti.androidyoutubeplayer:core:12.1.2`, in
-`libs.versions.toml`) via `YouTubePlayerView`.
+`YouTubeEmbedDialog` is a `WebView` that loads the embed URL **with an explicit
+`Referer` header**:
 
-The first attempt was a hand-rolled `WebView` + `loadDataWithBaseURL` embed: it
-rendered an empty black box, because YouTube will not configure a player for an
-iframe whose page has no proper origin/referer, and an app WebView has none.
-`YouTubePlayerView` exists to own exactly that plumbing (iframe, origin,
-fullscreen, cleanup), so playback is its job now.
+```kotlin
+val origin = "https://" + context.packageName          // e.g. https://com.thestudent.sl
+loadUrl(
+    "https://www.youtube.com/embed/$id?autoplay=1&playsinline=1&rel=0&origin=$origin",
+    mapOf("Referer" to origin)
+)
+```
 
-Details that matter: the view is registered as a **lifecycle observer** of the
-current owner (it pauses when the app backgrounds), `onReady` calls
-`loadVideo(id, 0f)`, and `onRelease` calls `release()` so the player and its
-WebView are torn down when the dialog closes. Under the player: the title, the
-channel ("… on YouTube") and a **Watch on YouTube** fallback for the original
-page.
+**Why exactly this.** YouTube now refuses to configure a player — error 153, and
+the 152 family — for an embed that arrives without a `Referer`, because the
+iframe must be able to say which app is hosting it. The history of this screen is
+that rule being hit three times:
 
-**Build note:** this added a dependency — Gradle needs one sync before the next
-build. It is on Maven Central, which `settings.gradle.kts` already includes.
+| Attempt | Result |
+| --- | --- |
+| `loadUrl("…/embed/…")` from the app WebView | black box (no referer) |
+| iframe inside `loadDataWithBaseURL("https://www.youtube.com/")` | still error 152-4 |
+| `android-youtube-player`'s `YouTubePlayerView` | still error 152-4 — it cannot set the header either |
+| **embed URL + `Referer` header + matching `origin=`** | plays |
+
+The header and the `origin` parameter must agree, which is why both come from
+one `origin` value derived from the package name. `playsinline=1` keeps it inside
+the dialog, `rel=0` stops related videos from other channels appearing, and the
+channel is still credited under the player with a **Watch on YouTube** exit.
+
+The player shows a spinner until `onPageFinished` and, if the *main frame* fails
+to load, swaps to the thumbnail with an **Open in YouTube** button — never an
+empty black rectangle. `onRelease` stops the load, blanks the page and destroys
+the WebView so audio cannot keep playing after the dialog closes.
+
+No third-party player dependency is needed for this; the `core` library added in
+the previous round was removed again.
 
 ### Provider logos
 
@@ -196,7 +224,8 @@ mark is for; it is never used as TheStudent's own branding.
 `course_detail_skeleton`,
 `courses_credit_block`, `course_detail_{id}`, `course_detail_back`,
 `course_detail_video`, `course_detail_open`, `course_video_player`,
-`course_video_close`, `course_video_open_youtube`, `home_course_collection_card`.
+`course_video_close`, `course_video_open_youtube`, `course_video_fallback`,
+`home_course_collection_card`.
 
 ## 6. Adding a course
 
@@ -233,3 +262,6 @@ mark is for; it is never used as TheStudent's own branding.
 | Video showed an empty black card | WebView embed without a proper origin/referer | replaced with `YouTubePlayerView` (android-youtube-player 12.1.2) |
 | Wanted shimmer on filters and entry | no loading state | animated shimmer on arrival (0.7s) and on facet changes (0.4s) |
 | Course detail still popped in | only the list had a loading state | detail gets its own 0.4s shimmer with a working back button |
+| Filter sheet opened at nearly full height | default handle + uncapped content | fixed header and button, chips scroll inside 356dp, slim handle |
+| YouTube error 152-4 | embed arrived without a `Referer`; the library could not set it either | WebView embed with a `Referer` header and a matching `origin=`, spinner + fallback |
+| Editor's picks snapped back at the end | `(index + 1) % size` animated backwards from the last card | three copies, start in the middle, eased `animateScrollBy`, silent recentre |
