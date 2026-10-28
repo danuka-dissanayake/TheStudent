@@ -247,56 +247,47 @@ private fun ExpHeader(
 
 @Composable
 private fun ExpHeroCard(total: Int, tier: ExpTier) {
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = Color.Transparent,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(
-                    Brush.linearGradient(
-                        colors = listOf(
-                            ExpDeep,
-                            Color(0xFF075E45),
-                            Color(0xFF059669)
-                        ),
-                        start = Offset.Zero,
-                        end = Offset.Infinite
-                    )
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    colors = listOf(ExpDeep, Color(0xFF075E45), EmeraldPrimary),
+                    start = Offset.Zero,
+                    end = Offset.Infinite
                 )
-                .padding(horizontal = 18.dp, vertical = 20.dp)
-        ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TierMedallion(code = tier.code, size = 96.dp, glow = true)
+            )
+            .padding(horizontal = 18.dp, vertical = 20.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            TierMedallion(code = tier.code, size = 96.dp, glow = true)
 
-                Spacer(Modifier.width(16.dp))
+            Spacer(Modifier.width(16.dp))
 
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Total EXP",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = Color.White.copy(alpha = 0.72f)
-                    )
-                    Text(
-                        text = formatExp(total),
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 40.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = Color.White,
-                        letterSpacing = (-1).sp
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = tier.epithet,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
-                        color = Color.White.copy(alpha = 0.85f)
-                    )
-                }
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Total EXP",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.5.sp,
+                    fontWeight = FontWeight.Medium,
+                    color = Color.White.copy(alpha = 0.72f)
+                )
+                Text(
+                    text = formatExp(total),
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 40.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    letterSpacing = (-1).sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = tier.epithet,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    color = Color.White.copy(alpha = 0.85f)
+                )
             }
         }
     }
@@ -333,7 +324,7 @@ private fun LevelProgressCard(tier: ExpTier, total: Int, progress: Float) {
                 }
                 Text(
                     text = if (tier.nextName != null) {
-                        "${formatExp(tier.toNext)} EXP to Level ${tier.nextLevel}"
+                        "${formatExp(tier.toNext)} EXP to Level ${tier.nextLevel ?: (tier.level + 1)}"
                     } else {
                         "Top level"
                     },

@@ -57,14 +57,18 @@ data class UserExp(
                         level = tierObj.optInt("level", local.level),
                         nextName = tierObj.optString("next_name").orEmpty()
                             .takeIf { it.isNotBlank() },
-                        nextLevel = tierObj.optInt("next_level", local.nextLevel),
+                        nextLevel = if (tierObj.has("next_level") && !tierObj.isNull("next_level")) {
+                            tierObj.optInt("next_level", 0)
+                        } else {
+                            local.nextLevel
+                        },
                         nextAt = if (tierObj.has("next_min") && !tierObj.isNull("next_min")) {
                             tierObj.optInt("next_min", 0)
                         } else {
                             null
                         },
                         toNext = tierObj.optInt("to_next", 0),
-                        progress = (tierObj.optDouble("progress", 0.0) ?: 0.0).toFloat(),
+                        progress = tierObj.optDouble("progress", 0.0).toFloat(),
                         min = tierObj.optInt("min", local.min),
                         cap = tierObj.optInt("cap", local.cap),
                         nextCap = if (tierObj.has("next_cap") && !tierObj.isNull("next_cap")) {
