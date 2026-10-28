@@ -104,6 +104,7 @@ import com.example.data.model.CourseCatalog
 import com.example.ui.components.paperCoverTint
 import com.example.ui.theme.MaisonNeueFontFamily
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 private val CcInk = Color(0xFF0F172A)
 private val CcMuted = Color(0xFF64748B)
