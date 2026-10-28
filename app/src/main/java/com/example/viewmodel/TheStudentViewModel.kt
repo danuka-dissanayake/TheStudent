@@ -2938,6 +2938,32 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private val _isExpLoading = MutableStateFlow(false)
     val isExpLoading: StateFlow<Boolean> = _isExpLoading.asStateFlow()
 
+    // ── My reputation (ratings I received) ───────────────────────────────────
+    private val _myRatings = MutableStateFlow(ChatMyRatings())
+    val myRatings: StateFlow<ChatMyRatings> = _myRatings.asStateFlow()
+
+    private val _isMyRatingsLoading = MutableStateFlow(false)
+    val isMyRatingsLoading: StateFlow<Boolean> = _isMyRatingsLoading.asStateFlow()
+
+    /**
+     * Pull the ratings I received, including the private notes.
+     *
+     * Only the profile tab calls this: it is the one screen where a student is
+     * looking at themselves, and the notes are nobody else's business.
+     */
+    fun refreshMyRatings() {
+        val session = chatSession() ?: return
+        if (_isMyRatingsLoading.value) return
+        _isMyRatingsLoading.value = true
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            TheStudentChatClient.fetchMyRatings(baseUrl, token).dataOrNull()?.let {
+                _myRatings.value = it
+            }
+            _isMyRatingsLoading.value = false
+        }
+    }
+
     /** Open "Your EXP" and refresh it from the ledger. */
     fun openExp() {
         _uiState.update { it.copy(isExpOpen = true) }

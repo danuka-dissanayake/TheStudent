@@ -65,7 +65,7 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `AiTutorScreen.kt` | 603 | English voice tutor: visualizer, transcript, grammar tip, scenario pills, hands-free, HF settings |
 | `AiLanguageScreen.kt` | 786 | 4 sub-tabs: Voice Conversation, Vocabulary, Grammar quiz, Pronunciation |
 | `AiAssistantScreen.kt` | 4526 | **Flagship**: ChatGPT-style chat, markdown/table/link rendering, chain-of-thought reasoning blocks, model picker, OCR preview, document cards, stop/retry/rate |
-| `ProfileScreen.kt` | 517 | Profile, saved papers/courses, activity history, theme toggle, (logout in VM) |
+| `ProfileScreen.kt` | ~1050 | The student's own record: identity hero (avatar, name, level chip), stats strip, level + badge ladder, reputation card (average, distribution, the private notes only they can read), studies card with subject rows, library tabs (saved / courses / history), and account rows (account, security, appearance, admin, sign out behind a confirmation). Opens `ExpScreen`, `SecurityScreen`, `AdminPanelScreen`. |
 | `AdminPanelScreen.kt` | 1103 | Upload form (thumbnail/PDF/marking-scheme pickers), paper list + delete, backend URL tester |
 | `LearnScreen.kt` | 428 | **Orphaned** — never referenced from `MainActivity` |
 

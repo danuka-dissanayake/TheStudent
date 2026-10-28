@@ -536,12 +536,31 @@ class MainActivity : ComponentActivity() {
                                                                 }
                                                             )
                                                         } else {
+                                                            val expState by viewModel.expState.collectAsStateWithLifecycle()
+                                                            val myRatings by viewModel.myRatings.collectAsStateWithLifecycle()
+                                                            val isRatingsLoading by viewModel.isMyRatingsLoading
+                                                                .collectAsStateWithLifecycle()
+                                                            val isAdmin by viewModel.isAdmin
+                                                                .collectAsStateWithLifecycle()
+
+                                                            // The profile is the one screen that shows a
+                                                            // student their own record, so opening it is
+                                                            // the moment to pull the ledger and the ratings.
+                                                            LaunchedEffect(Unit) {
+                                                                viewModel.refreshExp()
+                                                                viewModel.refreshMyRatings()
+                                                            }
+
                                                             ProfileScreen(
                                                                 userProfile = userProfile,
+                                                                exp = expState,
+                                                                myRatings = myRatings,
+                                                                isRatingsLoading = isRatingsLoading,
                                                                 savedPapers = savedPapers,
                                                                 savedCourses = savedCourses,
                                                                 recentActivities = recentActivities,
                                                                 isDarkTheme = uiState.isDarkTheme,
+                                                                isAdmin = isAdmin,
                                                                 onToggleTheme = { viewModel.toggleTheme() },
                                                                 onOpenAuthDialog = { viewModel.openAuthScreen(false) },
                                                                 onPaperClick = { paperId ->
@@ -549,7 +568,21 @@ class MainActivity : ComponentActivity() {
                                                                         viewModel.openPaperDetail(it)
                                                                     }
                                                                 },
-                                                                onEditAcademic = { viewModel.openAcademicSetup() }
+                                                                onCourseClick = { courseId ->
+                                                                    viewModel.allCourses
+                                                                        .find { it.id == courseId }
+                                                                        ?.let { viewModel.openCourseDetail(it) }
+                                                                },
+                                                                onEditAcademic = { viewModel.openAcademicSetup() },
+                                                                onOpenExp = { viewModel.openExp() },
+                                                                onOpenSecurity = { viewModel.openSecurityPanel() },
+                                                                onOpenAdmin = { viewModel.openAdminPanel() },
+                                                                onSignOut = { viewModel.logout() },
+                                                                onRefresh = {
+                                                                    viewModel.refreshExp()
+                                                                    viewModel.refreshMyRatings()
+                                                                },
+                                                                accountEmail = userProfile.email
                                                             )
                                                         }
                                                     }

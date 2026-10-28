@@ -229,6 +229,24 @@ data class ChatReceivedRating(
     val createdEpoch: Long = 0L
 )
 
+/**
+ * The ratings *I* received: the public summary plus the private notes students
+ * left for me. Only ever returned by `my_ratings`, never to another student.
+ */
+data class ChatMyRatings(
+    val summary: ChatRatingSummary = ChatRatingSummary(),
+    val notes: List<ChatRatingNote> = emptyList()
+)
+
+/** One private note: who said it, how many stars, and what was written. */
+data class ChatRatingNote(
+    val from: String,
+    val stars: Int,
+    val note: String,
+    val subjectLabel: String = "",
+    val createdEpoch: Long = 0L
+)
+
 /** A student's public reputation. Never contains a note or a rater's name. */
 data class ChatRatingSummary(
     val count: Int = 0,

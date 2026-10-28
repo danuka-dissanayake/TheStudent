@@ -10,7 +10,9 @@ import com.example.data.model.ChatHelpState
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
+import com.example.data.model.ChatMyRatings
 import com.example.data.model.ChatRateState
+import com.example.data.model.ChatRatingNote
 import com.example.data.model.ExpTier
 import com.example.data.model.UserExp
 import com.example.data.model.ChatReceivedRating
@@ -335,6 +337,38 @@ object TheStudentChatClient {
                 stars = latest.optInt("stars", 0),
                 raterName = latest.optString("rater_name").ifBlank { "A student" },
                 createdEpoch = latest.optLong("created_epoch", 0L)
+            )
+        }
+    }
+
+    /**
+     * The ratings I received: summary + the private notes students wrote about
+     * me. This is the only endpoint that returns notes, and only for the
+     * student they were written about.
+     */
+    suspend fun fetchMyRatings(
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<ChatMyRatings> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "my_ratings") { json ->
+            val notes = ArrayList<ChatRatingNote>()
+            json.optJSONArray("notes")?.let { array ->
+                for (index in 0 until array.length()) {
+                    val row = array.optJSONObject(index) ?: continue
+                    val text = row.optString("note").trim()
+                    if (text.isEmpty()) continue
+                    notes += ChatRatingNote(
+                        from = row.optString("from").ifBlank { "A student" },
+                        stars = row.optInt("stars", 0),
+                        note = text,
+                        subjectLabel = row.optString("subject_label"),
+                        createdEpoch = row.optLong("created_epoch", 0L)
+                    )
+                }
+            }
+            ChatMyRatings(
+                summary = parseRatingSummary(json.optJSONObject("summary")),
+                notes = notes
             )
         }
     }
