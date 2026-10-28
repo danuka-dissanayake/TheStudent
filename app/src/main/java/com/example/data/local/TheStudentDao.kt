@@ -54,6 +54,15 @@ interface TheStudentDao {
     @Query("UPDATE user_profile SET isLoggedIn = :isLoggedIn WHERE id = 1")
     suspend fun updateLoginStatus(isLoggedIn: Boolean)
 
+    /**
+     * Write just the EXP total, in place.
+     *
+     * A ledger refresh must not re-save the whole profile row from a possibly
+     * stale copy — this touches one column and leaves everything else alone.
+     */
+    @Query("UPDATE user_profile SET points = :points WHERE id = 1")
+    suspend fun updateUserPoints(points: Int)
+
     @Query("DELETE FROM user_profile")
     suspend fun clearUserProfile()
 

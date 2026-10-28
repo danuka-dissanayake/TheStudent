@@ -2916,11 +2916,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val exp = TheStudentChatClient.fetchExpState(baseUrl, token).dataOrNull()
             if (exp != null) {
                 _expState.value = exp
-                // Keep the home pill in step with the ledger.
-                val profile = repository.userProfileFlow.first()
-                if (profile.points != exp.total) {
-                    repository.saveUserProfile(profile.copy(points = exp.total))
-                }
+                // Keep the home pill in step with the ledger. Only the one
+                // column is written: a refresh must never re-save the whole
+                // profile from a copy that could be older than the row.
+                repository.updateUserPoints(exp.total)
             }
             _isExpLoading.value = false
         }

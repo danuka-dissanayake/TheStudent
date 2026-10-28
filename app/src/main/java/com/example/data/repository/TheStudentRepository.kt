@@ -190,6 +190,11 @@ class TheStudentRepository(private val dao: TheStudentDao) {
         dao.clearUserProfile()
     }
 
+    /** Keep the cached EXP total in step with the server ledger. */
+    suspend fun updateUserPoints(points: Int) = withContext(Dispatchers.IO) {
+        dao.updateUserPoints(points)
+    }
+
     suspend fun initializeDefaultDataIfEmpty() = withContext(Dispatchers.IO) {
         // Seed educational content only - strictly NO dummy user profiles or credentials
         // Profiles are populated solely from verified server-side authentication
