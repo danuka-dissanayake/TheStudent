@@ -3,7 +3,6 @@ package com.example.ui.screens
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
@@ -26,13 +25,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.drawscope.DrawScope
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -42,15 +36,16 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.ExpAward
 import com.example.data.model.ExpTier
 import com.example.data.model.UserExp
+import com.example.ui.components.ExpBadgeLadder
+import com.example.ui.components.ExpHeroCard
+import com.example.ui.components.TierMedallion
+import com.example.ui.components.formatExp
 import com.example.ui.theme.EmeraldDark
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.MaisonNeueFontFamily
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
-import kotlin.math.PI
-import kotlin.math.cos
-import kotlin.math.sin
 
 private val ExpInk = Color(0xFF0F172A)
 private val ExpMuted = Color(0xFF64748B)
@@ -58,7 +53,6 @@ private val ExpFaint = Color(0xFF94A3B8)
 private val ExpHairline = Color(0xFFE8EDF3)
 private val ExpBg = Color(0xFFF6F8FB)
 private val ExpMint = Color(0xFFECFDF5)
-private val ExpDeep = Color(0xFF053B2B)
 
 /**
  * "Your EXP" — the reward page.
@@ -141,7 +135,7 @@ fun ExpScreen(
             }
 
             item(key = "badges") {
-                BadgeLadder(total = exp.total)
+                ExpBadgeLadder(total = exp.total)
             }
 
             item(key = "activity_title") {
@@ -244,54 +238,6 @@ private fun ExpHeader(
 // ─────────────────────────────────────────────────────────────────────────────
 //  Hero
 // ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun ExpHeroCard(total: Int, tier: ExpTier) {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(24.dp))
-            .background(
-                Brush.linearGradient(
-                    colors = listOf(ExpDeep, Color(0xFF075E45), EmeraldPrimary),
-                    start = Offset.Zero,
-                    end = Offset.Infinite
-                )
-            )
-            .padding(horizontal = 18.dp, vertical = 20.dp)
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            TierMedallion(code = tier.code, size = 96.dp, glow = true)
-
-            Spacer(Modifier.width(16.dp))
-
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = "Total EXP",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Medium,
-                    color = Color.White.copy(alpha = 0.72f)
-                )
-                Text(
-                    text = formatExp(total),
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 40.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White,
-                    letterSpacing = (-1).sp
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = tier.epithet,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
-                    color = Color.White.copy(alpha = 0.85f)
-                )
-            }
-        }
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Level + today
@@ -548,56 +494,6 @@ private fun RewardDivider() {
     )
 }
 
-@Composable
-private fun BadgeLadder(total: Int) {
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = Color.White,
-        modifier = Modifier.fillMaxWidth()
-    ) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 10.dp, vertical = 16.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.Top
-        ) {
-            ExpTier.LADDER.forEach { step ->
-                val earned = total >= step.min
-                Column(
-                    horizontalAlignment = Alignment.CenterHorizontally,
-                    modifier = Modifier.weight(1f)
-                ) {
-                    TierMedallion(
-                        code = step.code,
-                        size = 44.dp,
-                        glow = false,
-                        earned = earned
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = step.name,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
-                        fontWeight = if (earned) FontWeight.Bold else FontWeight.Medium,
-                        color = if (earned) ExpInk else ExpFaint,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center
-                    )
-                    Text(
-                        text = if (earned) "Earned" else formatExp(step.min),
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.sp,
-                        color = if (earned) EmeraldPrimary else ExpFaint,
-                        maxLines = 1,
-                        textAlign = TextAlign.Center
-                    )
-                }
-            }
-        }
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Activity
 // ─────────────────────────────────────────────────────────────────────────────
@@ -743,116 +639,8 @@ private fun EmptyActivityCard() {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  The medallion
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** One colour per rung, so a badge is recognisable at a glance. */
-private fun badgeColor(code: String): Color = when (code.lowercase()) {
-    "helper" -> Color(0xFF10B981)
-    "guide" -> Color(0xFF0EA5E9)
-    "mentor" -> Color(0xFF8B5CF6)
-    "legend" -> Color(0xFFF59E0B)
-    else -> Color(0xFF059669)
-}
-
-/**
- * A hexagon badge with a star, drawn rather than an icon so it can glow, carry a
- * tier colour and grey out when it is still locked.
- */
-@Composable
-private fun TierMedallion(
-    code: String,
-    size: Dp,
-    glow: Boolean,
-    earned: Boolean = true
-) {
-    val base = if (earned) badgeColor(code) else Color(0xFFCBD5E1)
-    val light = if (earned) lerp(base, Color.White, 0.42f) else Color(0xFFE7EDF3)
-
-    Canvas(modifier = Modifier.size(size)) {
-        val maxRadius = this.size.minDimension / 2f
-        val center = Offset(this.size.width / 2f, this.size.height / 2f)
-        val hexRadius = maxRadius * 0.62f
-
-        if (glow) {
-            // Three soft rings, widest first: a halo, not a drop shadow.
-            drawCircle(base.copy(alpha = 0.10f), maxRadius, center)
-            drawCircle(base.copy(alpha = 0.14f), maxRadius * 0.84f, center)
-            drawCircle(base.copy(alpha = 0.18f), maxRadius * 0.70f, center)
-        }
-
-        // Ribbon tails behind the hexagon.
-        val tail = maxRadius * 0.42f
-        val tailTop = hexRadius * 0.52f
-        val tailBottom = maxRadius * 0.94f
-        listOf(-1f, 1f).forEach { side ->
-            val path = Path().apply {
-                moveTo(center.x + side * tailTop, center.y + hexRadius * 0.40f)
-                lineTo(center.x + side * tail, center.y + tailTop)
-                lineTo(center.x + side * tail * 0.62f, center.y + tailBottom)
-                lineTo(center.x + side * tail * 0.10f, center.y + hexRadius * 0.66f)
-                close()
-            }
-            drawPath(path, color = lerp(base, Color.Black, 0.16f))
-        }
-
-        // Hexagon face.
-        val hex = Path().apply {
-            for (index in 0 until 6) {
-                val angle = (-PI / 2 + index * PI / 3).toFloat()
-                val x = center.x + hexRadius * cos(angle)
-                val y = center.y + hexRadius * sin(angle)
-                if (index == 0) moveTo(x, y) else lineTo(x, y)
-            }
-            close()
-        }
-        drawPath(
-            path = hex,
-            brush = Brush.linearGradient(
-                colors = listOf(light, base),
-                start = Offset(center.x - hexRadius, center.y - hexRadius),
-                end = Offset(center.x + hexRadius, center.y + hexRadius)
-            )
-        )
-        drawPath(
-            path = hex,
-            color = Color.White.copy(alpha = if (glow) 0.55f else 0.35f),
-            style = Stroke(width = maxRadius * 0.05f)
-        )
-
-        // Star.
-        drawStar(
-            center = center,
-            outer = hexRadius * 0.46f,
-            color = if (earned) Color.White.copy(alpha = 0.96f) else Color(0xFFF8FAFC)
-        )
-    }
-}
-
-/** A five-point star, filled. */
-private fun DrawScope.drawStar(center: Offset, outer: Float, color: Color) {
-    val inner = outer * 0.46f
-    val path = Path()
-    for (index in 0 until 10) {
-        val angle = (-PI / 2 + index * PI / 5).toFloat()
-        val radius = if (index % 2 == 0) outer else inner
-        val x = center.x + radius * cos(angle)
-        val y = center.y + radius * sin(angle)
-        if (index == 0) path.moveTo(x, y) else path.lineTo(x, y)
-    }
-    path.close()
-    drawPath(path = path, color = color)
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 //  Helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-/** 1240 → "1,240": big numbers read better with the separator. */
-private fun formatExp(value: Int): String {
-    if (value < 1000) return value.toString()
-    return String.format(Locale.US, "%,d", value)
-}
 
 /** "Today", "Yesterday", or a short date — enough to place an award in time. */
 private fun awardDate(epochSeconds: Long): String {

@@ -86,6 +86,7 @@ an error.
 | --- | --- | --- |
 | GET | `auth.php?action=me` / `profile` | the user object now carries `exp_total`, `exp_today`, `exp_daily_cap`, `exp_tier` |
 | GET | `chat.php?action=exp_state` | `exp: { total, today, daily_cap, tier, rules, recent[] }` |
+| GET | `chat.php?action=profile&peer_id=N` | the peer's **public** slice: `exp: { total, tier, badges_earned, badges_total }` — no history, no today |
 | POST | `chat.php?action=rate` | response now includes `exp` for the rater, so a rating refreshes the number immediately |
 
 `chat.php` is **2.9.0**; the app refuses older chat servers.

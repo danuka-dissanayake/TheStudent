@@ -66,7 +66,7 @@ require_once __DIR__ . '/_exp.php';      // ts_exp_award(), ts_exp_summary()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.9.0';
+const TS_CHAT_API_VERSION          = '2.9.2';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 0;    // no waiting: a question can be answered in two messages
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
@@ -287,6 +287,33 @@ function ts_chat_rating_public(array $row, int $meId, int $now): array
 }
 
 /**
+ * The public slice of a student's EXP: the total and the level it buys.
+ *
+ * Deliberately not `ts_exp_summary()`: no `recent`, no `today`. What a student
+ * did today is nobody else's business; their level and badges are a reputation,
+ * which is exactly what a profile is for.
+ */
+function ts_exp_public(PDO $pdo, int $userId): array
+{
+    $total = ts_exp_total($pdo, $userId);
+    if ($total <= 0) {
+        return ['total' => 0, 'tier' => null, 'badges_earned' => 0,
+                'badges_total' => count(TS_EXP_TIERS)];
+    }
+    return [
+        'total' => $total,
+        'tier'  => ts_exp_tier($total),
+        // How many rungs the total reaches, so a profile can render the ladder
+        // without re-deriving the thresholds.
+        'badges_earned' => count(array_filter(
+            TS_EXP_TIERS,
+            static fn(array $tierRow): bool => $total >= (int) $tierRow['min']
+        )),
+        'badges_total' => count(TS_EXP_TIERS),
+    ];
+}
+
+/**
  * What everybody else is allowed to see about a student's ratings: the
  * average, the number of ratings, the per-subject split and the tag counts.
  * Never a note, never who said what.
@@ -294,10 +321,11 @@ function ts_chat_rating_public(array $row, int $meId, int $now): array
 function ts_chat_rating_summary(PDO $pdo, int $rateeId): array
 {
     $summary = [
-        'count'    => 0,
-        'average'  => null,
-        'subjects' => [],
-        'tags'     => [],
+        'count'     => 0,
+        'average'   => null,
+        'subjects'  => [],
+        'tags'      => [],
+        'breakdown' => [5 => 0, 4 => 0, 3 => 0, 2 => 0, 1 => 0],
     ];
 
     try {
@@ -310,6 +338,20 @@ function ts_chat_rating_summary(PDO $pdo, int $rateeId): array
         $summary['count'] = $count;
         if ($count > 0 && $totals['a'] !== null) {
             $summary['average'] = round((float) $totals['a'], 1);
+        }
+
+        // How many of each score, for the ratings card's five bars. All five
+        // keys are always present so the client can draw a stable shape.
+        $stmt = $pdo->prepare(
+            'SELECT stars, COUNT(*) AS c FROM chat_ratings
+             WHERE ratee_id = :me GROUP BY stars'
+        );
+        $stmt->execute(['me' => $rateeId]);
+        foreach ($stmt->fetchAll() as $starRow) {
+            $star = (int) $starRow['stars'];
+            if ($star >= 1 && $star <= 5) {
+                $summary['breakdown'][$star] = (int) $starRow['c'];
+            }
         }
 
         $stmt = $pdo->prepare(
@@ -1156,6 +1198,10 @@ switch ($action) {
                 // Public reputation: average, count, per-subject split and the
                 // tag counts. Notes are never included here.
                 'ratings'      => ts_chat_rating_summary($pdo, $peerId),
+                // The peer's level and badges, from the same ledger that pays
+                // them. Never the recent awards or today's progress: those are
+                // private, and nobody needs to audit a classmate.
+                'exp'          => ts_exp_public($pdo, $peerId),
                 'server_epoch' => $now,
             ]);
         } catch (Throwable $e) {

@@ -11,6 +11,7 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
 import com.example.data.model.ChatRateState
+import com.example.data.model.ExpTier
 import com.example.data.model.UserExp
 import com.example.data.model.ChatReceivedRating
 import com.example.data.model.ChatRating
@@ -382,6 +383,48 @@ object TheStudentChatClient {
         )
     }
 
+    /**
+     * A peer's public EXP: the total and the level it buys. There is no history
+     * here on purpose — the server does not send one.
+     */
+    private fun parsePublicExp(obj: JSONObject?): UserExp {
+        if (obj == null) return UserExp()
+        val total = obj.optInt("total", 0)
+        val local = ExpTier.forTotal(total)
+        val tierObj = obj.optJSONObject("tier")
+        val tier = if (tierObj == null) {
+            local
+        } else {
+            ExpTier(
+                code = tierObj.optString("code").orEmpty().ifBlank { local.code },
+                name = tierObj.optString("name").orEmpty().ifBlank { local.name },
+                level = tierObj.optInt("level", local.level),
+                nextName = tierObj.optString("next_name").orEmpty()
+                    .takeIf { it.isNotBlank() },
+                nextLevel = if (tierObj.has("next_level") && !tierObj.isNull("next_level")) {
+                    tierObj.optInt("next_level", 0)
+                } else {
+                    local.nextLevel
+                },
+                nextAt = if (tierObj.has("next_min") && !tierObj.isNull("next_min")) {
+                    tierObj.optInt("next_min", 0)
+                } else {
+                    local.nextAt
+                },
+                toNext = tierObj.optInt("to_next", local.toNext),
+                progress = tierObj.optDouble("progress", local.progress.toDouble()).toFloat(),
+                min = tierObj.optInt("min", local.min),
+                cap = tierObj.optInt("cap", local.cap),
+                nextCap = if (tierObj.has("next_cap") && !tierObj.isNull("next_cap")) {
+                    tierObj.optInt("next_cap", 0)
+                } else {
+                    local.nextCap
+                }
+            )
+        }
+        return UserExp(total = total, tier = tier)
+    }
+
     private fun parseRatingSummary(obj: JSONObject?): ChatRatingSummary {
         if (obj == null) return ChatRatingSummary()
 
@@ -411,11 +454,21 @@ object TheStudentChatClient {
             }
         }
 
+        // The five bars. Absent on older servers, where the card simply shows
+        // the average and the count without a distribution.
+        val breakdown = LinkedHashMap<Int, Int>()
+        obj.optJSONObject("breakdown")?.let { stars ->
+            for (value in 5 downTo 1) {
+                breakdown[value] = stars.optInt(value.toString(), 0)
+            }
+        }
+
         return ChatRatingSummary(
             count = obj.optInt("count", 0),
             average = if (obj.isNull("average")) null else obj.optDouble("average", 0.0),
             subjects = subjects,
-            tags = tags
+            tags = tags,
+            breakdown = breakdown
         )
     }
 
@@ -693,7 +746,9 @@ object TheStudentChatClient {
                     null
                 } else {
                     json.optLong("joined_epoch", 0L).takeIf { it > 0L }
-                }
+                },
+                ratings = parseRatingSummary(json.optJSONObject("ratings")),
+                exp = parsePublicExp(json.optJSONObject("exp"))
             )
         }
     }

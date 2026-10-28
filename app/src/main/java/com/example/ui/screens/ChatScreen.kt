@@ -104,6 +104,8 @@ import com.example.data.model.ChatHelpRequest
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
+import com.example.ui.components.ExpBadgeLadder
+import com.example.ui.components.ExpHeroCard
 import com.example.ui.components.RatingCelebrationOverlay
 import com.example.data.model.ChatRateState
 import com.example.data.model.ChatRatingSummary
@@ -1854,45 +1856,51 @@ private fun ChatPeerProfileScreen(
                         color = if (peer.isOnline) EmeraldDark else ChatMuted,
                         textAlign = TextAlign.Center
                     )
-                    Spacer(Modifier.height(20.dp))
-                    // Message plus Ask for help, side by side and equal
-                    // width so they fit any phone: two fixed-width capsules
-                    // overflowed the hero on a 360 dp screen. There is still no
-                    // block / mute on the relay, so the mockup's "..." stays
-                    // out — the help request is a real, server-backed action.
+                    Spacer(Modifier.height(18.dp))
+                    // Two compact capsules rather than two wide ones: 38 dp tall
+                    // with a real weight difference (Message is the action people
+                    // came for, so it gets the solid fill and the glow), and the
+                    // narrower "Ask for help" carries its own icon chip. Still
+                    // side by side, still fits a 360 dp screen.
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.spacedBy(9.dp),
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Surface(
                             onClick = onMessage,
                             shape = RoundedCornerShape(50),
-                            color = EmeraldPrimary,
-                            shadowElevation = 8.dp,
+                            color = Color.Transparent,
+                            shadowElevation = 10.dp,
                             modifier = Modifier
-                                .weight(1f)
-                                .height(46.dp)
+                                .weight(1.25f)
+                                .height(38.dp)
                                 .testTag("chat_profile_message")
                         ) {
                             Row(
                                 verticalAlignment = Alignment.CenterVertically,
                                 horizontalArrangement = Arrangement.Center,
-                                modifier = Modifier.fillMaxSize()
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .background(
+                                        Brush.horizontalGradient(
+                                            listOf(Color(0xFF10B981), EmeraldPrimary)
+                                        )
+                                    )
                             ) {
                                 Icon(
                                     Icons.AutoMirrored.Filled.Send,
                                     contentDescription = null,
                                     tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(14.dp)
                                 )
-                                Spacer(Modifier.width(8.dp))
+                                Spacer(Modifier.width(6.dp))
                                 Text(
                                     text = "Message",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
                                     maxLines = 1
@@ -1904,10 +1912,11 @@ private fun ChatPeerProfileScreen(
                             onClick = onAskForHelp,
                             shape = RoundedCornerShape(50),
                             color = Color.White,
-                            border = BorderStroke(1.5.dp, Color(0xFFA7F3D0)),
+                            border = BorderStroke(1.2.dp, Color(0xFF6EE7B7)),
+                            shadowElevation = 3.dp,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(46.dp)
+                                .height(38.dp)
                                 .testTag("chat_profile_help")
                         ) {
                             Row(
@@ -1915,23 +1924,59 @@ private fun ChatPeerProfileScreen(
                                 horizontalArrangement = Arrangement.Center,
                                 modifier = Modifier.fillMaxSize()
                             ) {
-                                Icon(
-                                    Icons.Default.Forum,
-                                    contentDescription = null,
-                                    tint = EmeraldDark,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(Modifier.width(8.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .size(20.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFFD1FAE5)),
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        Icons.Default.Forum,
+                                        contentDescription = null,
+                                        tint = EmeraldDark,
+                                        modifier = Modifier.size(11.dp)
+                                    )
+                                }
+                                Spacer(Modifier.width(6.dp))
                                 Text(
-                                    text = "Ask for help",
+                                    text = "Ask help",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.5.sp,
+                                    fontSize = 12.5.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = EmeraldDark,
                                     maxLines = 1
                                 )
                             }
                         }
+                    }
+                }
+
+                // ── level ────────────────────────────────────────────────────
+                // The same hero the EXP screen uses, so a level reads the same
+                // everywhere in the app. Hidden entirely for a student with no
+                // EXP yet rather than showing a zero.
+                profile.exp.total.takeIf { it > 0 }?.let { total ->
+                    ExpHeroCard(
+                        total = total,
+                        tier = profile.exp.tier,
+                        compact = true,
+                        modifier = Modifier
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                            .testTag("chat_profile_exp")
+                    )
+                }
+
+                // ── ratings ──────────────────────────────────────────────────
+                PeerRatingsCard(profile.ratings)
+
+                // ── badges ───────────────────────────────────────────────────
+                if (profile.exp.total > 0) {
+                    ProfileCard(title = "Badges") {
+                        ExpBadgeLadder(
+                            total = profile.exp.total,
+                            medallionSize = 42.dp
+                        )
                     }
                 }
 
@@ -1957,15 +2002,11 @@ private fun ChatPeerProfileScreen(
                             )
                         }
                         if (profile.subjects.isNotEmpty()) {
-                            // The three subjects are what actually decide whether
-                            // this student can help with a specific question.
-                            ProfileInfoRow(
-                                icon = Icons.Default.AutoStories,
-                                tint = Color(0xFF8B5CF6),
-                                tintSoft = Color(0xFFF1EAFE),
-                                label = "Subjects",
-                                value = profile.subjects.joinToString(" · ")
-                            )
+                            // The three subjects are what decide whether this
+                            // student can help with a specific question, so each
+                            // one gets its own line. Joined with " · " they ran
+                            // off the card and wrapped mid-subject.
+                            SubjectListRow(subjects = profile.subjects)
                         }
                         if (profile.medium.isNotBlank()) {
                             ProfileInfoRow(
@@ -2083,6 +2124,189 @@ private fun ChatPeerProfileScreen(
                             color = ChatFaint
                         )
                     }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * A student's reputation, at a glance.
+ *
+ * Big average, five stars, the count, a five-bar distribution and the two tag
+ * words other students used most. A student nobody has rated yet gets a plain
+ * "New" state — never "0.0".
+ */
+@Composable
+private fun PeerRatingsCard(ratings: ChatRatingSummary) {
+    ProfileCard(title = "Ratings") {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = if (ratings.hasRatings) ratings.averageLine else "New",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = if (ratings.hasRatings) 34.sp else 22.sp,
+                fontWeight = FontWeight.ExtraBold,
+                color = if (ratings.hasRatings) ChatInk else ChatMuted,
+                letterSpacing = (-0.8).sp
+            )
+            Spacer(Modifier.width(10.dp))
+            Column {
+                Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                    val fullStars = ratings.average?.let { kotlin.math.round(it).toInt() } ?: 0
+                    repeat(5) { index ->
+                        Icon(
+                            imageVector = Icons.Default.Star,
+                            contentDescription = null,
+                            tint = if (index < fullStars) Color(0xFFFBBF24) else Color(0xFFE2E8F0),
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = if (ratings.hasRatings) {
+                        val plural = if (ratings.count == 1) "" else "s"
+                        "${ratings.count} rating$plural from students"
+                    } else {
+                        "No ratings yet"
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    color = ChatMuted
+                )
+            }
+        }
+
+        if (ratings.hasRatings && ratings.breakdown.isNotEmpty()) {
+            Spacer(Modifier.height(14.dp))
+            // Five rows, 5★ down to 1★: each bar is that share of all ratings.
+            for (star in 5 downTo 1) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(vertical = 2.dp)
+                ) {
+                    Text(
+                        text = "$star",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ChatFaint,
+                        modifier = Modifier.width(10.dp)
+                    )
+                    Icon(
+                        imageVector = Icons.Default.Star,
+                        contentDescription = null,
+                        tint = Color(0xFFFBBF24),
+                        modifier = Modifier.size(10.dp)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFFF1F5F9))
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth(ratings.shareOf(star))
+                                .fillMaxHeight()
+                                .clip(RoundedCornerShape(50))
+                                .background(Color(0xFFFBBF24))
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "${ratings.breakdown[star] ?: 0}",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        color = ChatFaint,
+                        modifier = Modifier.width(16.dp),
+                        textAlign = TextAlign.End
+                    )
+                }
+            }
+        }
+
+        if (ratings.topTags.isNotEmpty()) {
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                ratings.topTags.forEach { tag ->
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color(0xFFE9F8F0))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = tag.label,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = EmeraldDark
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Subjects, one per row.
+ *
+ * A joining " · " string wrapped mid-subject and lost the fact that these are
+ * three separate things. Each subject is now its own tappable-weight line with a
+ * small subject-coloured dot, so the list reads as a list.
+ */
+@Composable
+private fun SubjectListRow(subjects: List<String>) {
+    Row {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(Color(0xFFF1EAFE)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = Icons.Default.AutoStories,
+                contentDescription = null,
+                tint = Color(0xFF8B5CF6),
+                modifier = Modifier.size(17.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = "Subjects",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 10.5.sp,
+                fontWeight = FontWeight.Medium,
+                color = ChatFaint
+            )
+            Spacer(Modifier.height(6.dp))
+            subjects.forEachIndexed { index, subject ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 3.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(5.dp)
+                            .background(Color(0xFF8B5CF6), CircleShape)
+                    )
+                    Spacer(Modifier.width(9.dp))
+                    Text(
+                        text = subject,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = ChatInk,
+                        modifier = Modifier.testTag("chat_profile_subject_$index")
+                    )
                 }
             }
         }

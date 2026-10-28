@@ -234,7 +234,9 @@ data class ChatRatingSummary(
     val count: Int = 0,
     val average: Double? = null,
     val subjects: List<ChatRatingSubject> = emptyList(),
-    val tags: List<ChatRatingTag> = emptyList()
+    val tags: List<ChatRatingTag> = emptyList(),
+    /** How many ratings gave each score, 5 down to 1. */
+    val breakdown: Map<Int, Int> = emptyMap()
 ) {
     val hasRatings: Boolean get() = count > 0
 
@@ -260,6 +262,12 @@ data class ChatRatingSummary(
 
     /** The two tag words worth showing on a profile row. */
     val topTags: List<ChatRatingTag> get() = tags.take(2)
+
+    /** The share of ratings that gave [stars], 0…1 — one bar on the card. */
+    fun shareOf(stars: Int): Float {
+        if (count <= 0) return 0f
+        return ((breakdown[stars] ?: 0).toFloat() / count).coerceIn(0f, 1f)
+    }
 }
 
 data class ChatRatingSubject(
@@ -332,7 +340,17 @@ data class ChatPeerProfile(
     /** Unix seconds, when the account was created; null if unknown. */
     val joinedEpoch: Long? = null,
     /** Unix seconds of the first message between us on this phone; null if none. */
-    val chattingSinceEpoch: Long? = null
+    val chattingSinceEpoch: Long? = null,
+    /**
+     * Their level and badges, from the server's EXP ledger. Public by design —
+     * a level is a reputation. Never the award history.
+     */
+    val exp: UserExp = UserExp(),
+    /**
+     * Their public reputation. Was always sent by `action=profile` and simply
+     * never drawn; the profile now shows it.
+     */
+    val ratings: ChatRatingSummary = ChatRatingSummary()
 ) {
     /** True when there is at least one education row worth rendering. */
     val hasEducation: Boolean
