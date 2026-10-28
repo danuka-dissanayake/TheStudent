@@ -849,7 +849,7 @@ private fun SectionTitle(title: String, subtitle: String? = null) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun rememberShimmerBrush(): Brush {
+private fun rememberShimmerBrush(onDark: Boolean = false): Brush {
     val transition = rememberInfiniteTransition(label = "courses_shimmer")
     val shift by transition.animateFloat(
         initialValue = -600f,
@@ -857,8 +857,18 @@ private fun rememberShimmerBrush(): Brush {
         animationSpec = infiniteRepeatable(tween(1150, easing = LinearEasing)),
         label = "courses_shimmer_shift"
     )
+    val colors = if (onDark) {
+        // Over the coloured hero: white sweeps, never grey on gradient.
+        listOf(
+            Color.White.copy(alpha = 0.10f),
+            Color.White.copy(alpha = 0.26f),
+            Color.White.copy(alpha = 0.10f)
+        )
+    } else {
+        listOf(Color(0xFFEDF1F6), Color(0xFFF8FAFC), Color(0xFFE9EEF5))
+    }
     return Brush.linearGradient(
-        colors = listOf(Color(0xFFEDF1F6), Color(0xFFF8FAFC), Color(0xFFE9EEF5)),
+        colors = colors,
         start = Offset(shift, 0f),
         end = Offset(shift + 600f, 600f)
     )
@@ -1573,6 +1583,18 @@ private fun CourseDetail(
     onOpenProvider: () -> Unit,
     onPlayVideo: (String) -> Unit
 ) {
+    // Opening a card is a page change, so it gets the same ~0.4s of shimmer the
+    // list does — the detail never snaps in fully formed.
+    var loading by remember(course.id) { mutableStateOf(true) }
+    LaunchedEffect(course.id) {
+        delay(420)
+        loading = false
+    }
+    if (loading) {
+        CourseDetailSkeleton(course = course, onBack = onBack)
+        return
+    }
+
     val tint = paperCoverTint(course.subject)
     val video = course.videoId?.let { CourseCatalog.video(it) }
 
@@ -2072,6 +2094,115 @@ private fun YouTubeEmbedDialog(
                     }
                 }
             }
+        }
+    }
+}
+
+/**
+ * The detail page's loading state. It mirrors the real page — coloured hero,
+ * facts card, certificate row, about text, video, sticky button — so nothing
+ * jumps when the content arrives. The back button is real from the first frame:
+ * a loading state must never trap you on a screen.
+ */
+@Composable
+private fun CourseDetailSkeleton(course: CatalogCourse, onBack: () -> Unit) {
+    val tint = paperCoverTint(course.subject)
+    val light = rememberShimmerBrush()
+    val dark = rememberShimmerBrush(onDark = true)
+
+    Column(
+        modifier = Modifier
+            .fillMaxSize()
+            .testTag("course_detail_skeleton")
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .background(
+                    Brush.linearGradient(
+                        listOf(tint.copy(alpha = 0.9f), tint.copy(alpha = 0.6f))
+                    )
+                )
+                .statusBarsPadding()
+                .padding(horizontal = 16.dp)
+                .padding(top = 8.dp, bottom = 18.dp)
+        ) {
+            Column {
+                Surface(
+                    onClick = onBack,
+                    shape = CircleShape,
+                    color = Color.White.copy(alpha = 0.18f),
+                    modifier = Modifier
+                        .size(40.dp)
+                        .testTag("course_detail_back")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Icon(
+                            Icons.AutoMirrored.Filled.ArrowBack,
+                            contentDescription = "Back",
+                            tint = Color.White,
+                            modifier = Modifier.size(19.dp)
+                        )
+                    }
+                }
+                Spacer(Modifier.height(18.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.92f)
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(dark)
+                )
+                Spacer(Modifier.height(9.dp))
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(0.6f)
+                        .height(24.dp)
+                        .clip(RoundedCornerShape(8.dp))
+                        .background(dark)
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        modifier = Modifier
+                            .size(24.dp)
+                            .clip(RoundedCornerShape(7.dp))
+                            .background(dark)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier
+                            .width(150.dp)
+                            .height(13.dp)
+                            .clip(RoundedCornerShape(6.dp))
+                            .background(dark)
+                    )
+                }
+            }
+        }
+
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            ShimmerBlock(light, Modifier.fillMaxWidth().height(108.dp), 16)
+            ShimmerBlock(light, Modifier.fillMaxWidth().height(64.dp), 16)
+            ShimmerBlock(light, Modifier.width(150.dp).height(16.dp), 6)
+            ShimmerBlock(light, Modifier.fillMaxWidth().height(38.dp), 10)
+            ShimmerBlock(light, Modifier.fillMaxWidth().height(16.dp), 6)
+            ShimmerBlock(light, Modifier.fillMaxWidth().aspectRatio(16f / 9f), 16)
+        }
+
+        Spacer(Modifier.weight(1f))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+                .height(48.dp)
+        ) {
+            ShimmerBlock(light, Modifier.fillMaxSize(), 14)
         }
     }
 }

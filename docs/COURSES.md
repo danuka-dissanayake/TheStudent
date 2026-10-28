@@ -126,7 +126,11 @@ nothing happened. So:
 
 - **on arrival**, ~0.7s of shimmer that mirrors the real layout (slider, video
   cards, provider tiles, course rows), so the content lands without a jump;
-- **on a filter change**, ~0.4s of shimmer over the results.
+- **on a filter change**, ~0.4s of shimmer over the results;
+- **when a course card is opened**, ~0.4s of detail shimmer — coloured hero with
+  white sweeps, facts card, certificate row, about lines, video block and the
+  sticky button. The back button on that skeleton is real, so a loading state
+  can never trap you (tag `course_detail_skeleton`).
 
 Typing in the search field does **not** shimmer — flashing the list on every
 keystroke would be worse than no animation. The shimmer is one animated
@@ -189,6 +193,7 @@ mark is for; it is never used as TheStudent's own branding.
 `courses_subject_*`, `courses_featured_{id}`, `courses_video_{videoId}`,
 `courses_provider_{name}`, `courses_card_{id}`, `courses_clear_filters`,
 `courses_empty`, `courses_empty_clear`, `courses_skeleton`,
+`course_detail_skeleton`,
 `courses_credit_block`, `course_detail_{id}`, `course_detail_back`,
 `course_detail_video`, `course_detail_open`, `course_video_player`,
 `course_video_close`, `course_video_open_youtube`, `home_course_collection_card`.
@@ -227,3 +232,4 @@ mark is for; it is never used as TheStudent's own branding.
 | All filters in one place | three fixed chip rows ate the screen | one `Filters` button + a bottom sheet with grouped chips, applied live |
 | Video showed an empty black card | WebView embed without a proper origin/referer | replaced with `YouTubePlayerView` (android-youtube-player 12.1.2) |
 | Wanted shimmer on filters and entry | no loading state | animated shimmer on arrival (0.7s) and on facet changes (0.4s) |
+| Course detail still popped in | only the list had a loading state | detail gets its own 0.4s shimmer with a working back button |
