@@ -180,5 +180,14 @@ data class ProfileSetupSubmission(
     val institution: String,
     val streamOrDegree: String,
     val password: String? = null,
-    val avatarJpeg: ByteArray? = null
+    val avatarJpeg: ByteArray? = null,
+    /**
+     * The structured academic profile collected on the same screen.
+     *
+     * `targetExam` / `streamOrDegree` are still sent because the setup endpoint
+     * validates them and older builds read them, but they are now *derived* from
+     * this: the stage, grade, stream, subjects, medium and — for undergraduates —
+     * the university and the year of study are the real record.
+     */
+    val academic: AcademicProfile? = null
 )

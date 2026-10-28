@@ -86,7 +86,7 @@ const TS_PROFILE_STREAM_MIN         = 2;
 const TS_PROFILE_STREAM_MAX         = 150;
 
 /** Curricula the profile screen offers. Anything else is rejected. */
-const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Professional'];
+const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Professional', 'Grades 6–9'];
 
 /** Mediums the academic step offers. Free text here would split matching later. */
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];

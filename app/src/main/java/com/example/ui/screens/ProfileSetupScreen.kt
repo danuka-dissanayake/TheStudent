@@ -94,6 +94,8 @@ import coil.compose.AsyncImage
 import com.example.R
 import com.example.data.model.ProfileSetupSubmission
 import com.example.data.model.UserProfile
+import com.example.data.model.AcademicCatalog
+import com.example.data.model.AcademicProfile
 import com.example.data.remote.AvatarPreparer
 import com.example.ui.components.StudentLoadingSpinner
 import com.example.ui.components.TheStudentAppBackground
@@ -116,7 +118,7 @@ private val SectionGap = 14.dp
  *
  * Shown straight after a successful sign-up / sign-in and on every cold start
  * until the server reports `profile_completed: true`. It collects what an email
- * sign-up or a Google account cannot provide: phone number, curriculum,
+ * sign-up or a Google account cannot provide: phone number, academic details,
  * school/stream, a profile photo, and (for Google-only accounts) a password.
  *
  * Layout notes
@@ -159,9 +161,16 @@ fun ProfileSetupScreen(
         )
     }
     var phone by remember(initialProfile.email) { mutableStateOf("") }
-    var targetExam by remember(initialProfile.email) { mutableStateOf("") }
+    // The whole academic form is collected here now, not just a curriculum chip
+    // and a free-text stream: the stage decides the subjects, the exam year and
+    // the university, and the matcher needs all of it. A/L is only the default
+    // selection, not an assumption.
+    var academic by remember(initialProfile.email) {
+        mutableStateOf(
+            AcademicProfile(examLevel = AcademicCatalog.LEVEL_AL)
+        )
+    }
     var institution by remember(initialProfile.email) { mutableStateOf("") }
-    var streamOrDegree by remember(initialProfile.email) { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
@@ -221,19 +230,12 @@ fun ProfileSetupScreen(
         else -> "Enter a valid number, e.g. 071 234 5678."
     }
 
-    val examError = if (targetExam.isBlank()) "Please choose your curriculum." else null
+    val academicError = if (academic.isComplete) null else academicTodo(academic)
 
     val institutionError = when {
         institution.isBlank() -> "Please enter your school or institution."
         institution.trim().length < 2 -> "That looks too short."
         institution.trim().length > 120 -> "Please use at most 120 characters."
-        else -> null
-    }
-
-    val streamError = when {
-        streamOrDegree.isBlank() -> "Please choose or type your stream."
-        streamOrDegree.trim().length < 2 -> "That looks too short."
-        streamOrDegree.trim().length > 150 -> "Please use at most 150 characters."
         else -> null
     }
 
@@ -255,8 +257,8 @@ fun ProfileSetupScreen(
     val hasPhoto = avatarBytes != null || existingAvatarUrl.isNotBlank()
     val photoErrorShown = photoError ?: if (!hasPhoto) "Add a profile photo to continue." else null
 
-    val isFormValid = nameError == null && phoneError == null && examError == null &&
-        institutionError == null && streamError == null &&
+    val isFormValid = nameError == null && phoneError == null && academicError == null &&
+        institutionError == null &&
         passwordError == null && confirmError == null &&
         photoErrorShown == null
 
@@ -264,9 +266,8 @@ fun ProfileSetupScreen(
     val checks = listOf(
         nameError == null,
         phoneError == null,
-        examError == null,
+        academicError == null,
         institutionError == null,
-        streamError == null,
         hasPhoto,
         !needsPassword || passwordError == null
     )
@@ -288,11 +289,15 @@ fun ProfileSetupScreen(
             ProfileSetupSubmission(
                 fullName = fullName.trim(),
                 phone = phone.trim(),
-                targetExam = targetExam,
+                // The legacy columns are derived from the structured profile:
+                // complete_profile still validates them, and the admin panel and
+                // older builds still read them.
+                targetExam = targetExamFor(academic),
                 institution = institution.trim(),
-                streamOrDegree = streamOrDegree.trim(),
+                streamOrDegree = streamOrDegreeFor(academic),
                 password = if (needsPassword) password else null,
-                avatarJpeg = avatarBytes
+                avatarJpeg = avatarBytes,
+                academic = academic
             )
         )
     }
@@ -466,36 +471,16 @@ fun ProfileSetupScreen(
                     )
                 }
 
-                // ── study details ────────────────────────────────────────────
+                // ── academic details ─────────────────────────────────────────
+                // The full academic step, live in the setup form: stage, grade,
+                // stream, subjects, medium and — for undergraduates — the
+                // university and the year. Asking here means the student never
+                // lands on a dashboard the matcher cannot read.
                 ProfileSectionCard(
-                    title = "Where you study",
-                    subtitle = "We use this to show the right syllabus and papers",
+                    title = "Academic details",
+                    subtitle = "What you study decides who can help you",
                     icon = Icons.Filled.School
                 ) {
-                    Text(
-                        text = "Curriculum",
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-                    Spacer(Modifier.height(10.dp))
-                    ExamSelector(
-                        selected = targetExam,
-                        onSelect = { exam ->
-                            targetExam = exam
-                            // Clear a stream that does not belong to the new
-                            // curriculum instead of silently keeping it.
-                            if (streamOrDegree.isNotBlank() && streamOrDegree !in streamsFor(exam)) {
-                                streamOrDegree = ""
-                            }
-                        }
-                    )
-                    if (submitted && examError != null) {
-                        Spacer(Modifier.height(6.dp))
-                        Text(examError, style = MaterialTheme.typography.bodySmall, color = RedError)
-                    }
-
-                    Spacer(Modifier.height(16.dp))
                     ProfileField(
                         value = institution,
                         onValueChange = { institution = it.take(120) },
@@ -507,65 +492,21 @@ fun ProfileSetupScreen(
                     )
 
                     Spacer(Modifier.height(16.dp))
-                    Text(
-                        text = if (targetExam == "University" || targetExam == "Professional") {
-                            "Degree / programme"
-                        } else {
-                            "Stream"
-                        },
-                        style = MaterialTheme.typography.labelLarge,
-                        fontWeight = FontWeight.SemiBold,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+
+                    AcademicStageForm(
+                        profile = academic,
+                        onChange = { academic = it },
+                        flat = true
                     )
-                    Spacer(Modifier.height(8.dp))
-                    if (targetExam.isBlank()) {
+
+                    if (submitted && academicError != null) {
+                        Spacer(Modifier.height(10.dp))
                         Text(
-                            text = "Choose a curriculum above to see the options.",
+                            text = academicError,
                             style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = RedError
                         )
-                    } else {
-                        FlowRow(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(8.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp)
-                        ) {
-                            streamsFor(targetExam).forEach { option ->
-                                FilterChip(
-                                    selected = streamOrDegree == option,
-                                    onClick = { streamOrDegree = option },
-                                    label = {
-                                        Text(
-                                            option,
-                                            fontSize = 12.sp,
-                                            maxLines = 1
-                                        )
-                                    },
-                                    shape = RoundedCornerShape(50),
-                                    colors = FilterChipDefaults.filterChipColors(
-                                        selectedContainerColor = EmeraldPrimary,
-                                        selectedLabelColor = Color.White
-                                    ),
-                                    border = FilterChipDefaults.filterChipBorder(
-                                        enabled = true,
-                                        selected = streamOrDegree == option,
-                                        borderColor = MaterialTheme.colorScheme.outline.copy(alpha = 0.4f),
-                                        selectedBorderColor = EmeraldPrimary
-                                    )
-                                )
-                            }
-                        }
                     }
-                    Spacer(Modifier.height(12.dp))
-                    ProfileField(
-                        value = streamOrDegree,
-                        onValueChange = { streamOrDegree = it.take(150) },
-                        label = "Or type it",
-                        placeholder = "e.g. Physical Science",
-                        error = if (submitted) streamError else null,
-                        keyboardType = KeyboardType.Text,
-                        testTag = "profile_stream"
-                    )
                 }
 
                 // ── password (Google-only accounts) ──────────────────────────
@@ -681,26 +622,6 @@ private fun String?.cleanValue(): String {
     val value = this?.trim().orEmpty()
     return if (value.isEmpty() || value.equals("null", ignoreCase = true)) "" else value
 }
-
-private fun streamsFor(exam: String): List<String> = when (exam) {
-    "G.C.E. O/L" -> listOf("Grade 10", "Grade 11", "Commerce", "Arts", "Science")
-    "University" -> listOf(
-        "Engineering", "IT / Computing", "Medicine", "Science",
-        "Business", "Arts", "Law", "Other"
-    )
-    "Professional" -> listOf("BIT", "BCS", "CIMA", "ACCA", "Other")
-    else -> listOf(
-        "Physical Science", "Biological Science", "Commerce",
-        "Arts", "Technology", "Common"
-    )
-}
-
-private val examOptions = listOf(
-    Triple("G.C.E. O/L", "Grade 10–11", Icons.Filled.School),
-    Triple("G.C.E. A/L", "Grade 12–13", Icons.Filled.School),
-    Triple("University", "Undergraduate", Icons.Filled.AccountCircle),
-    Triple("Professional", "BIT · BCS · CIMA", Icons.Filled.Badge)
-)
 
 @Composable
 private fun AvatarPicker(
@@ -947,107 +868,3 @@ private fun ProfileField(
     )
 }
 
-@Composable
-private fun ExamSelector(selected: String, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        examOptions.chunked(2).forEach { rowItems ->
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                rowItems.forEach { (exam, hint, icon) ->
-                    val isSelected = selected == exam
-                    Column(
-                        modifier = Modifier
-                            .weight(1f)
-                            .clip(RoundedCornerShape(14.dp))
-                            .background(
-                                if (isSelected) EmeraldPrimary.copy(alpha = 0.10f)
-                                else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
-                            )
-                            .border(
-                                width = if (isSelected) 1.5.dp else 1.dp,
-                                color = if (isSelected) EmeraldPrimary
-                                else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f),
-                                shape = RoundedCornerShape(14.dp)
-                            )
-                            .clickable { onSelect(exam) }
-                            .padding(horizontal = 10.dp, vertical = 10.dp)
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(5.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSelected) Icons.Filled.Check else icon,
-                                contentDescription = null,
-                                tint = if (isSelected) EmeraldDark
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Text(
-                                text = exam,
-                                style = MaterialTheme.typography.labelMedium,
-                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isSelected) EmeraldDark else MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1
-                            )
-                        }
-                        Spacer(Modifier.height(1.dp))
-                        Text(
-                            text = hint,
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1
-                        )
-                    }
-                }
-                if (rowItems.size == 1) Spacer(Modifier.weight(1f))
-            }
-        }
-    }
-}
-
-@Composable
-private fun PasswordStrengthBar(password: String) {
-    var score = 0
-    if (password.length >= 8) score++
-    if (password.length >= 12) score++
-    if (password.any { it.isDigit() }) score++
-    if (password.any { !it.isLetterOrDigit() }) score++
-    if (password.any { it.isUpperCase() }) score++
-
-    val (label, color) = when {
-        score <= 2 -> "Weak" to RedError
-        score == 3 -> "Fair" to Color(0xFFF59E0B)
-        score == 4 -> "Good" to Color(0xFF10B981)
-        else -> "Strong" to EmeraldDark
-    }
-
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .heightIn(min = 16.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
-    ) {
-        repeat(5) { index ->
-            Box(
-                modifier = Modifier
-                    .weight(1f)
-                    .height(5.dp)
-                    .clip(CircleShape)
-                    .background(
-                        if (index < score) color
-                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
-                    )
-            )
-        }
-        Text(
-            text = label,
-            style = MaterialTheme.typography.labelSmall,
-            fontWeight = FontWeight.SemiBold,
-            color = color
-        )
-    }
-}

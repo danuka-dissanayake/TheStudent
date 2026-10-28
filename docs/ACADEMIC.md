@@ -1,7 +1,20 @@
 # Academic details — the four stages the app models
 
-The academic step (`ui/screens/AcademicSetupScreen.kt`) is the data behind help
-matching. It is not a free-text "what do you study" box: the matcher needs the
+The academic step is collected in two places, from **one shared form**
+(`ui/screens/AcademicFormSections.kt` → `AcademicStageForm`):
+
+* `ProfileSetupScreen` — the mandatory step after sign-up. It collects the whole
+  academic record, so a student never lands on a dashboard the matcher cannot read.
+* `AcademicSetupScreen` — the same form later, opened from the Profile tab.
+
+The server call for the setup screen happens right after `complete_profile`
+succeeds (`TheStudentViewModel.submitProfileSetup`): `target_exam` and
+`stream_or_degree` are *derived* from the structured profile because the setup
+endpoint still validates them, then `action=academic_profile` saves the real
+record. If that second call fails the sign-up still completes and the student is
+told they can add the details from Profile.
+
+It is the data behind help matching. It is not a free-text "what do you study" box: the matcher needs the
 stage, the subjects and the medium, because two students both typing
 "Technology" tells you nothing about whether they share Science for Technology,
 and a Sinhala-medium student cannot help a Tamil-medium one.

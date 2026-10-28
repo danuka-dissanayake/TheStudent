@@ -2786,7 +2786,32 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
             when (result) {
                 is AuthApiResult.Success -> {
-                    val profile = result.profile.copy(isLoggedIn = true, profileCompleted = true)
+                    // The setup screen now collects the whole academic step, so
+                    // the structured profile is pushed as soon as the account
+                    // exists. A failure here must not undo the sign-up: the
+                    // student is in, and can fix the details from Profile.
+                    var finalProfile = result.profile
+                    var academicSaved = submission.academic == null
+                    val academic = submission.academic
+                    if (academic != null && academic.isComplete) {
+                        when (
+                            val academicResult = TheStudentAuthClient.saveAcademicProfile(
+                                backendBaseUrl = serverUrlState.value,
+                                token = token,
+                                profile = academic
+                            )
+                        ) {
+                            is AuthApiResult.Success -> {
+                                finalProfile = academicResult.profile
+                                academicSaved = true
+                            }
+                            else -> academicSaved = false
+                        }
+                    } else if (academic != null) {
+                        academicSaved = false
+                    }
+
+                    val profile = finalProfile.copy(isLoggedIn = true, profileCompleted = true)
                     repository.saveUserProfile(profile)
                     preferences.isLoggedIn = true
                     preferences.isGuest = false
@@ -2804,7 +2829,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     }
                     val firstName = profile.name.trim().split(" ").firstOrNull().orEmpty()
                     showSnackbar(
-                        if (firstName.isBlank()) "Your profile is ready!" else "You're all set, $firstName!"
+                        when {
+                            !academicSaved ->
+                                "You're in — add your academic details from Profile when ready."
+                            firstName.isBlank() -> "Your profile is ready!"
+                            else -> "You're all set, $firstName!"
+                        }
                     )
                     simulateSkeletonRefresh()
                 }
