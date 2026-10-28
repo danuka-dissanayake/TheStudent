@@ -59,7 +59,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -88,12 +90,17 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.Popup
+import androidx.compose.ui.window.PopupProperties
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.abs
 import kotlin.math.roundToInt
+import kotlin.math.sin
 import coil.compose.AsyncImage
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
@@ -267,7 +274,7 @@ private fun ChatScreenBody(
             onReply = { message -> viewModel.setChatReply(message) },
             onClearReply = { viewModel.clearChatReply() },
             onStartVoiceNote = { viewModel.startVoiceNote() },
-            onStopVoiceNote = { viewModel.stopVoiceNote() },
+            onSendVoiceNote = { viewModel.sendVoiceNote() },
             onCancelVoiceNote = { viewModel.cancelVoiceNote() },
             onStopTyping = { viewModel.stopChatTyping() },
             onOpenProfile = { viewModel.openChatProfile(it) },
@@ -2949,7 +2956,7 @@ private fun ChatConversationScreen(
     onReply: (ChatMessage) -> Unit,
     onClearReply: () -> Unit,
     onStartVoiceNote: () -> Boolean,
-    onStopVoiceNote: () -> Unit,
+    onSendVoiceNote: () -> Unit,
     onCancelVoiceNote: () -> Unit,
     onStopTyping: () -> Unit,
     onOpenProfile: (ChatPeer) -> Unit,
@@ -3260,90 +3267,64 @@ private fun ChatConversationScreen(
                         Surface(
                             onClick = { showMenu = true },
                             shape = CircleShape,
-                            color = Color.White,
-                            border = BorderStroke(1.dp, ChatHairline),
-                            modifier = Modifier.size(40.dp)
+                            color = if (showMenu) Color(0xFFECFDF5) else Color.White,
+                            border = BorderStroke(
+                                1.dp,
+                                if (showMenu) Color(0xFF6EE7B7) else ChatHairline
+                            ),
+                            modifier = Modifier
+                                .size(40.dp)
+                                .testTag("chat_menu_button")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     Icons.Default.MoreVert,
                                     contentDescription = "Conversation options",
-                                    tint = ChatInk,
+                                    tint = if (showMenu) EmeraldDark else ChatInk,
                                     modifier = Modifier.size(19.dp)
                                 )
                             }
                         }
-                        DropdownMenu(
-                            expanded = showMenu,
-                            onDismissRequest = { showMenu = false }
-                        ) {
-                            // Reachable at any time, not only on a brand-new
-                            // conversation: a student often realises mid-chat
-                            // that the question needs tracking.
-                            DropdownMenuItem(
-                                text = { Text("Ask for help", fontFamily = MaisonNeueFontFamily) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Forum,
-                                        contentDescription = null,
-                                        tint = EmeraldDark
-                                    )
-                                },
-                                onClick = {
-                                    showMenu = false
-                                    // Straight to a request: no sheet, no subject
-                                    // field. "Ask for help" and "what's this chat
-                                    // about" are different questions.
-                                    onAskAgain()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = {
-                                    Text(
-                                        "What's this chat about?",
-                                        fontFamily = MaisonNeueFontFamily
-                                    )
-                                },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Edit,
-                                        contentDescription = null,
-                                        tint = ChatMuted
-                                    )
-                                },
-                                onClick = {
-                                    showMenu = false
-                                    onOpenIntent()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Rate this student", fontFamily = MaisonNeueFontFamily) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.Star,
-                                        contentDescription = null,
-                                        tint = Color(0xFFF59E0B)
-                                    )
-                                },
-                                onClick = {
-                                    showMenu = false
-                                    onOpenRating()
-                                }
-                            )
-                            DropdownMenuItem(
-                                text = { Text("Clear chat", fontFamily = MaisonNeueFontFamily) },
-                                leadingIcon = {
-                                    Icon(
-                                        Icons.Default.DeleteOutline,
-                                        contentDescription = null,
-                                        tint = ChatError
-                                    )
-                                },
-                                onClick = {
-                                    showMenu = false
-                                    showClearDialog = true
-                                }
-                            )
+
+                        // A popup rather than a Material DropdownMenu: the menu
+                        // needs a header, grouped rows with their own tinted icon
+                        // tiles, a divider and a destructive row at the bottom.
+                        // Those are the things that make it read as part of this
+                        // app instead of a stock list.
+                        if (showMenu) {
+                            val density = LocalDensity.current
+                            Popup(
+                                alignment = Alignment.TopEnd,
+                                offset = IntOffset(0, with(density) { 46.dp.roundToPx() }),
+                                onDismissRequest = { showMenu = false },
+                                properties = PopupProperties(focusable = true)
+                            ) {
+                                ChatOptionsMenu(
+                                    peerName = peer.name,
+                                    presence = peer.presenceLabel,
+                                    isOnline = peer.isOnline,
+                                    onAskAgain = {
+                                        showMenu = false
+                                        // Straight to a request: no sheet, no
+                                        // subject field. "Ask for help" and
+                                        // "what's this chat about" are different
+                                        // questions.
+                                        onAskAgain()
+                                    },
+                                    onOpenIntent = {
+                                        showMenu = false
+                                        onOpenIntent()
+                                    },
+                                    onOpenRating = {
+                                        showMenu = false
+                                        onOpenRating()
+                                    },
+                                    onClearChat = {
+                                        showMenu = false
+                                        showClearDialog = true
+                                    }
+                                )
+                            }
                         }
                     }
                 }
@@ -3760,14 +3741,46 @@ private fun ChatConversationScreen(
                 }
 
                 if (state.isRecordingVoiceNote) {
-                    VoiceRecordingBar(
-                        elapsedMs = state.voiceNoteElapsedMs,
-                        onCancel = onCancelVoiceNote,
-                        onStop = onStopVoiceNote,
+                    // The wave runs *inside* the input bar, in the composer's own
+                    // place: the screen does not lurch into a different layout the
+                    // moment you tap the microphone, and the send button is where
+                    // the send button always is.
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp)
-                    )
+                            .padding(start = 12.dp, end = 12.dp, top = 6.dp, bottom = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        RecordingComposer(
+                            elapsedMs = state.voiceNoteElapsedMs,
+                            level = state.voiceNoteLevel,
+                            onCancel = onCancelVoiceNote,
+                            modifier = Modifier
+                                .weight(1f)
+                                .heightIn(min = 50.dp)
+                                .testTag("chat_recording_bar")
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        // One tap: stop, stage and send. No second question.
+                        Surface(
+                            onClick = onSendVoiceNote,
+                            shape = CircleShape,
+                            color = EmeraldPrimary,
+                            shadowElevation = 6.dp,
+                            modifier = Modifier
+                                .size(50.dp)
+                                .testTag("chat_voice_send")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.Send,
+                                    contentDescription = "Send voice note",
+                                    tint = Color.White,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                        }
+                    }
                 } else {
                     Row(
                         modifier = Modifier
@@ -4329,94 +4342,143 @@ private fun EmojiPickerRow(onPick: (String) -> Unit, modifier: Modifier = Modifi
 }
 
 /** Replaces the composer while a voice note is being recorded. */
+/**
+ * The composer while a voice note is being recorded.
+ *
+ * Built to sit exactly where the text field sits: a 24 dp pill with the live
+ * waveform inside it, a pulsing record dot, the running clock and a small cross
+ * to throw the take away. The waveform reacts to the microphone — [level] is the
+ * peak of the last 90 ms — but keeps a gentle idle motion, so the bar still reads
+ * as "recording" on a quiet phone or an emulator that reports no amplitude.
+ */
 @Composable
-private fun VoiceRecordingBar(
+private fun RecordingComposer(
     elapsedMs: Long,
+    level: Float,
     onCancel: () -> Unit,
-    onStop: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val seconds = (elapsedMs / 1000L)
+    val seconds = elapsedMs / 1000L
     val clock = String.format(Locale.US, "%d:%02d", seconds / 60, seconds % 60)
 
+    // A smooth, ever-running phase: the bars never freeze, whatever the mic says.
+    val wave = rememberInfiniteTransition(label = "voice_wave")
+    val phase by wave.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1400, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "voice_wave_phase"
+    )
+    val dotAlpha by wave.animateFloat(
+        initialValue = 0.25f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(700, easing = LinearEasing),
+            repeatMode = RepeatMode.Reverse
+        ),
+        label = "recording_dot"
+    )
+    // The mic is spiky; ease it so the bars swell instead of jittering.
+    val smoothed by animateFloatAsState(
+        targetValue = level.coerceIn(0f, 1f),
+        animationSpec = tween(120),
+        label = "voice_level"
+    )
+
     Surface(
-        shape = RoundedCornerShape(25.dp),
+        shape = RoundedCornerShape(24.dp),
         color = Color.White,
-        border = BorderStroke(1.dp, ChatHairline),
+        border = BorderStroke(1.2.dp, Color(0xFF6EE7B7)),
         modifier = modifier
     ) {
         Row(
-            modifier = Modifier.padding(horizontal = 8.dp, vertical = 6.dp),
-            verticalAlignment = Alignment.CenterVertically
+            verticalAlignment = Alignment.CenterVertically,
+            modifier = Modifier
+                .fillMaxHeight()
+                .padding(start = 14.dp, end = 6.dp)
         ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .alpha(dotAlpha)
+                    .background(ChatError, CircleShape)
+            )
+            Spacer(Modifier.width(9.dp))
+            Text(
+                text = clock,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 13.sp,
+                fontWeight = FontWeight.Bold,
+                color = ChatInk
+            )
+            Spacer(Modifier.width(12.dp))
+
+            VoiceWave(
+                phase = phase,
+                level = smoothed,
+                modifier = Modifier
+                    .weight(1f)
+                    .height(26.dp)
+            )
+
+            Spacer(Modifier.width(8.dp))
             Surface(
                 onClick = onCancel,
                 shape = CircleShape,
                 color = Color(0xFFF1F5F9),
-                modifier = Modifier.size(38.dp)
+                modifier = Modifier.size(34.dp)
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Icon(
-                        Icons.Default.DeleteOutline,
+                        Icons.Default.Close,
                         contentDescription = "Cancel recording",
                         tint = ChatError,
-                        modifier = Modifier.size(19.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
-            Spacer(Modifier.width(10.dp))
+        }
+    }
+}
 
-            // Pulsing dot + timer, so it is obvious that recording is live.
-            val transition = rememberInfiniteTransition(label = "recording_pulse")
-            val dotAlpha by transition.animateFloat(
-                initialValue = 0.25f,
-                targetValue = 1f,
-                animationSpec = infiniteRepeatable(
-                    animation = tween(700, easing = LinearEasing),
-                    repeatMode = RepeatMode.Reverse
-                ),
-                label = "recording_dot"
-            )
-            Box(
-                modifier = Modifier
-                    .size(9.dp)
-                    .alpha(dotAlpha)
-                    .background(ChatError, CircleShape)
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = clock,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.5.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = ChatInk
-            )
-            Spacer(Modifier.width(8.dp))
-            Text(
-                text = "Recording voice note…",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
-                color = ChatMuted,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+/**
+ * The live waveform: a row of emerald bars whose heights travel like a wave and
+ * grow with the microphone level.
+ *
+ * Drawn on a Canvas rather than as thirty composables — one draw pass per frame,
+ * and each bar is centred in its own cell so the shape reads as a wave rather
+ * than a bar chart.
+ */
+@Composable
+private fun VoiceWave(
+    phase: Float,
+    level: Float,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val bars = 26
+        val cell = size.width / bars
+        val barWidth = cell * 0.42f
+        // A quiet mic still moves: 0.22 minimum, 1.0 when the student is loud.
+        val energy = 0.22f + 0.78f * level
 
-            Surface(
-                onClick = onStop,
-                shape = CircleShape,
-                color = EmeraldPrimary,
-                modifier = Modifier.size(44.dp)
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Send,
-                        contentDescription = "Stop and keep the recording",
-                        tint = Color.White,
-                        modifier = Modifier.size(19.dp)
-                    )
-                }
-            }
+        for (index in 0 until bars) {
+            val t = (phase + index.toFloat() / bars) * 2f * PI.toFloat()
+            val shape = (0.35f + 0.65f * abs(sin(t))) * energy
+            // Taper the ends so the wave reads as a pill, not a block of bars.
+            val taper = sin((index + 0.5f) / bars * PI.toFloat()).coerceIn(0f, 1f)
+            val height = (size.height * shape * (0.45f + 0.55f * taper))
+                .coerceAtLeast(barWidth)
+            val left = index * cell + (cell - barWidth) / 2f
+            drawRoundRect(
+                color = EmeraldPrimary.copy(alpha = 0.30f + 0.55f * shape),
+                topLeft = Offset(left, (size.height - height) / 2f),
+                size = Size(barWidth, height),
+                cornerRadius = CornerRadius(barWidth / 2f)
+            )
         }
     }
 }
@@ -4438,6 +4500,202 @@ private fun AttachmentProgressBar(progress: Float, onDark: Boolean, modifier: Mo
                 .fillMaxWidth(clamped)
                 .clip(RoundedCornerShape(2.dp))
                 .background(if (onDark) Color.White else EmeraldPrimary)
+        )
+    }
+}
+
+/**
+ * The ⋯ menu for a conversation.
+ *
+ * Deliberately not a stock `DropdownMenu`: it opens with a small identity header
+ * (who you are talking to, and whether they are around), groups the three things
+ * you might *do* above a hairline, and keeps "Clear chat" alone at the bottom in
+ * red where a destructive action belongs. 244 dp wide, one tap target per row.
+ */
+@Composable
+private fun ChatOptionsMenu(
+    peerName: String,
+    presence: String,
+    isOnline: Boolean,
+    onAskAgain: () -> Unit,
+    onOpenIntent: () -> Unit,
+    onOpenRating: () -> Unit,
+    onClearChat: () -> Unit
+) {
+    // Scale-in from the dot that opened it, so the menu grows out of the toolbar
+    // instead of blinking into existence.
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+
+    AnimatedVisibility(
+        visible = shown,
+        enter = fadeIn(tween(110)) +
+            scaleIn(
+                initialScale = 0.92f,
+                transformOrigin = TransformOrigin(1f, 0f),
+                animationSpec = tween(150)
+            )
+    ) {
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White,
+            shadowElevation = 16.dp,
+            border = BorderStroke(1.dp, Color(0xFFEEF2F7)),
+            modifier = Modifier
+                .width(244.dp)
+                .testTag("chat_options_menu")
+        ) {
+            Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                // ── who ──────────────────────────────────────────────────────
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(start = 14.dp, end = 14.dp, top = 6.dp, bottom = 10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(30.dp)
+                            .clip(CircleShape)
+                            .background(Color(0xFFECFDF5)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = peerName.trim().take(1).uppercase(Locale.getDefault())
+                                .ifBlank { "?" },
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = EmeraldDark
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = peerName,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = ChatInk,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(5.dp)
+                                    .background(
+                                        if (isOnline) ChatOnline else ChatFaint,
+                                        CircleShape
+                                    )
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = presence,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 10.5.sp,
+                                color = if (isOnline) EmeraldDark else ChatMuted,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(1.dp)
+                        .background(Color(0xFFF1F5F9))
+                )
+
+                // ── what you can do ──────────────────────────────────────────
+                ChatMenuRow(
+                    icon = Icons.Default.Forum,
+                    tint = EmeraldDark,
+                    tintSoft = Color(0xFFE3F8EC),
+                    label = "Ask for help",
+                    onClick = onAskAgain,
+                    testTag = "chat_menu_ask_help"
+                )
+                ChatMenuRow(
+                    icon = Icons.Default.Edit,
+                    tint = Color(0xFF3B82F6),
+                    tintSoft = Color(0xFFE7F0FE),
+                    label = "What's this chat about?",
+                    onClick = onOpenIntent,
+                    testTag = "chat_menu_intent"
+                )
+                ChatMenuRow(
+                    icon = Icons.Default.Star,
+                    tint = Color(0xFFF59E0B),
+                    tintSoft = Color(0xFFFFF4E0),
+                    label = "Rate this student",
+                    onClick = onOpenRating,
+                    testTag = "chat_menu_rate"
+                )
+
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 4.dp)
+                        .height(1.dp)
+                        .background(Color(0xFFF1F5F9))
+                )
+
+                // ── the one that deletes things ──────────────────────────────
+                ChatMenuRow(
+                    icon = Icons.Default.DeleteOutline,
+                    tint = ChatError,
+                    tintSoft = Color(0xFFFEEBEB),
+                    label = "Clear chat",
+                    onClick = onClearChat,
+                    testTag = "chat_menu_clear"
+                )
+            }
+        }
+    }
+}
+
+/** One row of the ⋯ menu: tinted icon tile, label, generous tap height. */
+@Composable
+private fun ChatMenuRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    tintSoft: Color,
+    label: String,
+    onClick: () -> Unit,
+    testTag: String
+) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .fillMaxWidth()
+            .clickable(onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 8.dp)
+            .testTag(testTag)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(30.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tintSoft),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(Modifier.width(11.dp))
+        Text(
+            text = label,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = if (tint == ChatError) ChatError else ChatInk,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

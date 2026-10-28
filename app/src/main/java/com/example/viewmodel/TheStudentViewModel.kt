@@ -226,6 +226,11 @@ data class ChatUiState(
     /** Elapsed time of that recording, in milliseconds. */
     val voiceNoteElapsedMs: Long = 0L,
     /**
+     * Microphone peak level, 0…1, sampled while a note is being recorded. Drives
+     * the live waveform inside the composer.
+     */
+    val voiceNoteLevel: Float = 0f,
+    /**
      * Non-null while the rating card is on screen. It carries everything the
      * card needs (subject, limits, the rating already given), so the card never
      * has to guess what is allowed.
@@ -2198,13 +2203,25 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             return false
         }
         _chatState.update {
-            it.copy(isRecordingVoiceNote = true, voiceNoteElapsedMs = 0L, errorMessage = null)
+            it.copy(
+                isRecordingVoiceNote = true,
+                voiceNoteElapsedMs = 0L,
+                voiceNoteLevel = 0f,
+                errorMessage = null
+            )
         }
         voiceTickerJob?.cancel()
         voiceTickerJob = viewModelScope.launch {
             while (voiceRecorder.isRecording) {
-                _chatState.update { it.copy(voiceNoteElapsedMs = voiceRecorder.elapsedMs()) }
-                delay(200L)
+                // 90 ms is fast enough for a waveform to read as "live" and slow
+                // enough that the state write is never the bottleneck.
+                _chatState.update {
+                    it.copy(
+                        voiceNoteElapsedMs = voiceRecorder.elapsedMs(),
+                        voiceNoteLevel = voiceRecorder.level()
+                    )
+                }
+                delay(90L)
             }
         }
         return true
@@ -2215,7 +2232,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         voiceTickerJob?.cancel()
         voiceTickerJob = null
         val draft = voiceRecorder.stop()
-        _chatState.update { it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L) }
+        _chatState.update {
+            it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L, voiceNoteLevel = 0f)
+        }
         if (draft == null) {
             _chatState.update { it.copy(errorMessage = "That recording was too short to send.") }
             return
@@ -2223,12 +2242,39 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _chatState.update { it.copy(pendingAttachment = draft) }
     }
 
+    /**
+     * Finish the recording and send it in the same tap.
+     *
+     * This is the whole point of the send button inside the recording composer:
+     * once you have said what you wanted, tapping send posts the note. The draft
+     * is staged and immediately handed to `sendChatMessage("")`, so it never sits
+     * in the composer asking to be confirmed a second time.
+     */
+    fun sendVoiceNote() {
+        voiceTickerJob?.cancel()
+        voiceTickerJob = null
+        val draft = voiceRecorder.stop()
+        _chatState.update {
+            it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L, voiceNoteLevel = 0f)
+        }
+        if (draft == null) {
+            _chatState.update { it.copy(errorMessage = "That recording was too short to send.") }
+            return
+        }
+        // Staged, then sent straight away: `sendChatMessage` reads the pending
+        // attachment synchronously, so there is no window where it goes missing.
+        _chatState.update { it.copy(pendingAttachment = draft) }
+        sendChatMessage("")
+    }
+
     /** Throw the recording away. */
     fun cancelVoiceNote() {
         voiceTickerJob?.cancel()
         voiceTickerJob = null
         voiceRecorder.cancel()
-        _chatState.update { it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L) }
+        _chatState.update {
+            it.copy(isRecordingVoiceNote = false, voiceNoteElapsedMs = 0L, voiceNoteLevel = 0f)
+        }
     }
 
     /**

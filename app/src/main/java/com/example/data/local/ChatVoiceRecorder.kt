@@ -27,6 +27,23 @@ class ChatVoiceRecorder(context: Context) {
     /** Milliseconds since recording started (0 when idle). */
     fun elapsedMs(): Long = if (startedAt == 0L) 0L else System.currentTimeMillis() - startedAt
 
+    /**
+     * Peak input level since the last call, 0…1.
+     *
+     * `MediaRecorder` only exposes the peak *between* calls, and reading it
+     * resets it — which is exactly what a waveform wants: call it on a tick and
+     * each reading is the loudest moment of that slice. Any failure (or a device
+     * that reports nothing) returns 0, and the UI still animates.
+     */
+    fun level(): Float {
+        val peak = try {
+            recorder?.maxAmplitude ?: 0
+        } catch (e: Exception) {
+            0
+        }
+        return (peak / 32767f).coerceIn(0f, 1f)
+    }
+
     fun start(): Boolean {
         stopInternal(discard = true)
 
