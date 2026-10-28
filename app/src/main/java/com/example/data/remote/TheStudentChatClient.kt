@@ -10,6 +10,12 @@ import com.example.data.model.ChatHelpState
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
+import com.example.data.model.ChatRateState
+import com.example.data.model.ChatRating
+import com.example.data.model.ChatRatingResult
+import com.example.data.model.ChatRatingSubject
+import com.example.data.model.ChatRatingSummary
+import com.example.data.model.ChatRatingTag
 import com.example.data.model.ChatThread
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -234,6 +240,147 @@ object TheStudentChatClient {
         ) { json ->
             parseHelpRequest(json.optJSONObject("request"))
         }
+    }
+
+    // -----------------------------------------------------------------------
+    // Ratings
+    // -----------------------------------------------------------------------
+
+    /**
+     * What can be said about [peerId] right now: which subject a closed request
+     * covers, whether a rating already exists, and how long it stays editable.
+     */
+    suspend fun fetchRateState(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int
+    ): ChatResult<ChatRateState> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "rate_state", query = "peer_id=$peerId") { json ->
+            ChatRateState(
+                peerId = json.optInt("peer_id", peerId),
+                kind = json.optString("kind", "talk"),
+                subjectCode = json.optString("subject_code"),
+                subjectLabel = json.optString("subject_label"),
+                canRateNow = json.optBoolean("can_rate_now", false),
+                talkMinMessages = json.optInt("talk_min_messages", 20),
+                maxTags = json.optInt("max_tags", 3),
+                maxNote = json.optInt("max_note", 40),
+                existing = parseRating(json.optJSONObject("existing"))
+            )
+        }
+    }
+
+    /**
+     * Send (or correct) a rating. [talkMessagesEachWay] is only used when no
+     * help request was ever closed: the server cannot see messages, so the
+     * phone attests how much has actually been said in both directions.
+     */
+    suspend fun submitRating(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int,
+        stars: Int,
+        tags: List<String>,
+        note: String,
+        talkMessagesEachWay: Int
+    ): ChatResult<ChatRatingResult> = withContext(Dispatchers.IO) {
+        val tagArray = JSONArray()
+        tags.forEach { tagArray.put(it) }
+
+        val payload = JSONObject()
+            .put("peer_id", peerId)
+            .put("stars", stars)
+            .put("tags", tagArray)
+            .put("note", note)
+            .put("talk_messages_each_way", talkMessagesEachWay)
+
+        post(backendBaseUrl, token, "rate", payload) { json ->
+            ChatRatingResult(
+                rating = parseRating(json.optJSONObject("rating")),
+                summary = parseRatingSummary(json.optJSONObject("summary"))
+            )
+        }
+    }
+
+    /** A student's public reputation (no notes, no rater names). */
+    suspend fun fetchRatingSummary(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int
+    ): ChatResult<ChatRatingSummary> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "rating_summary", query = "peer_id=$peerId") { json ->
+            parseRatingSummary(json.optJSONObject("summary"))
+        }
+    }
+
+    private fun parseRating(obj: JSONObject?): ChatRating? {
+        if (obj == null) return null
+        val id = obj.optLong("id", 0L)
+        if (id <= 0L) return null
+
+        val tags = ArrayList<String>()
+        obj.optJSONArray("tags")?.let { array ->
+            for (index in 0 until array.length()) {
+                val tag = array.optString(index).trim()
+                if (tag.isNotEmpty()) tags.add(tag)
+            }
+        }
+
+        // The row carries both ids; the useful one is always "the other side".
+        val isMine = obj.optBoolean("is_mine", false)
+        val other = if (isMine) obj.optInt("ratee_id", 0) else obj.optInt("rater_id", 0)
+
+        return ChatRating(
+            id = id,
+            peerId = other,
+            subjectCode = obj.optString("subject_code"),
+            subjectLabel = obj.optString("subject_label"),
+            kind = obj.optString("kind", "help"),
+            stars = obj.optInt("stars", 0),
+            tags = tags,
+            note = obj.optString("note"),
+            isMine = isMine,
+            createdEpoch = obj.optLong("created_epoch", 0L),
+            editable = obj.optBoolean("editable", false),
+            locksEpoch = obj.optLong("locks_epoch", 0L).takeIf { it > 0L }
+        )
+    }
+
+    private fun parseRatingSummary(obj: JSONObject?): ChatRatingSummary {
+        if (obj == null) return ChatRatingSummary()
+
+        val subjects = ArrayList<ChatRatingSubject>()
+        obj.optJSONArray("subjects")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                subjects.add(
+                    ChatRatingSubject(
+                        code = item.optString("code"),
+                        label = item.optString("label"),
+                        count = item.optInt("count", 0),
+                        average = if (item.isNull("average")) null else item.optDouble("average", 0.0)
+                    )
+                )
+            }
+        }
+
+        val tags = ArrayList<ChatRatingTag>()
+        obj.optJSONArray("tags")?.let { array ->
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val tag = item.optString("tag").trim()
+                if (tag.isNotEmpty()) {
+                    tags.add(ChatRatingTag(tag = tag, count = item.optInt("count", 0)))
+                }
+            }
+        }
+
+        return ChatRatingSummary(
+            count = obj.optInt("count", 0),
+            average = if (obj.isNull("average")) null else obj.optDouble("average", 0.0),
+            subjects = subjects,
+            tags = tags
+        )
     }
 
     /**

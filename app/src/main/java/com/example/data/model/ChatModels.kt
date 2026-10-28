@@ -176,6 +176,124 @@ data class ChatHelpRequest(
         get() = subjectLabel.ifBlank { "a question" }
 }
 
+/**
+ * Ratings — the other half of a closed help request.
+ *
+ * Rules the app and the server both enforce:
+ *  * one rating per (rater, ratee, subject), so the same help cannot be
+ *    starred twice from two devices;
+ *  * 1–5 stars, at most [ChatRateState.maxTags] tags from a fixed list, and an
+ *    optional note of at most [ChatRateState.maxNote] characters;
+ *  * a rating is only possible after a *closed* help request with that student,
+ *    or — for a pair that only ever talked — after 20 messages each way;
+ *  * it can be corrected for 24 hours, then it locks.
+ *
+ * The note is private: only the student it is about ever reads it.
+ */
+data class ChatRating(
+    val id: Long,
+    /** The other side of the rating: who I rated, or who rated me. */
+    val peerId: Int = 0,
+    val subjectCode: String = "",
+    val subjectLabel: String = "",
+    /** help (earned by a closed request) | talk (a long, real conversation). */
+    val kind: String = "help",
+    val stars: Int = 0,
+    val tags: List<String> = emptyList(),
+    val note: String = "",
+    val isMine: Boolean = false,
+    val createdEpoch: Long = 0L,
+    /** Still inside the 24-hour window, so it can be changed. */
+    val editable: Boolean = false,
+    val locksEpoch: Long? = null
+)
+
+/** A student's public reputation. Never contains a note or a rater's name. */
+data class ChatRatingSummary(
+    val count: Int = 0,
+    val average: Double? = null,
+    val subjects: List<ChatRatingSubject> = emptyList(),
+    val tags: List<ChatRatingTag> = emptyList()
+) {
+    val hasRatings: Boolean get() = count > 0
+
+    /** "4.8" — one decimal, or "" when nobody has rated yet. */
+    val averageLine: String
+        get() {
+            val value = average ?: return ""
+            val rounded = kotlin.math.round(value * 10.0) / 10.0
+            return if (rounded % 1.0 == 0.0) {
+                "${rounded.toInt()}.0"
+            } else {
+                rounded.toString()
+            }
+        }
+
+    /** "4.8 ★ · 12 ratings" or "New — no ratings yet". */
+    val headline: String
+        get() = if (hasRatings) {
+            "$averageLine ★ · $count rating" + (if (count == 1) "" else "s")
+        } else {
+            "New — no ratings yet"
+        }
+
+    /** The two tag words worth showing on a profile row. */
+    val topTags: List<ChatRatingTag> get() = tags.take(2)
+}
+
+data class ChatRatingSubject(
+    val code: String,
+    val label: String,
+    val count: Int,
+    val average: Double?
+)
+
+data class ChatRatingTag(val tag: String, val count: Int) {
+    val label: String get() = chatRatingTagLabels[tag] ?: tag.replaceFirstChar { it.uppercase() }
+}
+
+/** Tag slugs the server accepts. The words live here, not in the database. */
+val chatRatingTagLabels: Map<String, String> = linkedMapOf(
+    "clear" to "Clear explanation",
+    "patient" to "Patient",
+    "fast" to "Fast reply",
+    "notes" to "Good notes",
+    "friendly" to "Friendly",
+    "syllabus" to "Knows the syllabus"
+)
+
+/**
+ * Everything the rating card needs to know before it opens.
+ *
+ * [kind] is "help" when a closed request already earns the star, "talk" when
+ * only a long conversation can. [canRateNow] is decided by the server for help
+ * and by the phone for talk (the server never sees messages, so the phone
+ * attests the message count when it sends).
+ */
+data class ChatRateState(
+    val peerId: Int = 0,
+    val kind: String = "talk",
+    val subjectCode: String = "",
+    val subjectLabel: String = "",
+    val canRateNow: Boolean = false,
+    val talkMinMessages: Int = 20,
+    val maxTags: Int = 3,
+    val maxNote: Int = 40,
+    val existing: ChatRating? = null
+) {
+    val isTalk: Boolean get() = kind == "talk"
+
+    /** Card title line: "Physics" or "Just talking". */
+    val subjectLine: String
+        get() = subjectLabel.ifBlank { if (isTalk) "Just talking" else "a question" }
+}
+
+/** What `rate` returns: the saved rating and the updated public summary. */
+data class ChatRatingResult(
+    val rating: ChatRating? = null,
+    val summary: ChatRatingSummary = ChatRatingSummary()
+)
+
 data class ChatPeerProfile(
     val peer: ChatPeer,
     val targetExam: String = "",

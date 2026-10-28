@@ -103,6 +103,9 @@ import com.example.data.model.ChatHelpRequest
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
+import com.example.data.model.ChatRateState
+import com.example.data.model.ChatRatingSummary
+import com.example.data.model.chatRatingTagLabels
 import com.example.data.model.ChatReply
 import com.example.data.model.ChatThread
 import com.example.ui.components.TheStudentAppBackground
@@ -238,6 +241,7 @@ fun ChatScreen(
             onCompleteHelp = { viewModel.completeHelpRequest() },
             onCancelHelp = { viewModel.cancelHelpRequest() },
             onOpenIntent = { viewModel.openChatIntent() },
+            onOpenRating = { viewModel.openRatingCard() },
             onTrackQuestion = { viewModel.trackQuestionAsHelp() },
             onDismissQuestionOffer = { viewModel.dismissQuestionOffer() },
             onAskAgain = { viewModel.askForHelp() },
@@ -258,6 +262,21 @@ fun ChatScreen(
                     viewModel.applyChatPurpose(purpose, subject)
                 },
                 onDismiss = { viewModel.dismissChatIntent() }
+            )
+        }
+
+        // The rating card: opened by itself when a help request is closed, and
+        // from the ⋯ menu afterwards. It floats over the thread, never gates the
+        // composer, and "Not now" leaves without a fuss.
+        val rate = chatState.rateState
+        if (rate != null) {
+            BackHandler { viewModel.dismissRatingCard() }
+            RatingCardOverlay(
+                rate = rate,
+                peer = activePeer,
+                isBusy = chatState.isRatingBusy,
+                onDismiss = { viewModel.dismissRatingCard() },
+                onSubmit = { stars, tags, note -> viewModel.submitRating(stars, tags, note) }
             )
         }
         return
@@ -741,6 +760,263 @@ private data class PurposeOption(
     val subtitle: String,
     val icon: androidx.compose.ui.graphics.vector.ImageVector
 )
+
+/**
+ * The rating card.
+ *
+ * Five stars, up to three tags from a fixed list, and an optional note of at
+ * most forty characters that only the rated student ever reads. It floats over
+ * the conversation rather than taking it over: "Not now" costs nothing, the
+ * composer is never blocked, and the stars already picked survive a failure.
+ */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun RatingCardOverlay(
+    rate: ChatRateState,
+    peer: ChatPeer,
+    isBusy: Boolean,
+    onDismiss: () -> Unit,
+    onSubmit: (Int, List<String>, String) -> Unit
+) {
+    val existing = rate.existing
+    var stars by remember(rate.subjectCode) { mutableStateOf(existing?.stars ?: 0) }
+    var tags by remember(rate.subjectCode) { mutableStateOf(existing?.tags?.toSet() ?: emptySet()) }
+    var note by remember(rate.subjectCode) { mutableStateOf(existing?.note.orEmpty()) }
+
+    val firstName = peer.name.trim().split(" ").firstOrNull().orEmpty().ifBlank { "them" }
+    val canSend = stars > 0 && !isBusy
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Tapping the scrim is "Not now" — the same weight as the button, so a
+        // student never feels trapped in the card.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B1220).copy(alpha = 0.34f))
+                .clickable(onClick = onDismiss)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(26.dp),
+            color = Color.White,
+            shadowElevation = 20.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .navigationBarsPadding()
+                .imePadding()
+                .padding(horizontal = 18.dp, vertical = 22.dp)
+                .fillMaxWidth()
+                .testTag("chat_rating_card")
+        ) {
+            Column(modifier = Modifier.padding(18.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    ChatAvatar(
+                        peer = peer,
+                        size = 42.dp,
+                        showPresence = false,
+                        ringColor = Color.White
+                    )
+                    Spacer(Modifier.width(11.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = if (existing != null) {
+                                "Update your rating?"
+                            } else {
+                                "How was $firstName's help?"
+                            },
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = ChatInk
+                        )
+                        Text(
+                            text = rate.subjectLine + " · " +
+                                if (rate.isTalk) "after a long chat" else "help closed",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            color = ChatMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Spacer(Modifier.height(16.dp))
+
+                // ── stars ────────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chat_rating_stars"),
+                    horizontalArrangement = Arrangement.Center
+                ) {
+                    (1..5).forEach { index ->
+                        val filled = index <= stars
+                        Box(
+                            modifier = Modifier
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .clickable(enabled = !isBusy) { stars = index }
+                                .testTag("chat_rating_star_$index"),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Star,
+                                contentDescription = "$index star" + if (index == 1) "" else "s",
+                                tint = if (filled) Color(0xFFF59E0B) else Color(0xFFE2E8F0),
+                                modifier = Modifier.size(34.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(14.dp))
+
+                // ── tags (at most three) ─────────────────────────────────────
+                FlowRow(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    chatRatingTagLabels.forEach { (slug, label) ->
+                        val selected = slug in tags
+                        Surface(
+                            onClick = {
+                                tags = when {
+                                    selected -> tags - slug
+                                    tags.size >= rate.maxTags -> tags
+                                    else -> tags + slug
+                                }
+                            },
+                            enabled = !isBusy,
+                            shape = RoundedCornerShape(50),
+                            color = if (selected) Color(0xFFE9F8F0) else Color.White,
+                            border = BorderStroke(
+                                1.dp,
+                                if (selected) EmeraldPrimary else ChatHairline
+                            )
+                        ) {
+                            Text(
+                                text = label,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 11.5.sp,
+                                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                color = if (selected) EmeraldDark else ChatMuted,
+                                modifier = Modifier.padding(horizontal = 11.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+
+                // ── the private note ────────────────────────────────────────
+                OutlinedTextField(
+                    value = note,
+                    onValueChange = { typed ->
+                        if (typed.length <= rate.maxNote) note = typed
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("chat_rating_note"),
+                    textStyle = LocalTextStyle.current.copy(
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        color = ChatInk
+                    ),
+                    placeholder = {
+                        Text(
+                            text = "Private note (optional)",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            color = ChatMuted
+                        )
+                    },
+                    trailingIcon = {
+                        Text(
+                            text = "${note.length}/${rate.maxNote}",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            color = ChatMuted
+                        )
+                    },
+                    singleLine = true,
+                    shape = RoundedCornerShape(16.dp),
+                    colors = OutlinedTextFieldDefaults.colors(
+                        focusedBorderColor = EmeraldPrimary,
+                        unfocusedBorderColor = ChatHairline,
+                        focusedContainerColor = Color(0xFFF6F8FA),
+                        unfocusedContainerColor = Color(0xFFF6F8FA)
+                    )
+                )
+
+                Spacer(Modifier.height(14.dp))
+
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        onClick = { if (canSend) onSubmit(stars, tags.toList(), note.trim()) },
+                        enabled = canSend,
+                        shape = RoundedCornerShape(50),
+                        color = if (canSend) EmeraldPrimary else Color(0xFFD1FAE5),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(44.dp)
+                            .testTag("chat_rating_send")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = when {
+                                    isBusy -> "Sending…"
+                                    existing != null -> "Update rating"
+                                    else -> "Send rating"
+                                },
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (canSend) Color.White else EmeraldDark
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(9.dp))
+                    Surface(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(50),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier
+                            .height(44.dp)
+                            .testTag("chat_rating_dismiss")
+                    ) {
+                        Box(
+                            contentAlignment = Alignment.Center,
+                            modifier = Modifier.padding(horizontal = 18.dp)
+                        ) {
+                            Text(
+                                text = "Not now",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ChatMuted
+                            )
+                        }
+                    }
+                }
+
+                Spacer(Modifier.height(10.dp))
+
+                Text(
+                    text = "Only $firstName sees this. One rating per subject, " +
+                        "editable for 24 hours.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    color = ChatMuted,
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
 
 /**
  * The purpose sheet — now three rows instead of four checkboxes.
@@ -2312,6 +2588,7 @@ private fun ChatConversationScreen(
     onCompleteHelp: () -> Unit = {},
     onCancelHelp: () -> Unit = {},
     onOpenIntent: () -> Unit = {},
+    onOpenRating: () -> Unit = {},
     onTrackQuestion: () -> Unit = {},
     onDismissQuestionOffer: () -> Unit = {},
     onAskAgain: () -> Unit = {},
@@ -2668,6 +2945,20 @@ private fun ChatConversationScreen(
                                 onClick = {
                                     showMenu = false
                                     onOpenIntent()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = { Text("Rate this student", fontFamily = MaisonNeueFontFamily) },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Star,
+                                        contentDescription = null,
+                                        tint = Color(0xFFF59E0B)
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    onOpenRating()
                                 }
                             )
                             DropdownMenuItem(

@@ -65,10 +65,14 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.7.1';
+const TS_CHAT_API_VERSION          = '2.8.0';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 600;  // accept -> complete cannot happen instantly
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
+const TS_CHAT_RATING_MAX_TAGS      = 3;    // tags a rating may carry
+const TS_CHAT_RATING_MAX_NOTE      = 40;   // characters in the private note
+const TS_CHAT_RATING_EDIT_SEC      = 86400; // a rating can be corrected for 24 h
+const TS_CHAT_RATING_TALK_MIN_EACH = 20;   // "just talking" needs 20 messages each way
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -223,6 +227,146 @@ function ts_chat_peer_id(array $body): int
         ts_chat_json('error', 'A valid recipient is required.', [], 422);
     }
     return $peerId;
+}
+
+/**
+ * The only tags a rating may carry. Slugs on the wire, words on the phone —
+ * so a translation never breaks the count.
+ */
+function ts_chat_rating_tag_list(): array
+{
+    return ['clear', 'patient', 'fast', 'notes', 'friendly', 'syllabus'];
+}
+
+/** Columns + epochs for every rating read. */
+function ts_chat_rating_select(): string
+{
+    return 'SELECT id, rater_id, ratee_id, subject_code, subject_label, kind, stars, tags, note,
+                   help_request_id,
+                   UNIX_TIMESTAMP(created_at) AS created_epoch,
+                   UNIX_TIMESTAMP(updated_at) AS updated_epoch
+            FROM chat_ratings';
+}
+
+/**
+ * One rating, as its owner sees it.
+ *
+ * The note is the private half: it is only ever returned to the student who
+ * wrote it and the student it is about. Nobody browsing profiles gets it.
+ */
+function ts_chat_rating_public(array $row, int $meId, int $now): array
+{
+    $tags = array_values(array_filter(array_map(
+        'trim',
+        explode(',', (string) ($row['tags'] ?? ''))
+    ), static function ($t) { return $t !== ''; }));
+
+    $createdEpoch = isset($row['created_epoch']) ? (int) $row['created_epoch'] : 0;
+    $updatedEpoch = isset($row['updated_epoch']) && $row['updated_epoch'] !== null
+        ? (int) $row['updated_epoch']
+        : 0;
+    $baseEpoch = $updatedEpoch > 0 ? $updatedEpoch : $createdEpoch;
+    $editable = $baseEpoch > 0 && ($now - $baseEpoch) < TS_CHAT_RATING_EDIT_SEC;
+
+    return [
+        'id'            => (int) $row['id'],
+        'rater_id'      => (int) $row['rater_id'],
+        'ratee_id'      => (int) $row['ratee_id'],
+        'is_mine'       => ((int) $row['rater_id']) === $meId,
+        'subject_code'  => (string) ($row['subject_code'] ?? ''),
+        'subject_label' => (string) ($row['subject_label'] ?? ''),
+        'kind'          => (string) ($row['kind'] ?? 'help'),
+        'stars'         => (int) $row['stars'],
+        'tags'          => $tags,
+        'note'          => (string) ($row['note'] ?? ''),
+        'created_epoch' => $createdEpoch,
+        'editable'      => $editable,
+        'locks_epoch'   => $baseEpoch > 0 ? $baseEpoch + TS_CHAT_RATING_EDIT_SEC : null,
+    ];
+}
+
+/**
+ * What everybody else is allowed to see about a student's ratings: the
+ * average, the number of ratings, the per-subject split and the tag counts.
+ * Never a note, never who said what.
+ */
+function ts_chat_rating_summary(PDO $pdo, int $rateeId): array
+{
+    $summary = [
+        'count'    => 0,
+        'average'  => null,
+        'subjects' => [],
+        'tags'     => [],
+    ];
+
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) AS c, AVG(stars) AS a FROM chat_ratings WHERE ratee_id = :me'
+        );
+        $stmt->execute(['me' => $rateeId]);
+        $totals = $stmt->fetch() ?: [];
+        $count = (int) ($totals['c'] ?? 0);
+        $summary['count'] = $count;
+        if ($count > 0 && $totals['a'] !== null) {
+            $summary['average'] = round((float) $totals['a'], 1);
+        }
+
+        $stmt = $pdo->prepare(
+            'SELECT subject_code, subject_label, COUNT(*) AS c, AVG(stars) AS a
+             FROM chat_ratings
+             WHERE ratee_id = :me
+             GROUP BY subject_code, subject_label
+             ORDER BY c DESC, subject_label ASC'
+        );
+        $stmt->execute(['me' => $rateeId]);
+        foreach ($stmt->fetchAll() as $sub) {
+            $summary['subjects'][] = [
+                'code'    => (string) $sub['subject_code'],
+                'label'   => (string) $sub['subject_label'],
+                'count'   => (int) $sub['c'],
+                'average' => $sub['a'] !== null ? round((float) $sub['a'], 1) : null,
+            ];
+        }
+
+        // Tags are at most three short slugs per rating, so counting them here
+        // beats another table and keeps the write path to a single row.
+        $stmt = $pdo->prepare('SELECT tags FROM chat_ratings WHERE ratee_id = :me');
+        $stmt->execute(['me' => $rateeId]);
+        $counts = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $parts = array_filter(array_map('trim', explode(',', (string) $row['tags'])));
+            foreach ($parts as $tag) {
+                $counts[$tag] = ($counts[$tag] ?? 0) + 1;
+            }
+        }
+        arsort($counts);
+        foreach (array_slice($counts, 0, 6, true) as $tag => $n) {
+            $summary['tags'][] = ['tag' => (string) $tag, 'count' => (int) $n];
+        }
+    } catch (Throwable $e) {
+        error_log('[TheStudent] rating summary failed: ' . $e->getMessage());
+    }
+
+    return $summary;
+}
+
+/** The latest closed help request between two students, or false. */
+function ts_chat_rating_closed_help(PDO $pdo, int $meId, int $peerId)
+{
+    $stmt = $pdo->prepare(
+        ts_chat_help_select() . "
+         WHERE status = 'completed'
+           AND ((seeker_id = :me_a AND helper_id = :peer_a)
+             OR (seeker_id = :peer_b AND helper_id = :me_b))
+         ORDER BY id DESC LIMIT 1"
+    );
+    $stmt->execute([
+        'me_a'   => $meId,
+        'peer_a' => $peerId,
+        'peer_b' => $peerId,
+        'me_b'   => $meId,
+    ]);
+    return $stmt->fetch();
 }
 
 /**
@@ -709,6 +853,31 @@ function ts_chat_ensure_schema(PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
+        // Ratings: one per (rater, ratee, subject). The unique key is the whole
+        // anti-abuse story — a second tap, a reinstall or a second device can
+        // never add a second star for the same help. `help_request_id` records
+        // which closed request earned it, so a rating is traceable to real help.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `chat_ratings` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `rater_id` INT UNSIGNED NOT NULL,
+                `ratee_id` INT UNSIGNED NOT NULL,
+                `subject_code` VARCHAR(64) NOT NULL DEFAULT '',
+                `subject_label` VARCHAR(120) NOT NULL DEFAULT '',
+                `kind` VARCHAR(12) NOT NULL DEFAULT 'help',
+                `stars` TINYINT UNSIGNED NOT NULL DEFAULT 0,
+                `tags` VARCHAR(120) NOT NULL DEFAULT '',
+                `note` VARCHAR(80) NOT NULL DEFAULT '',
+                `help_request_id` BIGINT UNSIGNED NULL DEFAULT NULL,
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `updated_at` DATETIME NULL DEFAULT NULL,
+                UNIQUE KEY `uniq_rating_pair_subject` (`rater_id`, `ratee_id`, `subject_code`),
+                INDEX `idx_rating_ratee` (`ratee_id`, `subject_code`),
+                INDEX `idx_rating_ratee_all` (`ratee_id`),
+                INDEX `idx_rating_rater` (`rater_id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS `chat_typing` (
                 `user_id` INT UNSIGNED NOT NULL,
@@ -983,6 +1152,9 @@ switch ($action) {
                     'subjects'         => $subjects,
                 ],
                 'joined_epoch' => $joinedEpoch > 0 ? $joinedEpoch : null,
+                // Public reputation: average, count, per-subject split and the
+                // tag counts. Notes are never included here.
+                'ratings'      => ts_chat_rating_summary($pdo, $peerId),
                 'server_epoch' => $now,
             ]);
         } catch (Throwable $e) {
@@ -1855,12 +2027,250 @@ switch ($action) {
         break;
     }
 
+    // -----------------------------------------------------------------------
+    // Ratings — a star can only come from real help (or a long conversation)
+    // -----------------------------------------------------------------------
+    case 'rate_state': {
+        $peerId = ts_chat_peer_id($_GET);
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'You cannot rate yourself.', [], 422);
+        }
+
+        $help = ts_chat_rating_closed_help($pdo, $meId, $peerId);
+        $kind = $help ? 'help' : 'talk';
+        $subjectCode = $help ? (string) ($help['subject_code'] ?? '') : 'talk';
+        $subjectLabel = $help ? (string) ($help['subject_label'] ?? '') : 'Just talking';
+
+        $out = [
+            'peer_id'            => $peerId,
+            'kind'               => $kind,
+            'subject_code'       => $subjectCode,
+            'subject_label'      => $subjectLabel,
+            'help_request_id'    => $help ? (int) $help['id'] : null,
+            // 'help' means the card can open now. 'talk' means the phone decides:
+            // the server never sees messages, so it only checks the attested
+            // count when the rating is actually sent.
+            'can_rate_now'       => $help ? true : false,
+            'talk_min_messages'  => TS_CHAT_RATING_TALK_MIN_EACH,
+            'tags_allowed'       => ts_chat_rating_tag_list(),
+            'max_tags'           => TS_CHAT_RATING_MAX_TAGS,
+            'max_note'           => TS_CHAT_RATING_MAX_NOTE,
+            'edit_window_sec'    => TS_CHAT_RATING_EDIT_SEC,
+            'existing'           => null,
+        ];
+
+        $stmt = $pdo->prepare(
+            ts_chat_rating_select() .
+            ' WHERE rater_id = :me AND ratee_id = :peer AND subject_code = :sc LIMIT 1'
+        );
+        $stmt->execute(['me' => $meId, 'peer' => $peerId, 'sc' => $subjectCode]);
+        $mine = $stmt->fetch();
+        if ($mine) {
+            $out['existing'] = ts_chat_rating_public($mine, $meId, $now);
+        }
+
+        ts_chat_json('success', 'Rating state loaded.', $out);
+        break;
+    }
+
+    case 'rate': {
+        ts_chat_require_post('rate');
+        $body = ts_chat_read_body();
+        $peerId = ts_chat_peer_id($body);
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'You cannot rate yourself.', [], 422);
+        }
+
+        $stars = (int) ($body['stars'] ?? 0);
+        if ($stars < 1 || $stars > 5) {
+            ts_chat_json('error', 'Pick between 1 and 5 stars.', [], 422);
+        }
+
+        $allowed = ts_chat_rating_tag_list();
+        $tags = [];
+        $rawTags = $body['tags'] ?? [];
+        if (is_array($rawTags)) {
+            foreach ($rawTags as $tag) {
+                $tag = strtolower(trim((string) $tag));
+                if ($tag !== '' && in_array($tag, $allowed, true) && !in_array($tag, $tags, true)) {
+                    $tags[] = $tag;
+                }
+            }
+        }
+        if (count($tags) > TS_CHAT_RATING_MAX_TAGS) {
+            $tags = array_slice($tags, 0, TS_CHAT_RATING_MAX_TAGS);
+        }
+
+        $note = isset($body['note']) ? trim((string) $body['note']) : '';
+        if (mb_strlen($note, 'UTF-8') > TS_CHAT_RATING_MAX_NOTE) {
+            ts_chat_json(
+                'error',
+                'Keep the note to ' . TS_CHAT_RATING_MAX_NOTE . ' characters.',
+                [],
+                422
+            );
+        }
+
+        $help = ts_chat_rating_closed_help($pdo, $meId, $peerId);
+        if ($help) {
+            $kind         = 'help';
+            $helpId       = (int) $help['id'];
+            $subjectCode  = (string) ($help['subject_code'] ?? '');
+            $subjectLabel = (string) ($help['subject_label'] ?? '');
+        } else {
+            // "Just talking": no help was ever closed. The phone is the only
+            // place that knows how many messages went each way, so it attests
+            // the count and anything under the floor is refused.
+            $attested = (int) ($body['talk_messages_each_way'] ?? 0);
+            if ($attested < TS_CHAT_RATING_TALK_MIN_EACH) {
+                ts_chat_json(
+                    'error',
+                    'Ratings come from closed help, or from a chat with at least '
+                        . TS_CHAT_RATING_TALK_MIN_EACH . ' messages each way.',
+                    ['talk_min_messages' => TS_CHAT_RATING_TALK_MIN_EACH],
+                    403
+                );
+            }
+            $kind         = 'talk';
+            $helpId       = null;
+            $subjectCode  = 'talk';
+            $subjectLabel = 'Just talking';
+        }
+
+        $stmt = $pdo->prepare(
+            ts_chat_rating_select() .
+            ' WHERE rater_id = :me AND ratee_id = :peer AND subject_code = :sc LIMIT 1'
+        );
+        $stmt->execute(['me' => $meId, 'peer' => $peerId, 'sc' => $subjectCode]);
+        $existing = $stmt->fetch();
+
+        $tagList = implode(',', $tags);
+
+        if ($existing) {
+            $rating = ts_chat_rating_public($existing, $meId, $now);
+            if (!$rating['editable']) {
+                ts_chat_json(
+                    'error',
+                    'You already rated this student in that subject, and the 24 hours to change it are over.',
+                    ['locks_epoch' => $rating['locks_epoch']],
+                    409
+                );
+            }
+            $pdo->prepare(
+                "UPDATE chat_ratings
+                 SET stars = :stars, tags = :tags, note = :note, updated_at = NOW()
+                 WHERE id = :id"
+            )->execute([
+                'stars' => $stars,
+                'tags'  => $tagList,
+                'note'  => $note,
+                'id'    => (int) $existing['id'],
+            ]);
+            $savedId = (int) $existing['id'];
+        } else {
+            $pdo->prepare(
+                "INSERT INTO chat_ratings
+                    (rater_id, ratee_id, subject_code, subject_label, kind, stars, tags, note, help_request_id)
+                 VALUES (:rater, :ratee, :sc, :sl, :kind, :stars, :tags, :note, :hid)"
+            )->execute([
+                'rater'  => $meId,
+                'ratee'  => $peerId,
+                'sc'     => $subjectCode,
+                'sl'     => $subjectLabel,
+                'kind'   => $kind,
+                'stars'  => $stars,
+                'tags'   => $tagList,
+                'note'   => $note,
+                'hid'    => $helpId,
+            ]);
+            $savedId = (int) $pdo->lastInsertId();
+        }
+
+        $fresh = $pdo->prepare(ts_chat_rating_select() . ' WHERE id = :id LIMIT 1');
+        $fresh->execute(['id' => $savedId]);
+        $freshRow = $fresh->fetch();
+
+        ts_chat_json('success', 'Rating saved.', [
+            'rating'  => $freshRow ? ts_chat_rating_public($freshRow, $meId, $now) : null,
+            'summary' => ts_chat_rating_summary($pdo, $peerId),
+        ]);
+        break;
+    }
+
+    case 'rating_summary': {
+        $peerId = ts_chat_peer_id($_GET);
+
+        // What this student has earned, plus what *I* have already said about
+        // them, so the app can show "you rated 4 stars in Physics" instead of
+        // offering the same card twice.
+        $stmt = $pdo->prepare(
+            ts_chat_rating_select() .
+            ' WHERE rater_id = :me AND ratee_id = :peer ORDER BY id DESC'
+        );
+        $stmt->execute(['me' => $meId, 'peer' => $peerId]);
+        $mine = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $mine[] = ts_chat_rating_public($row, $meId, $now);
+        }
+
+        ts_chat_json('success', 'Ratings loaded.', [
+            'peer_id'    => $peerId,
+            'summary'    => ts_chat_rating_summary($pdo, $peerId),
+            'my_ratings' => $mine,
+        ]);
+        break;
+    }
+
+    case 'my_ratings': {
+        // The student's own page: their average and the private notes students
+        // left for them. Nobody else can ever call this for somebody else.
+        $stmt = $pdo->prepare(
+            'SELECT r.stars, r.tags, r.note, r.subject_label, r.kind,
+                    UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+                    u.full_name, u.profile_picture
+             FROM chat_ratings r
+             JOIN users u ON u.id = r.rater_id
+             WHERE r.ratee_id = :me
+             ORDER BY r.id DESC
+             LIMIT 50'
+        );
+        $stmt->execute(['me' => $meId]);
+
+        $notes = [];
+        foreach ($stmt->fetchAll() as $row) {
+            $note = trim((string) ($row['note'] ?? ''));
+            if ($note === '') {
+                continue;
+            }
+            $firstName = trim(explode(' ', trim((string) ($row['full_name'] ?? '')))[0] ?? '');
+            $notes[] = [
+                'from'           => $firstName !== '' ? $firstName : 'A student',
+                'stars'          => (int) $row['stars'],
+                'tags'           => array_values(array_filter(array_map(
+                    'trim',
+                    explode(',', (string) ($row['tags'] ?? ''))
+                ))),
+                'note'           => $note,
+                'subject_label'  => (string) ($row['subject_label'] ?? ''),
+                'kind'           => (string) ($row['kind'] ?? 'help'),
+                'created_epoch'  => (int) ($row['created_epoch'] ?? 0),
+            ];
+        }
+
+        ts_chat_json('success', 'Your ratings loaded.', [
+            'summary' => ts_chat_rating_summary($pdo, $meId),
+            'notes'   => $notes,
+        ]);
+        break;
+    }
+
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
                 'threads', 'profile', 'set_purpose',
                 'help_request', 'help_state',
                 'help_accept', 'help_close', 'help_cancel',
+                'rate', 'rate_state', 'rating_summary', 'my_ratings',
                 'inbox', 'send', 'read', 'typing', 'ack_safety',
                 'heartbeat', 'set_key', 'version',
             ],

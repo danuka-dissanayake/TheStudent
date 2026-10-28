@@ -71,6 +71,33 @@ CREATE TABLE IF NOT EXISTS `chat_attachments` (
     KEY `idx_chat_att_created` (`created_at`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+-- ── 5. Ratings — one per (rater, ratee, subject) ─────────────────────────────
+--     A star can only come from a *closed* help request with that student, or
+--     (for a pair that only ever talked) a chat with 20+ messages each way.
+--     The UNIQUE key is the anti-abuse rule: a second device, a reinstall or a
+--     double tap can never add a second rating for the same subject. `note` is
+--     private — it is only ever returned to the student it is about.
+--     `kind` is 'help' (earned by a closed request) or 'talk' (long chat).
+CREATE TABLE IF NOT EXISTS `chat_ratings` (
+    `id`              BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `rater_id`        INT UNSIGNED    NOT NULL,
+    `ratee_id`        INT UNSIGNED    NOT NULL,
+    `subject_code`    VARCHAR(64)     NOT NULL DEFAULT '',
+    `subject_label`   VARCHAR(120)    NOT NULL DEFAULT '',
+    `kind`            VARCHAR(12)     NOT NULL DEFAULT 'help',
+    `stars`           TINYINT UNSIGNED NOT NULL DEFAULT 0,
+    `tags`            VARCHAR(120)    NOT NULL DEFAULT '',
+    `note`            VARCHAR(80)     NOT NULL DEFAULT '',
+    `help_request_id` BIGINT UNSIGNED NULL DEFAULT NULL,
+    `created_at`      TIMESTAMP       NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at`      DATETIME        NULL DEFAULT NULL,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uniq_rating_pair_subject` (`rater_id`, `ratee_id`, `subject_code`),
+    KEY `idx_rating_ratee` (`ratee_id`, `subject_code`),
+    KEY `idx_rating_ratee_all` (`ratee_id`),
+    KEY `idx_rating_rater` (`rater_id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 -- ═══════════════════════════════════════════════════════════════════════════
 --  Housekeeping: chat.php purges expired relay rows and stale typing flags at
 --  the start of every request, so no cron job is required. The queries below

@@ -222,7 +222,19 @@ data class ChatUiState(
     /** True while a voice note is being recorded. */
     val isRecordingVoiceNote: Boolean = false,
     /** Elapsed time of that recording, in milliseconds. */
-    val voiceNoteElapsedMs: Long = 0L
+    val voiceNoteElapsedMs: Long = 0L,
+    /**
+     * Non-null while the rating card is on screen. It carries everything the
+     * card needs (subject, limits, the rating already given), so the card never
+     * has to guess what is allowed.
+     */
+    val rateState: ChatRateState? = null,
+    /** Public reputation of [activePeer] — average, count, tags. */
+    val peerRatingSummary: ChatRatingSummary? = null,
+    /** True while a rating is being sent. */
+    val isRatingBusy: Boolean = false,
+    /** Subject codes I have already rated this peer in (this session). */
+    val ratedSubjects: Set<String> = emptySet()
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
     val totalUnread: Int get() = threads.sumOf { it.unreadCount }
@@ -1000,6 +1012,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             it.copy(mySubjects = userProfile.value.academic.subjectLabels())
         }
         refreshHelpState(peer.id)
+        refreshPeerRatings(peer.id)
 
         viewModelScope.launch {
             chatSession()?.let { (baseUrl, token) -> downloadPendingAttachments(baseUrl, token) }
@@ -1071,6 +1084,132 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     questionOfferVisible = if (state.request != null) false
                         else it.questionOfferVisible
                 )
+            }
+        }
+    }
+
+    // ── Ratings ──────────────────────────────────────────────────────────────
+
+    /**
+     * How many messages each side has sent in the open conversation.
+     *
+     * The server never sees a message (the relay deletes what it hands out), so
+     * this count can only come from the phone. It is what unlocks a rating for
+     * a pair that never closed a help request: real conversation, not a tap.
+     */
+    private fun ChatPeer.firstNameOrStudent(): String =
+        name.trim().split(" ").firstOrNull().orEmpty().ifBlank { "this student" }
+
+    private fun messagesEachWay(): Int {
+        val messages = _chatState.value.messages
+        val mine = messages.count { it.isMine }
+        val theirs = messages.count { !it.isMine && !it.isPending }
+        return minOf(mine, theirs)
+    }
+
+    /** Public reputation of the student in the open conversation. */
+    private fun refreshPeerRatings(peerId: Int) {
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            val summary = TheStudentChatClient.fetchRatingSummary(baseUrl, token, peerId)
+                .dataOrNull() ?: return@launch
+            if (chatActivePeerId != peerId) return@launch
+            _chatState.update { it.copy(peerRatingSummary = summary) }
+        }
+    }
+
+    /**
+     * Open the rating card for the student in the conversation.
+     *
+     * Called by itself the moment a help request is closed, and from the
+     * conversation menu afterwards. It opens only when something really earns
+     * it: a closed request, or 20+ messages each way. Otherwise it says why and
+     * stays closed — a rating nobody earned is just a number.
+     */
+    fun openRatingCard() {
+        val peer = _chatState.value.activePeer ?: return
+        if (_chatState.value.isRatingBusy) return
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            val result = TheStudentChatClient.fetchRateState(baseUrl, token, peer.id)
+            when (result) {
+                is ChatResult.Success -> {
+                    val rate = result.data
+                    // "Just talking" is decided here, on the phone, because only
+                    // the phone knows how much was actually said.
+                    val talkReady = rate.isTalk && messagesEachWay() >= rate.talkMinMessages
+                    if (!rate.canRateNow && !talkReady) {
+                        _uiState.update {
+                            it.copy(
+                                snackbarMessage = "Rate ${peer.name.firstNameOrStudent()} " +
+                                    "after a closed help request, or after " +
+                                    "${rate.talkMinMessages} messages each way."
+                            )
+                        }
+                        return@launch
+                    }
+                    if (chatActivePeerId != peer.id) return@launch
+                    _chatState.update { it.copy(rateState = rate) }
+                }
+                is ChatResult.Failure -> {
+                    _uiState.update { it.copy(snackbarMessage = chatFailureMessage(result.message)) }
+                }
+            }
+        }
+    }
+
+    /** "Not now" on the rating card. */
+    fun dismissRatingCard() {
+        _chatState.update { it.copy(rateState = null) }
+    }
+
+    /**
+     * Send (or correct) the rating on screen. The card stays open on failure so
+     * the student never loses the stars they picked.
+     */
+    fun submitRating(stars: Int, tags: List<String>, note: String) {
+        val peer = _chatState.value.activePeer ?: return
+        val rate = _chatState.value.rateState ?: return
+        if (_chatState.value.isRatingBusy) return
+        val session = chatSession() ?: return
+
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            _chatState.update { it.copy(isRatingBusy = true) }
+            val result = TheStudentChatClient.submitRating(
+                backendBaseUrl = baseUrl,
+                token = token,
+                peerId = peer.id,
+                stars = stars,
+                tags = tags,
+                note = note,
+                talkMessagesEachWay = messagesEachWay()
+            )
+            when (result) {
+                is ChatResult.Success -> {
+                    _chatState.update {
+                        it.copy(
+                            isRatingBusy = false,
+                            rateState = null,
+                            peerRatingSummary = result.data.summary,
+                            ratedSubjects = it.ratedSubjects + rate.subjectCode
+                        )
+                    }
+                    _uiState.update {
+                        it.copy(
+                            snackbarMessage = "Rating sent — ${peer.name.firstNameOrStudent()} " +
+                                "can see it, and the note stays private."
+                        )
+                    }
+                }
+                is ChatResult.Failure -> {
+                    _chatState.update { it.copy(isRatingBusy = false) }
+                    _uiState.update {
+                        it.copy(snackbarMessage = chatFailureMessage(result.message))
+                    }
+                }
             }
         }
     }
@@ -1284,7 +1423,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private fun chatFailureMessage(raw: String): String =
         if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
             "This server is running an older chat API. Upload backend/api/chat.php " +
-                "(needs version 2.7.1 or newer)."
+                "(needs version 2.8.0 or newer)."
         } else {
             raw
         }
@@ -1346,6 +1485,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         _uiState.update {
                             it.copy(snackbarMessage = "Help confirmed — you can rate this student")
                         }
+                        // The natural moment: the question is answered, so the
+                        // rating card comes to the student instead of hiding
+                        // behind a menu.
+                        openRatingCard()
                     }
                 }
                 is ChatResult.Failure -> {
@@ -2140,7 +2283,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
          * action is added, so a host that was never updated says so out loud
          * instead of silently hiding the feature.
          */
-        const val CHAT_MIN_SERVER_VERSION = "2.7.1"
+        const val CHAT_MIN_SERVER_VERSION = "2.8.0"
         /** Two "track this question?" offers a day, app-wide, is plenty. */
         private const val MAX_OFFERS_PER_DAY = 2
         /** Purpose string the server stores for a tracked question. */
