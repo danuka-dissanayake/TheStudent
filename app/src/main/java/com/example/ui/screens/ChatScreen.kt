@@ -3779,7 +3779,11 @@ private fun ChatConversationScreen(
                             onCancel = onCancelVoiceNote,
                             modifier = Modifier
                                 .weight(1f)
-                                .heightIn(min = 50.dp)
+                                // A fixed height, matching the text field. A
+                                // minimum alone left the maximum unbounded, and
+                                // the row inside then filled the whole screen —
+                                // which is what drew that tall box on the left.
+                                .height(50.dp)
                                 .testTag("chat_recording_bar")
                         )
                         Spacer(Modifier.width(8.dp))
@@ -4419,7 +4423,7 @@ private fun RecordingComposer(
         Row(
             verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier
-                .fillMaxHeight()
+                .fillMaxSize()
                 .padding(start = 14.dp, end = 6.dp)
         ) {
             Box(
@@ -4443,7 +4447,7 @@ private fun RecordingComposer(
                 level = smoothed,
                 modifier = Modifier
                     .weight(1f)
-                    .height(26.dp)
+                    .height(24.dp)
             )
 
             Spacer(Modifier.width(8.dp))
