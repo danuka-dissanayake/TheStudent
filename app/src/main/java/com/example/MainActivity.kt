@@ -228,6 +228,20 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         AppScreenFlow.MAIN -> {
+                            // Quiz state read once per composition: the runner and the
+                            // builder are full-screen routes, not tabs.
+                            val editingQuizId by viewModel.editingQuizId.collectAsStateWithLifecycle()
+                            val isQuizSaving by viewModel.isQuizSaving.collectAsStateWithLifecycle()
+                            val quizSaveError by viewModel.quizSaveError.collectAsStateWithLifecycle()
+                            val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
+                            val quizAttempt by viewModel.quizAttempt.collectAsStateWithLifecycle()
+                            val quizAnswers by viewModel.quizAnswers.collectAsStateWithLifecycle()
+                            val quizResult by viewModel.quizResult.collectAsStateWithLifecycle()
+                            val isQuizStarting by viewModel.isQuizStarting.collectAsStateWithLifecycle()
+                            val isQuizSubmitting by viewModel.isQuizSubmitting.collectAsStateWithLifecycle()
+                            val adminQuizzes by viewModel.adminQuizzes.collectAsStateWithLifecycle()
+                            val isAdminQuizzesLoading by viewModel.isAdminQuizzesLoading.collectAsStateWithLifecycle()
+
                             if (!uiState.isAuthenticated && !viewModel.preferences.isLoggedIn) {
                                 LaunchedEffect(Unit) {
                                     viewModel.openAuthScreen()
@@ -268,15 +282,11 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 )
-                            } else if (viewModel.editingQuizId.collectAsStateWithLifecycle().value != null) {
+                            } else if (editingQuizId != null) {
                                 // The quiz builder gets the whole screen: a phone is a
                                 // cramped place to write twelve questions inside a tab.
-                                val editingId by viewModel.editingQuizId.collectAsStateWithLifecycle()
-                                val isQuizSaving by viewModel.isQuizSaving.collectAsStateWithLifecycle()
-                                val quizSaveError by viewModel.quizSaveError.collectAsStateWithLifecycle()
-
                                 QuizEditorScreen(
-                                    quizId = editingId ?: 0,
+                                    quizId = editingQuizId ?: 0,
                                     isSaving = isQuizSaving,
                                     saveError = quizSaveError,
                                     onSave = { draft, publish -> viewModel.saveQuiz(draft, publish) },
@@ -287,18 +297,11 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 )
-                            } else if (viewModel.activeQuiz.collectAsStateWithLifecycle().value != null) {
-                                val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
-                                val attempt by viewModel.quizAttempt.collectAsStateWithLifecycle()
-                                val quizAnswers by viewModel.quizAnswers.collectAsStateWithLifecycle()
-                                val quizResult by viewModel.quizResult.collectAsStateWithLifecycle()
-                                val isQuizStarting by viewModel.isQuizStarting.collectAsStateWithLifecycle()
-                                val isQuizSubmitting by viewModel.isQuizSubmitting.collectAsStateWithLifecycle()
-
+                            } else if (activeQuiz != null) {
                                 activeQuiz?.let { quiz ->
                                     QuizRunnerScreen(
                                         quiz = quiz,
-                                        attempt = attempt,
+                                        attempt = quizAttempt,
                                         answers = quizAnswers,
                                         result = quizResult,
                                         isStarting = isQuizStarting,
@@ -318,8 +321,6 @@ class MainActivity : ComponentActivity() {
                                 val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
                                 val isTestingConn by viewModel.isTestingConnection.collectAsStateWithLifecycle()
                                 val connResult by viewModel.connectionTestResult.collectAsStateWithLifecycle()
-                                val adminQuizzes by viewModel.adminQuizzes.collectAsStateWithLifecycle()
-                                val isAdminQuizzesLoading by viewModel.isAdminQuizzesLoading.collectAsStateWithLifecycle()
 
                                 AdminPanelScreen(
                                     papersList = dynamicPapers,
