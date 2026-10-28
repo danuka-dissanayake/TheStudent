@@ -18,14 +18,26 @@ data class CatalogProvider(
     /** The provider's own site — where we send people when they ask "who?". */
     val url: String,
     /** "University", "Open university", "MOOC platform", "Non-profit"… */
-    val kind: String
+    val kind: String,
+    /** Hostname used to fetch the provider's own favicon for the avatar. */
+    val domain: String
 ) {
-    /** Up to two letters, for the avatar tile. */
+    /** Up to two letters, shown only if the logo cannot be fetched. */
     val initials: String
         get() = name.split(' ')
             .filter { it.isNotBlank() }
             .take(2)
             .joinToString("") { it.first().uppercase() }
+
+    /**
+     * The provider's favicon, served by Google's public favicon endpoint.
+     *
+     * We point at their published icon instead of redrawing one: it identifies
+     * the owner (the whole point of the credit) without implying that we made
+     * the course, and nothing is bundled in the APK.
+     */
+    val logoUrl: String
+        get() = "https://www.google.com/s2/favicons?domain=" + domain + "&sz=128"
 }
 
 /**
@@ -101,23 +113,24 @@ object CourseCatalog {
         CatalogProvider(
             "University of Moratuwa",
             "https://open.uom.lk/",
-            "Sri Lankan university · free"
+            "Sri Lankan university · free",
+            "open.uom.lk"
         ),
-        CatalogProvider("edX", "https://www.edx.org/", "MOOC platform"),
-        CatalogProvider("Coursera", "https://www.coursera.org/", "MOOC platform"),
-        CatalogProvider("OpenLearn", "https://www.open.edu/openlearn/", "The Open University, UK"),
-        CatalogProvider("MIT OpenCourseWare", "https://ocw.mit.edu/", "University · open courseware"),
-        CatalogProvider("NPTEL", "https://nptel.ac.in/", "Indian Institutes of Technology"),
-        CatalogProvider("freeCodeCamp", "https://www.freecodecamp.org/", "Non-profit"),
-        CatalogProvider("Saylor Academy", "https://learn.saylor.org/", "Non-profit"),
-        CatalogProvider("Alison", "https://alison.com/", "MOOC platform"),
-        CatalogProvider("IBM SkillsBuild", "https://skillsbuild.org/", "Industry programme"),
-        CatalogProvider("Cisco Networking Academy", "https://www.netacad.com/", "Industry programme"),
-        CatalogProvider("Google", "https://grow.google/certificates/", "Industry programme"),
-        CatalogProvider("HP LIFE", "https://www.life-global.org/", "Non-profit · HP Foundation"),
-        CatalogProvider("Kaggle", "https://www.kaggle.com/learn", "Data science community"),
-        CatalogProvider("Microsoft Learn", "https://learn.microsoft.com/training/", "Industry programme"),
-        CatalogProvider("Khan Academy", "https://www.khanacademy.org/", "Non-profit")
+        CatalogProvider("edX", "https://www.edx.org/", "MOOC platform", "edx.org"),
+        CatalogProvider("Coursera", "https://www.coursera.org/", "MOOC platform", "coursera.org"),
+        CatalogProvider("OpenLearn", "https://www.open.edu/openlearn/", "The Open University, UK", "open.edu"),
+        CatalogProvider("MIT OpenCourseWare", "https://ocw.mit.edu/", "University · open courseware", "ocw.mit.edu"),
+        CatalogProvider("NPTEL", "https://nptel.ac.in/", "Indian Institutes of Technology", "nptel.ac.in"),
+        CatalogProvider("freeCodeCamp", "https://www.freecodecamp.org/", "Non-profit", "freecodecamp.org"),
+        CatalogProvider("Saylor Academy", "https://learn.saylor.org/", "Non-profit", "saylor.org"),
+        CatalogProvider("Alison", "https://alison.com/", "MOOC platform", "alison.com"),
+        CatalogProvider("IBM SkillsBuild", "https://skillsbuild.org/", "Industry programme", "skillsbuild.org"),
+        CatalogProvider("Cisco Networking Academy", "https://www.netacad.com/", "Industry programme", "netacad.com"),
+        CatalogProvider("Google", "https://grow.google/certificates/", "Industry programme", "grow.google"),
+        CatalogProvider("HP LIFE", "https://www.life-global.org/", "Non-profit · HP Foundation", "life-global.org"),
+        CatalogProvider("Kaggle", "https://www.kaggle.com/learn", "Data science community", "kaggle.com"),
+        CatalogProvider("Microsoft Learn", "https://learn.microsoft.com/training/", "Industry programme", "microsoft.com"),
+        CatalogProvider("Khan Academy", "https://www.khanacademy.org/", "Non-profit", "khanacademy.org")
     )
 
     // ── Courses ─────────────────────────────────────────────────────────────

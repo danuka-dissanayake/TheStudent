@@ -88,28 +88,47 @@ freeCodeCamp full courses, one StatQuest video.
 opened from the **Courses collection** card on Home. No bottom bar, no app header,
 own back button, system back closes the detail before the screen.
 
+**The top bar is fixed.** Header, search and every filter row sit in a `Column`
+above the list, so nothing you need disappears when you scroll. Only the
+content — slider, video rail, provider rail, course rows, credit block — scrolls.
+
 Sections, top to bottom:
 
-1. header — count of courses and providers, "credited to their owners";
+1. header — back, title, course and provider counts, "credited to their owners";
 2. search — title, subject, provider and skills;
-3. filters — certificate kind (four values), stage (A/L, Undergraduate,
-   Postgraduate), and a **Sri Lanka** shortcut;
-4. **Editor's picks** — horizontal slider of gradient cards with a dot
-   indicator;
-5. **Watch first** — YouTube rail: real thumbnails from `i.ytimg.com`, runtime
-   badge, channel name under the title;
-6. **Where these come from** — provider tiles that filter the list;
-7. the list — white cards with subject, title, "Provided by …", certificate
+3. **filters** (three fixed rows):
+   - *certificate*: All · Free cert · Paid cert · Participation · No cert ·
+     Sri Lanka;
+   - *stage and level*: A/L, Undergraduate, Postgraduate, Beginner,
+     Intermediate, Advanced;
+   - *subject*: every subject in the catalog, derived from the courses.
+   Selecting a filter resets the list to the top, which is what stops the old
+   scroll offset from dropping you at the bottom of a suddenly shorter page;
+4. **Editor's picks** — a sliding rail that advances itself every 4.5s, pausing
+   while a finger is on it (`isScrollInProgress`), with a dot indicator that
+   follows the first visible card;
+5. **Watch first** — YouTube rail: real thumbnails, runtime badge, channel name;
+6. **Where these come from** — provider tiles with their own logo, name, kind
+   and course count; tapping one filters the list;
+7. the list — course cards with subject, title, "Provided by …", certificate
    pill, level and hours;
 8. the credit block.
 
 Slider, video rail and provider rail hide while a filter is active, so results
 are never pushed below three screens of browsing furniture. Any filter adds a
-**Clear** action and a "No courses match that" state.
+**Clear filters** action and a "No courses match that" state.
+
+### Typography
+
+One local scale (`private object CT`) drives the whole screen, with an **11sp
+floor**: `screen 21`, `hero 22`, `section 16`, `cardTitle 14.5`, `body 13`,
+`meta 12`, `micro 11`, `chip 12`, plus matching line heights. Nothing is 9sp to
+make it fit; long strings wrap (`maxLines` 2–3) instead of being clipped.
 
 ### Detail
 
-Gradient hero (subject colour), facts row (level / time / who it is for), the
+Gradient hero (subject colour), a facts card (level and time side by side, the
+audience list on its own full-width row so it wraps instead of clipping), the
 certificate fact in plain words, summary, skills, an inline video card, an
 **Ownership** box, and a sticky **Open on {provider}** button that launches the
 system browser through `LocalUriHandler` (wrapped in `runCatching`, so a device
@@ -117,20 +136,34 @@ with no browser cannot crash the screen).
 
 ### Video player
 
-`YouTubeEmbedDialog` is a real embed, not a thumbnail that kicks you out to the
-YouTube app: a `WebView` on `youtube-nocookie.com` (no tracking cookies until
-play), JavaScript and DOM storage on, `mediaPlaybackRequiresUserGesture = false`,
-and `onRelease` stops loading, blanks the page and destroys the `WebView` so the
-audio stops when the dialog closes. Under the player: the title, the channel
-("… on YouTube") and a **Watch on YouTube** button for anyone who wants the
-original page — the credit and the exit both travel with the video.
+`YouTubeEmbedDialog` is a real embed: a `WebView` loading an HTML page whose
+base URL is `https://www.youtube.com/`, with a `youtube-nocookie.com` iframe.
+
+The base URL is the fix for the "video player configuration" error: a bare
+`loadUrl("…/embed/…")` reaches YouTube **without a referer**, and the embed
+refuses to configure a player. Serving the iframe from a page based at
+youtube.com gives the WebView that referer.
+
+`onRelease` stops loading, blanks the page and destroys the `WebView`, so audio
+stops when the dialog closes. Under the player: the title, the channel ("… on
+YouTube") and a **Watch on YouTube** exit.
+
+### Provider logos
+
+Each provider shows **its own icon**, fetched at runtime from Google's public
+favicon endpoint (`https://www.google.com/s2/favicons?domain=…&sz=128`).
+Nothing is bundled, nothing is redrawn, and initials appear while it loads or
+offline — so the credit still reads correctly on a bad connection. Using a
+provider's mark to identify the provider you are crediting is exactly what the
+mark is for; it is never used as TheStudent's own branding.
 
 ## 5. Test tags
 
 `courses_collection_content`, `courses_back`, `courses_search`,
 `courses_chip_all`, `courses_chip_free`, `courses_chip_paid`,
 `courses_chip_participation`, `courses_chip_none`, `courses_chip_local`,
-`courses_stage_*`, `courses_featured_{id}`, `courses_video_{videoId}`,
+`courses_stage_*`, `courses_level_*`, `courses_subject_*`,
+`courses_featured_{id}`, `courses_video_{videoId}`,
 `courses_provider_{name}`, `courses_card_{id}`, `courses_clear_filters`,
 `courses_empty`, `courses_credit_block`, `course_detail_{id}`,
 `course_detail_back`, `course_detail_video`, `course_detail_open`,
@@ -149,3 +182,16 @@ original page — the credit and the exit both travel with the video.
 4. Keep `featured = true` to at most ~6 courses; the slider is an argument, not
    a catalogue.
 5. Never add a course whose certificate claim you have not read on its own page.
+
+## 7. Fixes after first review (2026-10-28)
+
+| Report | Cause | Fix |
+| --- | --- | --- |
+| "Level / Time / For" clipped on small phones | three weighted columns inside one row | two columns plus a full-width audience row that wraps |
+| Top bar scrolled away | header lived inside the `LazyColumn` | header, search and filters moved to a fixed `Column` above it |
+| Editor's picks didn't move | no timer | auto-advance every 4.5s, paused while dragging, dots follow the card |
+| YouTube "video player configuration" error | WebView embed had no referer | iframe served from an HTML page based at `https://www.youtube.com/` |
+| Tapping a provider jumped to the bottom | shorter filtered content kept the old scroll offset | filter changes animate the list back to the top |
+| Provider cards felt empty | initials avatar, small | real provider favicon at 46dp, name, kind, course count, taller card |
+| Wanted free/paid and more filters | only four certificate chips | certificate + stage + level + subject + provider filters, with a clear action |
+| Some text too small | sizes drifted to 9–10.5sp | single `CT` type scale with an 11sp floor |

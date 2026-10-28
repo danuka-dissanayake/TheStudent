@@ -1,12 +1,15 @@
 package com.example.ui.screens
 
 import android.graphics.Color as AndroidColor
+import android.webkit.WebChromeClient
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,6 +20,7 @@ import androidx.compose.foundation.layout.aspectRatio
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
@@ -26,10 +30,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ChevronRight
@@ -44,8 +46,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,23 +56,27 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
-import coil.compose.AsyncImage
+import coil.compose.SubcomposeAsyncImage
 import com.example.data.model.CatalogCertificate
 import com.example.data.model.CatalogCourse
+import com.example.data.model.CatalogProvider
 import com.example.data.model.CatalogVideo
 import com.example.data.model.CourseCatalog
 import com.example.ui.components.paperCoverTint
 import com.example.ui.theme.MaisonNeueFontFamily
+import kotlinx.coroutines.delay
 
 private val CcInk = Color(0xFF0F172A)
 private val CcMuted = Color(0xFF64748B)
@@ -85,13 +91,37 @@ private val CcBlue = Color(0xFF1D4ED8)
 private val CcBlueSoft = Color(0xFFEEF2FF)
 
 /**
+ * One type scale for the whole screen, so nothing is left at 9sp because it
+ * "fit". The floor is [micro] (11sp) — anything smaller is unreadable on a
+ * 5-inch phone in daylight. These are the Material 3 body/label steps, rounded
+ * to what this screen actually needs.
+ */
+private object CT {
+    val screen: TextUnit = 21.sp
+    val hero: TextUnit = 22.sp
+    val section: TextUnit = 16.sp
+    val cardTitle: TextUnit = 14.5.sp
+    val body: TextUnit = 13.sp
+    val meta: TextUnit = 12.sp
+    val micro: TextUnit = 11.sp
+    val chip: TextUnit = 12.sp
+
+    val bodyHeight: TextUnit = 19.sp
+    val metaHeight: TextUnit = 17.sp
+    val microHeight: TextUnit = 15.sp
+}
+
+private val STAGES = listOf("A/L", "Undergraduate", "Postgraduate")
+private val LEVELS = listOf("Beginner", "Intermediate", "Advanced")
+
+/**
  * The courses collection — an index of **other people's** courses.
  *
  * Two rules run through the whole screen:
  *
- *   1. **Every card names its owner.** The provider is not a tag in the corner,
- *      it is a line on the card ("Provided by edX"), and the detail page repeats
- *      it before the button that leaves the app.
+ *   1. **Every card names its owner.** The provider is a line of text on the
+ *      card ("Provided by edX"), the provider rail shows their own logo, and the
+ *      detail page repeats the credit above the button that leaves the app.
  *   2. **Nothing is re-hosted.** Tapping opens the provider's own page, so the
  *      student enrols with them, and their terms, certificates and prices stay
  *      their business. Videos are embedded from YouTube and credited to the
@@ -120,7 +150,7 @@ fun CourseCollectionScreen(
                 onPlayVideo = { id -> playingVideo = CourseCatalog.video(id) }
             )
         } else {
-            CourseCatalogList(
+            CourseCatalogBrowse(
                 onBack = onBack,
                 onOpenCourse = { selectedCourse = it },
                 onPlayVideo = { playingVideo = it }
@@ -141,11 +171,11 @@ fun CourseCollectionScreen(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Catalog list
+//  Browse
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun CourseCatalogList(
+private fun CourseCatalogBrowse(
     onBack: () -> Unit,
     onOpenCourse: (CatalogCourse) -> Unit,
     onPlayVideo: (CatalogVideo) -> Unit
@@ -153,14 +183,22 @@ private fun CourseCatalogList(
     var query by remember { mutableStateOf("") }
     var certificate by remember { mutableStateOf<CatalogCertificate?>(null) }
     var stage by remember { mutableStateOf<String?>(null) }
+    var level by remember { mutableStateOf<String?>(null) }
+    var subject by remember { mutableStateOf<String?>(null) }
     var provider by remember { mutableStateOf<String?>(null) }
 
+    val listState = rememberLazyListState()
     val featured = remember { CourseCatalog.courses.filter { it.featured } }
 
-    val visible = remember(query, certificate, stage, provider) {
+    val filtering = query.isNotBlank() || certificate != null || stage != null ||
+        level != null || subject != null || provider != null
+
+    val visible = remember(query, certificate, stage, level, subject, provider) {
         CourseCatalog.courses.filter { course ->
             (certificate == null || course.certificate == certificate) &&
                 (stage == null || course.stages.contains(stage)) &&
+                (level == null || course.level == level) &&
+                (subject == null || course.subject == subject) &&
                 (provider == null || course.provider == provider) &&
                 (
                     query.isBlank() ||
@@ -172,232 +210,179 @@ private fun CourseCatalogList(
         }
     }
 
-    val filtering =
-        query.isNotBlank() || certificate != null || stage != null || provider != null
-
-    LazyColumn(
-        modifier = Modifier
-            .fillMaxSize()
-            .testTag("courses_collection_content"),
-        contentPadding = PaddingValues(bottom = 28.dp)
-    ) {
-        item(key = "header") {
-            CatalogHeader(
-                courseCount = CourseCatalog.courses.size,
-                providerCount = CourseCatalog.usedProviders.size,
-                onBack = onBack
-            )
+    // A filter changes what is above the list, so the old scroll offset can land
+    // the student at the bottom of a much shorter page. Reset to the top when
+    // anything changes — that is what makes tapping a provider feel responsive.
+    LaunchedEffect(query, certificate, stage, level, subject, provider) {
+        if (listState.firstVisibleItemIndex > 0) {
+            listState.animateScrollToItem(0)
         }
+    }
 
-        item(key = "search") {
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 10.dp)
-                    .height(50.dp)
-                    .testTag("courses_search"),
-                placeholder = {
-                    Text(
-                        text = "Search courses, subjects, providers",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
-                        color = CcFaint
-                    )
-                },
-                leadingIcon = {
+    val clearAll: () -> Unit = {
+        query = ""
+        certificate = null
+        stage = null
+        level = null
+        subject = null
+        provider = null
+    }
+
+    Column(modifier = Modifier.fillMaxSize()) {
+        // ── fixed top bar: title, search and filters never scroll away ───────
+        CatalogHeader(
+            courseCount = CourseCatalog.courses.size,
+            providerCount = CourseCatalog.usedProviders.size,
+            onBack = onBack
+        )
+
+        OutlinedTextField(
+            value = query,
+            onValueChange = { query = it },
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp)
+                .padding(top = 10.dp, bottom = 8.dp)
+                .height(50.dp)
+                .testTag("courses_search"),
+            placeholder = {
+                Text(
+                    text = "Search courses, subjects, providers",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = CT.body,
+                    color = CcFaint
+                )
+            },
+            leadingIcon = {
+                Icon(
+                    Icons.Default.Search,
+                    contentDescription = null,
+                    tint = CcMuted,
+                    modifier = Modifier.size(20.dp)
+                )
+            },
+            trailingIcon = {
+                if (query.isNotEmpty()) {
                     Icon(
-                        Icons.Default.Search,
-                        contentDescription = null,
+                        Icons.Default.Close,
+                        contentDescription = "Clear search",
                         tint = CcMuted,
-                        modifier = Modifier.size(19.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Clear search",
-                            tint = CcMuted,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clickable { query = "" }
-                        )
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(26.dp),
-                textStyle = TextStyle(
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
-                    color = CcInk
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = CcGreen,
-                    unfocusedBorderColor = CcHairline,
-                    focusedContainerColor = Color.White,
-                    unfocusedContainerColor = Color.White
-                )
-            )
-        }
-
-        // ── certificate + stage filters ──────────────────────────────────────
-        item(key = "filters") {
-            Column {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp, vertical = 8.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    FilterPill(
-                        label = "All",
-                        selected = certificate == null,
-                        tag = "courses_chip_all",
-                        onClick = { certificate = null }
-                    )
-                    CatalogCertificate.entries.forEach { option ->
-                        FilterPill(
-                            label = option.label,
-                            selected = certificate == option,
-                            tag = "courses_chip_" + option.name.lowercase(),
-                            onClick = {
-                                certificate = if (certificate == option) null else option
-                            }
-                        )
-                    }
-                    FilterPill(
-                        label = "Sri Lanka",
-                        selected = provider == "University of Moratuwa",
-                        tag = "courses_chip_local",
-                        onClick = {
-                            provider = if (provider == "University of Moratuwa") null
-                            else "University of Moratuwa"
-                        }
-                    )
-                }
-
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .horizontalScroll(rememberScrollState())
-                        .padding(horizontal = 16.dp)
-                        .padding(bottom = 4.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    listOf("A/L", "Undergraduate", "Postgraduate").forEach { option ->
-                        StagePill(
-                            label = option,
-                            selected = stage == option,
-                            tag = "courses_stage_" + option.lowercase().replace("/", "_"),
-                            onClick = { stage = if (stage == option) null else option }
-                        )
-                    }
-                }
-            }
-        }
-
-        // ── editor's picks slider ────────────────────────────────────────────
-        if (!filtering && featured.isNotEmpty()) {
-            item(key = "featured") {
-                Column(modifier = Modifier.padding(top = 12.dp)) {
-                    SectionTitle("Editor's picks", "Hand-checked, free or free-to-audit")
-                    FeaturedSlider(featured = featured, onOpenCourse = onOpenCourse)
-                }
-            }
-        }
-
-        // ── videos ───────────────────────────────────────────────────────────
-        if (!filtering) {
-            item(key = "videos") {
-                Column(modifier = Modifier.padding(top = 20.dp)) {
-                    SectionTitle("Watch first", "Plays in the app — credit to each channel")
-                    VideoRail(videos = CourseCatalog.videos, onPlayVideo = onPlayVideo)
-                }
-            }
-        }
-
-        // ── providers ────────────────────────────────────────────────────────
-        if (!filtering) {
-            item(key = "providers") {
-                Column(modifier = Modifier.padding(top = 20.dp)) {
-                    SectionTitle("Where these come from", "Tap a provider to filter")
-                    ProviderRail(
-                        selected = provider,
-                        onSelect = { name -> provider = if (provider == name) null else name }
-                    )
-                }
-            }
-        }
-
-        // ── the list ─────────────────────────────────────────────────────────
-        item(key = "list_title") {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 18.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = if (filtering) "Results" else "All courses",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = CcInk,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = "${visible.size} " + if (visible.size == 1) "course" else "courses",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
-                    color = CcMuted
-                )
-                if (filtering) {
-                    Spacer(Modifier.width(10.dp))
-                    Text(
-                        text = "Clear",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = CcGreen,
                         modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .clickable {
-                                query = ""
-                                certificate = null
-                                stage = null
-                                provider = null
-                            }
-                            .padding(horizontal = 8.dp, vertical = 4.dp)
-                            .testTag("courses_clear_filters")
+                            .size(18.dp)
+                            .clickable { query = "" }
+                    )
+                }
+            },
+            singleLine = true,
+            shape = RoundedCornerShape(26.dp),
+            textStyle = TextStyle(
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = CT.body,
+                color = CcInk
+            ),
+            colors = OutlinedTextFieldDefaults.colors(
+                focusedBorderColor = CcGreen,
+                unfocusedBorderColor = CcHairline,
+                focusedContainerColor = Color.White,
+                unfocusedContainerColor = Color.White
+            )
+        )
+
+        FilterBar(
+            certificate = certificate,
+            stage = stage,
+            level = level,
+            subject = subject,
+            provider = provider,
+            filtering = filtering,
+            onCertificate = { certificate = if (certificate == it) null else it },
+            onStage = { stage = if (stage == it) null else it },
+            onLevel = { level = if (level == it) null else it },
+            onSubject = { subject = if (subject == it) null else it },
+            onProvider = { provider = if (provider == it) null else it },
+            onClear = clearAll
+        )
+
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(CcHairline)
+        )
+
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxSize()
+                .testTag("courses_collection_content"),
+            contentPadding = PaddingValues(bottom = 28.dp)
+        ) {
+            if (!filtering && featured.isNotEmpty()) {
+                item(key = "featured") {
+                    Column(modifier = Modifier.padding(top = 14.dp)) {
+                        SectionTitle("Editor's picks", "Hand-checked · auto-advancing")
+                        FeaturedSlider(featured = featured, onOpenCourse = onOpenCourse)
+                    }
+                }
+            }
+
+            if (!filtering) {
+                item(key = "videos") {
+                    Column(modifier = Modifier.padding(top = 22.dp)) {
+                        SectionTitle("Watch first", "Plays in the app · credited to each channel")
+                        VideoRail(videos = CourseCatalog.videos, onPlayVideo = onPlayVideo)
+                    }
+                }
+
+                item(key = "providers") {
+                    Column(modifier = Modifier.padding(top = 22.dp)) {
+                        SectionTitle("Where these come from", "Tap a provider to filter")
+                        ProviderRail(
+                            selected = provider,
+                            onSelect = { name -> provider = if (provider == name) null else name }
+                        )
+                    }
+                }
+            }
+
+            item(key = "list_title") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(start = 18.dp, end = 16.dp, top = 22.dp, bottom = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (filtering) "Results" else "All courses",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.section,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = CcInk,
+                        modifier = Modifier.weight(1f)
+                    )
+                    Text(
+                        text = "${visible.size} " + if (visible.size == 1) "course" else "courses",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.meta,
+                        color = CcMuted
                     )
                 }
             }
-        }
 
-        if (visible.isEmpty()) {
-            item(key = "empty") {
-                NoCoursesState(
-                    onClear = {
-                        query = ""
-                        certificate = null
-                        stage = null
-                        provider = null
-                    }
-                )
+            if (visible.isEmpty()) {
+                item(key = "empty") {
+                    NoCoursesState(onClear = clearAll)
+                }
+            } else {
+                items(visible, key = { it.id }) { course ->
+                    CourseRow(course = course, onClick = { onOpenCourse(course) })
+                    Spacer(Modifier.height(8.dp))
+                }
             }
-        } else {
-            items(visible, key = { it.id }) { course ->
-                CourseRow(course = course, onClick = { onOpenCourse(course) })
-                Spacer(Modifier.height(8.dp))
-            }
-        }
 
-        item(key = "credit") {
-            CreditBlock()
+            item(key = "credit") {
+                CreditBlock()
+            }
         }
     }
 }
@@ -435,47 +420,120 @@ private fun CatalogHeader(courseCount: Int, providerCount: Int, onBack: () -> Un
                 Text(
                     text = "Courses collection",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 21.sp,
+                    fontSize = CT.screen,
                     fontWeight = FontWeight.ExtraBold,
                     color = CcInk,
-                    letterSpacing = (-0.4).sp
+                    letterSpacing = (-0.4).sp,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 Text(
                     text = "$courseCount courses · $providerCount providers · credited to their owners",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = CT.micro,
                     color = CcMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
         }
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(1.dp)
-                .background(CcHairline)
-        )
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  Filters
+// ─────────────────────────────────────────────────────────────────────────────
+
 @Composable
-private fun SectionTitle(title: String, subtitle: String? = null) {
-    Column(modifier = Modifier.padding(start = 18.dp, end = 16.dp, bottom = 10.dp)) {
-        Text(
-            text = title,
-            fontFamily = MaisonNeueFontFamily,
-            fontSize = 15.sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = CcInk
-        )
-        if (subtitle != null) {
-            Text(
-                text = subtitle,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
-                color = CcMuted
+private fun FilterBar(
+    certificate: CatalogCertificate?,
+    stage: String?,
+    level: String?,
+    subject: String?,
+    provider: String?,
+    filtering: Boolean,
+    onCertificate: (CatalogCertificate) -> Unit,
+    onStage: (String) -> Unit,
+    onLevel: (String) -> Unit,
+    onSubject: (String) -> Unit,
+    onProvider: (String) -> Unit,
+    onClear: () -> Unit
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        // Row 1 — what you get at the end. "Free certificate" and "Certificate is
+        // paid" are first because that is the question students actually ask.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            FilterPill(
+                label = "All",
+                selected = !filtering,
+                tag = "courses_chip_all",
+                onClick = onClear
             )
+            CatalogCertificate.entries.forEach { option ->
+                FilterPill(
+                    label = option.short,
+                    selected = certificate == option,
+                    tag = "courses_chip_" + option.name.lowercase(),
+                    onClick = { onCertificate(option) }
+                )
+            }
+            FilterPill(
+                label = "Sri Lanka",
+                selected = provider == "University of Moratuwa",
+                tag = "courses_chip_local",
+                onClick = { onProvider("University of Moratuwa") }
+            )
+        }
+
+        // Row 2 — who it is for, and how hard it is.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            STAGES.forEach { option ->
+                SubPill(
+                    label = option,
+                    selected = stage == option,
+                    tag = "courses_stage_" + option.lowercase().replace("/", "_"),
+                    onClick = { onStage(option) }
+                )
+            }
+            LEVELS.forEach { option ->
+                SubPill(
+                    label = option,
+                    selected = level == option,
+                    tag = "courses_level_" + option.lowercase(),
+                    onClick = { onLevel(option) }
+                )
+            }
+        }
+
+        // Row 3 — subject.
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState())
+                .padding(horizontal = 16.dp)
+                .padding(bottom = 8.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
+            CourseCatalog.subjects.forEach { option ->
+                SubPill(
+                    label = option,
+                    selected = subject == option,
+                    tag = "courses_subject_" + option.lowercase().replace(' ', '_'),
+                    onClick = { onSubject(option) }
+                )
+            }
         }
     }
 }
@@ -488,16 +546,17 @@ private fun FilterPill(label: String, selected: Boolean, tag: String, onClick: (
         color = if (selected) CcInk else Color.White,
         border = BorderStroke(1.dp, if (selected) CcInk else CcHairline),
         modifier = Modifier
-            .height(32.dp)
+            .height(34.dp)
             .testTag(tag)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
+                fontSize = CT.chip,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else CcMuted,
+                maxLines = 1,
                 modifier = Modifier.padding(horizontal = 12.dp)
             )
         }
@@ -505,40 +564,76 @@ private fun FilterPill(label: String, selected: Boolean, tag: String, onClick: (
 }
 
 @Composable
-private fun StagePill(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+private fun SubPill(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
     Surface(
         onClick = onClick,
         shape = RoundedCornerShape(50),
-        color = if (selected) CcGreenSoft else Color.Transparent,
+        color = if (selected) CcGreenSoft else Color.White,
         border = BorderStroke(
             1.dp,
-            if (selected) CcGreen.copy(alpha = 0.35f) else CcHairline
+            if (selected) CcGreen.copy(alpha = 0.4f) else CcHairline
         ),
         modifier = Modifier
-            .height(28.dp)
+            .height(31.dp)
             .testTag(tag)
     ) {
         Box(contentAlignment = Alignment.Center) {
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
+                fontSize = CT.micro,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) CcGreen else CcMuted,
+                maxLines = 1,
                 modifier = Modifier.padding(horizontal = 11.dp)
             )
         }
     }
 }
 
+@Composable
+private fun SectionTitle(title: String, subtitle: String? = null) {
+    Column(modifier = Modifier.padding(start = 18.dp, end = 16.dp, bottom = 10.dp)) {
+        Text(
+            text = title,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = CT.section,
+            fontWeight = FontWeight.ExtraBold,
+            color = CcInk
+        )
+        if (subtitle != null) {
+            Text(
+                text = subtitle,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = CT.micro,
+                color = CcMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-//  Featured slider
+//  Featured slider (auto-advancing)
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
 private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (CatalogCourse) -> Unit) {
     val state = rememberLazyListState()
-    var dot by remember { mutableIntStateOf(0) }
+
+    // Auto-advance, pausing whenever a finger is on the slider (or the previous
+    // animation is still running) so it never fights the student.
+    LaunchedEffect(featured.size) {
+        if (featured.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(4500)
+            if (!state.isScrollInProgress) {
+                val next = (state.firstVisibleItemIndex + 1) % featured.size
+                state.animateScrollToItem(next)
+            }
+        }
+    }
 
     Column {
         LazyRow(
@@ -550,29 +645,25 @@ private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (Catalog
                 FeaturedCard(course = course, onClick = { onOpenCourse(course) })
             }
         }
-        // Dots track the *first* visible card: enough to say "there is more",
-        // without pretending this is a paged carousel.
         if (featured.size > 1) {
-            Spacer(Modifier.height(8.dp))
+            Spacer(Modifier.height(10.dp))
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.Center
             ) {
+                val active = state.firstVisibleItemIndex.coerceIn(0, featured.lastIndex)
                 featured.indices.forEach { index ->
                     Box(
                         modifier = Modifier
                             .padding(horizontal = 2.dp)
-                            .height(5.dp)
-                            .width(if (index == dot) 16.dp else 5.dp)
+                            .height(6.dp)
+                            .width(if (index == active) 18.dp else 6.dp)
                             .clip(CircleShape)
-                            .background(if (index == dot) CcInk else Color(0xFFDDE3EC))
+                            .background(if (index == active) CcInk else Color(0xFFDDE3EC))
                     )
                 }
-            }
-            androidx.compose.runtime.LaunchedEffect(state.firstVisibleItemIndex) {
-                dot = state.firstVisibleItemIndex.coerceIn(0, featured.lastIndex)
             }
         }
     }
@@ -586,8 +677,8 @@ private fun FeaturedCard(course: CatalogCourse, onClick: () -> Unit) {
         shape = RoundedCornerShape(20.dp),
         color = tint,
         modifier = Modifier
-            .width(268.dp)
-            .height(178.dp)
+            .width(276.dp)
+            .height(186.dp)
             .testTag("courses_featured_${course.id}")
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
@@ -603,17 +694,17 @@ private fun FeaturedCard(course: CatalogCourse, onClick: () -> Unit) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(14.dp)
+                    .padding(15.dp)
             ) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProviderAvatar(name = course.provider, onDark = true)
-                    Spacer(Modifier.width(7.dp))
+                    ProviderLogo(name = course.provider, onDark = true, size = 28)
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = course.subject.uppercase(),
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.sp,
+                        fontSize = CT.micro,
                         fontWeight = FontWeight.ExtraBold,
-                        color = Color.White.copy(alpha = 0.9f),
+                        color = Color.White.copy(alpha = 0.92f),
                         letterSpacing = 0.8.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
@@ -623,8 +714,8 @@ private fun FeaturedCard(course: CatalogCourse, onClick: () -> Unit) {
                 Text(
                     text = course.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
-                    lineHeight = 19.sp,
+                    fontSize = 15.5.sp,
+                    lineHeight = 20.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White,
                     maxLines = 3,
@@ -634,12 +725,12 @@ private fun FeaturedCard(course: CatalogCourse, onClick: () -> Unit) {
                 Text(
                     text = "Provided by ${course.provider}",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
-                    color = Color.White.copy(alpha = 0.78f),
+                    fontSize = CT.micro,
+                    color = Color.White.copy(alpha = 0.82f),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(9.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     DarkPill(course.certificate.short)
                     DarkPill(course.durationLabel)
@@ -653,41 +744,71 @@ private fun FeaturedCard(course: CatalogCourse, onClick: () -> Unit) {
 private fun DarkPill(text: String) {
     Box(
         modifier = Modifier
+            .heightIn(min = 22.dp)
             .clip(RoundedCornerShape(50))
-            .background(Color.White.copy(alpha = 0.18f))
-            .padding(horizontal = 8.dp, vertical = 3.dp)
+            .background(Color.White.copy(alpha = 0.2f))
+            .padding(horizontal = 9.dp, vertical = 3.dp)
     ) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.5.sp,
+            fontSize = CT.micro,
             fontWeight = FontWeight.Bold,
-            color = Color.White
+            color = Color.White,
+            maxLines = 1
         )
     }
 }
 
+/**
+ * The provider's own icon, with initials as a fallback while it loads or if the
+ * device is offline. Fetched at runtime — no logo is bundled or redrawn.
+ */
 @Composable
-private fun ProviderAvatar(name: String, onDark: Boolean = false, size: Int = 26) {
-    val provider = CourseCatalog.provider(name)
-    val initials = provider?.initials ?: name.take(2).uppercase()
+private fun ProviderLogo(
+    name: String,
+    size: Int = 46,
+    onDark: Boolean = false
+) {
+    val provider: CatalogProvider? = CourseCatalog.provider(name)
+    val shape = RoundedCornerShape((size / 3.4f).dp)
+
     Box(
         modifier = Modifier
             .size(size.dp)
-            .clip(RoundedCornerShape((size / 3).dp))
-            .background(
-                if (onDark) Color.White.copy(alpha = 0.2f) else paperCoverTint(name).copy(alpha = 0.12f)
+            .clip(shape)
+            .background(if (onDark) Color.White.copy(alpha = 0.16f) else Color.White)
+            .then(
+                if (onDark) Modifier
+                else Modifier.border(0.5.dp, CcHairline, shape)
             ),
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = initials,
-            fontFamily = MaisonNeueFontFamily,
-            fontSize = (size / 2.9f).sp,
-            fontWeight = FontWeight.ExtraBold,
-            color = if (onDark) Color.White else paperCoverTint(name)
-        )
+        if (provider == null) {
+            ProviderInitials(name = name, size = size, onDark = onDark)
+        } else {
+            SubcomposeAsyncImage(
+                model = provider.logoUrl,
+                contentDescription = provider.name,
+                contentScale = ContentScale.Fit,
+                modifier = Modifier.size((size * 0.64f).dp),
+                loading = { ProviderInitials(name = name, size = size, onDark = onDark) },
+                error = { ProviderInitials(name = name, size = size, onDark = onDark) }
+            )
+        }
     }
+}
+
+@Composable
+private fun ProviderInitials(name: String, size: Int, onDark: Boolean) {
+    val initials = CourseCatalog.provider(name)?.initials ?: name.take(2).uppercase()
+    Text(
+        text = initials,
+        fontFamily = MaisonNeueFontFamily,
+        fontSize = (size / 2.9f).sp,
+        fontWeight = FontWeight.ExtraBold,
+        color = if (onDark) Color.White else paperCoverTint(name)
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -703,7 +824,7 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
         items(videos, key = { it.videoId }) { video ->
             Column(
                 modifier = Modifier
-                    .width(232.dp)
+                    .width(244.dp)
                     .clip(RoundedCornerShape(16.dp))
                     .clickable { onPlayVideo(video) }
                     .testTag("courses_video_${video.videoId}")
@@ -715,10 +836,13 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF0F172A))
                 ) {
-                    AsyncImage(
+                    SubcomposeAsyncImage(
                         model = video.thumbnailUrl,
                         contentDescription = null,
-                        modifier = Modifier.fillMaxSize()
+                        contentScale = ContentScale.Crop,
+                        modifier = Modifier.fillMaxSize(),
+                        loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
+                        error = { Box(Modifier.fillMaxSize().background(CcInk)) }
                     )
                     Box(
                         modifier = Modifier
@@ -732,22 +856,22 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
                     Box(
                         modifier = Modifier
                             .align(Alignment.Center)
-                            .size(42.dp)
+                            .size(44.dp)
                             .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.92f)),
+                            .background(Color.White.copy(alpha = 0.94f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
                             Icons.Default.PlayArrow,
                             contentDescription = "Play",
                             tint = CcInk,
-                            modifier = Modifier.size(24.dp)
+                            modifier = Modifier.size(26.dp)
                         )
                     }
                     Text(
                         text = "${video.minutes} min",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = CT.micro,
                         fontWeight = FontWeight.Bold,
                         color = Color.White,
                         modifier = Modifier
@@ -758,11 +882,12 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
                             .padding(horizontal = 7.dp, vertical = 2.dp)
                     )
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
                 Text(
                     text = video.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = CT.body,
+                    lineHeight = CT.metaHeight,
                     fontWeight = FontWeight.Bold,
                     color = CcInk,
                     maxLines = 2,
@@ -771,7 +896,7 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
                 Text(
                     text = video.channel,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = CT.micro,
                     color = CcMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -789,40 +914,63 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
 private fun ProviderRail(selected: String?, onSelect: (String) -> Unit) {
     LazyRow(
         contentPadding = PaddingValues(horizontal = 16.dp),
-        horizontalArrangement = Arrangement.spacedBy(8.dp)
+        horizontalArrangement = Arrangement.spacedBy(10.dp)
     ) {
         items(CourseCatalog.usedProviders, key = { it.name }) { provider ->
             val count = CourseCatalog.courses.count { it.provider == provider.name }
             val isSelected = selected == provider.name
             Surface(
                 onClick = { onSelect(provider.name) },
-                shape = RoundedCornerShape(14.dp),
+                shape = RoundedCornerShape(18.dp),
                 color = if (isSelected) CcGreenSoft else Color.White,
                 border = BorderStroke(
                     1.dp,
-                    if (isSelected) CcGreen.copy(alpha = 0.4f) else CcHairline
+                    if (isSelected) CcGreen.copy(alpha = 0.45f) else CcHairline
                 ),
                 modifier = Modifier
-                    .width(150.dp)
+                    .width(168.dp)
+                    .heightIn(min = 154.dp)
                     .testTag("courses_provider_" + provider.name.lowercase().replace(' ', '_'))
             ) {
-                Column(modifier = Modifier.padding(10.dp)) {
-                    ProviderAvatar(name = provider.name, size = 28)
-                    Spacer(Modifier.height(7.dp))
+                Column(modifier = Modifier.padding(13.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        ProviderLogo(name = provider.name, size = 46)
+                        Spacer(Modifier.weight(1f))
+                        Icon(
+                            Icons.Default.ChevronRight,
+                            contentDescription = null,
+                            tint = if (isSelected) CcGreen else CcFaint,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
+                    Spacer(Modifier.height(11.dp))
                     Text(
                         text = provider.name,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
+                        fontSize = 13.5.sp,
+                        lineHeight = 17.sp,
                         fontWeight = FontWeight.Bold,
                         color = CcInk,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(Modifier.height(3.dp))
+                    Text(
+                        text = provider.kind,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = CT.micro,
+                        lineHeight = CT.microHeight,
+                        color = CcMuted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(6.dp))
                     Text(
                         text = "$count " + if (count == 1) "course" else "courses",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
-                        color = CcMuted
+                        fontSize = CT.micro,
+                        fontWeight = FontWeight.Bold,
+                        color = if (isSelected) CcGreen else CcInk
                     )
                 }
             }
@@ -852,10 +1000,10 @@ private fun CourseRow(course: CatalogCourse, onClick: () -> Unit) {
                     Text(
                         text = course.subject,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
+                        fontSize = CT.micro,
                         fontWeight = FontWeight.ExtraBold,
                         color = paperCoverTint(course.subject),
-                        letterSpacing = 0.4.sp,
+                        letterSpacing = 0.3.sp,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
@@ -870,56 +1018,57 @@ private fun CourseRow(course: CatalogCourse, onClick: () -> Unit) {
                             Text(
                                 text = "Sri Lanka",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 8.5.sp,
+                                fontSize = CT.micro,
                                 fontWeight = FontWeight.Bold,
                                 color = CcGreen
                             )
                         }
                     }
                 }
-                Spacer(Modifier.height(3.dp))
+                Spacer(Modifier.height(4.dp))
                 Text(
                     text = course.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
-                    lineHeight = 17.sp,
+                    fontSize = CT.cardTitle,
+                    lineHeight = 19.sp,
                     fontWeight = FontWeight.Bold,
                     color = CcInk,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
-                Spacer(Modifier.height(5.dp))
+                Spacer(Modifier.height(6.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProviderAvatar(name = course.provider, size = 15)
-                    Spacer(Modifier.width(5.dp))
+                    ProviderLogo(name = course.provider, size = 17)
+                    Spacer(Modifier.width(6.dp))
                     Text(
                         text = "Provided by ${course.provider}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
+                        fontSize = CT.micro,
                         color = CcMuted,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis
                     )
                 }
-                Spacer(Modifier.height(7.dp))
+                Spacer(Modifier.height(8.dp))
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    horizontalArrangement = Arrangement.spacedBy(7.dp)
                 ) {
                     CertificateBadge(course.certificate)
                     Text(
                         text = "${course.level} · ${course.durationLabel}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.5.sp,
-                        color = CcFaint,
-                        maxLines = 1
+                        fontSize = CT.micro,
+                        color = CcMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
             Spacer(Modifier.width(8.dp))
             Box(
                 modifier = Modifier
-                    .size(28.dp)
+                    .size(30.dp)
                     .clip(CircleShape)
                     .background(CcBg),
                 contentAlignment = Alignment.Center
@@ -928,7 +1077,7 @@ private fun CourseRow(course: CatalogCourse, onClick: () -> Unit) {
                     Icons.Default.ChevronRight,
                     contentDescription = null,
                     tint = CcMuted,
-                    modifier = Modifier.size(17.dp)
+                    modifier = Modifier.size(18.dp)
                 )
             }
         }
@@ -945,22 +1094,23 @@ private fun CertificateBadge(certificate: CatalogCertificate) {
     }
     Row(
         modifier = Modifier
+            .heightIn(min = 22.dp)
             .clip(RoundedCornerShape(50))
             .background(background)
-            .padding(horizontal = 7.dp, vertical = 2.dp),
+            .padding(horizontal = 8.dp, vertical = 3.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             Icons.Default.WorkspacePremium,
             contentDescription = null,
             tint = tint,
-            modifier = Modifier.size(11.dp)
+            modifier = Modifier.size(12.dp)
         )
-        Spacer(Modifier.width(3.dp))
+        Spacer(Modifier.width(4.dp))
         Text(
             text = certificate.short,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
+            fontSize = CT.micro,
             fontWeight = FontWeight.Bold,
             color = tint,
             maxLines = 1
@@ -973,39 +1123,41 @@ private fun NoCoursesState(onClear: () -> Unit) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 28.dp, vertical = 26.dp)
+            .padding(horizontal = 28.dp, vertical = 30.dp)
             .testTag("courses_empty"),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Text(
             text = "No courses match that",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 14.sp,
+            fontSize = 15.sp,
             fontWeight = FontWeight.ExtraBold,
             color = CcInk
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(5.dp))
         Text(
             text = "Try a different subject or remove a filter.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = CT.body,
             color = CcMuted
         )
-        Spacer(Modifier.height(12.dp))
+        Spacer(Modifier.height(14.dp))
         Surface(
             onClick = onClear,
             shape = RoundedCornerShape(50),
             color = CcInk,
-            modifier = Modifier.height(40.dp)
+            modifier = Modifier
+                .height(42.dp)
+                .testTag("courses_clear_filters")
         ) {
             Box(contentAlignment = Alignment.Center) {
                 Text(
                     text = "Clear filters",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = CT.body,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
-                    modifier = Modifier.padding(horizontal = 20.dp)
+                    modifier = Modifier.padding(horizontal = 22.dp)
                 )
             }
         }
@@ -1021,18 +1173,18 @@ private fun CreditBlock() {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 16.dp)
-            .padding(top = 20.dp)
+            .padding(top = 22.dp)
             .testTag("courses_credit_block")
     ) {
         Column(modifier = Modifier.padding(15.dp)) {
             Text(
                 text = "Every course here belongs to someone else",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = CcInk
             )
-            Spacer(Modifier.height(5.dp))
+            Spacer(Modifier.height(6.dp))
             Text(
                 text = "TheStudent does not create, host, sell or re-upload these courses. " +
                     "Each card links to the provider's own page, where you enrol under their " +
@@ -1040,39 +1192,37 @@ private fun CreditBlock() {
                     "check the course page before you start. Our thanks to every university " +
                     "and platform below for keeping their work open.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.5.sp,
-                lineHeight = 15.sp,
+                fontSize = CT.meta,
+                lineHeight = CT.metaHeight,
                 color = CcMuted
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             CourseCatalog.usedProviders.forEach { provider ->
                 Row(
-                    modifier = Modifier.padding(vertical = 2.dp),
+                    modifier = Modifier.padding(vertical = 4.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    Text(
-                        text = "·",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
-                        color = CcFaint
-                    )
-                    Spacer(Modifier.width(6.dp))
-                    Text(
-                        text = provider.name,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = CcInk
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = provider.kind,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.sp,
-                        color = CcFaint,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
-                    )
+                    ProviderLogo(name = provider.name, size = 24)
+                    Spacer(Modifier.width(9.dp))
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = provider.name,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.meta,
+                            fontWeight = FontWeight.SemiBold,
+                            color = CcInk,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = provider.kind,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.micro,
+                            color = CcMuted,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
                 }
             }
         }
@@ -1094,14 +1244,13 @@ private fun CourseDetail(
     val video = course.videoId?.let { CourseCatalog.video(it) }
 
     Column(modifier = Modifier.fillMaxSize().testTag("course_detail_${course.id}")) {
-        // Hero
         Box(
             modifier = Modifier
                 .fillMaxWidth()
                 .background(Brush.linearGradient(listOf(tint, tint.copy(alpha = 0.7f), CcInk)))
                 .statusBarsPadding()
                 .padding(horizontal = 16.dp)
-                .padding(top = 8.dp, bottom = 16.dp)
+                .padding(top = 8.dp, bottom = 18.dp)
         ) {
             Column {
                 Row(verticalAlignment = Alignment.CenterVertically) {
@@ -1127,15 +1276,16 @@ private fun CourseDetail(
                         modifier = Modifier
                             .clip(RoundedCornerShape(50))
                             .background(Color.White.copy(alpha = 0.18f))
-                            .padding(horizontal = 9.dp, vertical = 4.dp)
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
                     ) {
                         Text(
                             text = course.subject.uppercase(),
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 9.sp,
+                            fontSize = CT.micro,
                             fontWeight = FontWeight.ExtraBold,
                             color = Color.White,
-                            letterSpacing = 0.8.sp
+                            letterSpacing = 0.8.sp,
+                            maxLines = 1
                         )
                     }
                 }
@@ -1143,22 +1293,24 @@ private fun CourseDetail(
                 Text(
                     text = course.title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 22.sp,
-                    lineHeight = 27.sp,
+                    fontSize = CT.hero,
+                    lineHeight = 28.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Color.White,
                     letterSpacing = (-0.4).sp
                 )
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(10.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    ProviderAvatar(name = course.provider, onDark = true, size = 20)
-                    Spacer(Modifier.width(6.dp))
+                    ProviderLogo(name = course.provider, onDark = true, size = 24)
+                    Spacer(Modifier.width(8.dp))
                     Text(
                         text = "Provided by ${course.provider}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
+                        fontSize = CT.body,
                         fontWeight = FontWeight.SemiBold,
-                        color = Color.White.copy(alpha = 0.9f)
+                        color = Color.White.copy(alpha = 0.92f),
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }
@@ -1166,32 +1318,12 @@ private fun CourseDetail(
 
         LazyColumn(
             modifier = Modifier
-                .fillMaxSize()
+                .fillMaxWidth()
                 .weight(1f),
             contentPadding = PaddingValues(16.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            item(key = "facts") {
-                Surface(
-                    shape = RoundedCornerShape(16.dp),
-                    color = Color.White,
-                    border = BorderStroke(1.dp, CcHairline)
-                ) {
-                    Row(modifier = Modifier.padding(vertical = 12.dp)) {
-                        Fact(label = "Level", value = course.level, modifier = Modifier.weight(1f))
-                        Fact(
-                            label = "Time",
-                            value = course.durationLabel,
-                            modifier = Modifier.weight(1f)
-                        )
-                        Fact(
-                            label = "For",
-                            value = course.stages.joinToString(", "),
-                            modifier = Modifier.weight(1.3f)
-                        )
-                    }
-                }
-            }
+            item(key = "facts") { FactsCard(course) }
 
             item(key = "certificate") {
                 Surface(
@@ -1199,14 +1331,14 @@ private fun CourseDetail(
                     color = Color.White,
                     border = BorderStroke(1.dp, CcHairline)
                 ) {
-                    Row(modifier = Modifier.padding(13.dp), verticalAlignment = Alignment.Top) {
+                    Row(modifier = Modifier.padding(14.dp), verticalAlignment = Alignment.Top) {
                         CertificateBadge(course.certificate)
                         Spacer(Modifier.width(10.dp))
                         Text(
                             text = course.priceNote,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
-                            lineHeight = 16.sp,
+                            fontSize = CT.meta,
+                            lineHeight = CT.metaHeight,
                             color = CcMuted,
                             modifier = Modifier.weight(1f)
                         )
@@ -1216,19 +1348,12 @@ private fun CourseDetail(
 
             item(key = "about") {
                 Column {
-                    Text(
-                        text = "About this course",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = CcInk,
-                        modifier = Modifier.padding(bottom = 5.dp)
-                    )
+                    SectionHeading("About this course")
                     Text(
                         text = course.summary,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
-                        lineHeight = 18.sp,
+                        fontSize = CT.body,
+                        lineHeight = CT.bodyHeight,
                         color = CcMuted
                     )
                 }
@@ -1237,33 +1362,27 @@ private fun CourseDetail(
             if (course.skills.isNotEmpty()) {
                 item(key = "skills") {
                     Column {
-                        Text(
-                            text = "What you'll learn",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = CcInk,
-                            modifier = Modifier.padding(bottom = 7.dp)
-                        )
+                        SectionHeading("What you'll learn")
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .horizontalScroll(rememberScrollState()),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            horizontalArrangement = Arrangement.spacedBy(7.dp)
                         ) {
                             course.skills.forEach { skill ->
                                 Box(
                                     modifier = Modifier
                                         .clip(RoundedCornerShape(50))
                                         .background(Color.White)
-                                        .padding(horizontal = 10.dp, vertical = 5.dp)
+                                        .padding(horizontal = 11.dp, vertical = 6.dp)
                                 ) {
                                     Text(
                                         text = skill,
                                         fontFamily = MaisonNeueFontFamily,
-                                        fontSize = 10.5.sp,
+                                        fontSize = CT.meta,
                                         fontWeight = FontWeight.SemiBold,
-                                        color = CcInk
+                                        color = CcInk,
+                                        maxLines = 1
                                     )
                                 }
                             }
@@ -1275,14 +1394,7 @@ private fun CourseDetail(
             if (video != null) {
                 item(key = "video") {
                     Column {
-                        Text(
-                            text = "Watch first",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.ExtraBold,
-                            color = CcInk,
-                            modifier = Modifier.padding(bottom = 7.dp)
-                        )
+                        SectionHeading("Watch first")
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -1292,10 +1404,13 @@ private fun CourseDetail(
                                 .clickable { onPlayVideo(video.videoId) }
                                 .testTag("course_detail_video")
                         ) {
-                            AsyncImage(
+                            SubcomposeAsyncImage(
                                 model = video.thumbnailUrl,
                                 contentDescription = null,
-                                modifier = Modifier.fillMaxSize()
+                                contentScale = ContentScale.Crop,
+                                modifier = Modifier.fillMaxSize(),
+                                loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
+                                error = { Box(Modifier.fillMaxSize().background(CcInk)) }
                             )
                             Box(
                                 modifier = Modifier
@@ -1309,27 +1424,27 @@ private fun CourseDetail(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.Center)
-                                    .size(48.dp)
+                                    .size(50.dp)
                                     .clip(CircleShape)
-                                    .background(Color.White.copy(alpha = 0.92f)),
+                                    .background(Color.White.copy(alpha = 0.94f)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 Icon(
                                     Icons.Default.PlayArrow,
                                     contentDescription = "Play",
                                     tint = CcInk,
-                                    modifier = Modifier.size(26.dp)
+                                    modifier = Modifier.size(28.dp)
                                 )
                             }
                             Column(
                                 modifier = Modifier
                                     .align(Alignment.BottomStart)
-                                    .padding(10.dp)
+                                    .padding(11.dp)
                             ) {
                                 Text(
                                     text = video.title,
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 11.5.sp,
+                                    fontSize = CT.meta,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White,
                                     maxLines = 1,
@@ -1338,8 +1453,9 @@ private fun CourseDetail(
                                 Text(
                                     text = "${video.channel} · ${video.minutes} min",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 9.5.sp,
-                                    color = Color.White.copy(alpha = 0.8f)
+                                    fontSize = CT.micro,
+                                    color = Color.White.copy(alpha = 0.8f),
+                                    maxLines = 1
                                 )
                             }
                         }
@@ -1353,23 +1469,23 @@ private fun CourseDetail(
                     color = CcBg,
                     border = BorderStroke(1.dp, CcHairline)
                 ) {
-                    Column(modifier = Modifier.padding(13.dp)) {
+                    Column(modifier = Modifier.padding(14.dp)) {
                         Text(
                             text = "Ownership",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = CT.meta,
                             fontWeight = FontWeight.ExtraBold,
                             color = CcInk
                         )
-                        Spacer(Modifier.height(3.dp))
+                        Spacer(Modifier.height(4.dp))
                         Text(
                             text = "This course is created, owned and delivered by " +
                                 "${course.provider}. TheStudent lists it as a courtesy and " +
                                 "takes no fee; enrolment, content and certificates are " +
                                 "handled entirely by them.",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
-                            lineHeight = 15.sp,
+                            fontSize = CT.meta,
+                            lineHeight = CT.metaHeight,
                             color = CcMuted
                         )
                     }
@@ -1401,16 +1517,18 @@ private fun CourseDetail(
                     Text(
                         text = "Open on ${course.provider}",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = CT.cardTitle,
                         fontWeight = FontWeight.Bold,
-                        color = Color.White
+                        color = Color.White,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Spacer(Modifier.width(6.dp))
                     Icon(
                         Icons.Default.OpenInNew,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(16.dp)
+                        modifier = Modifier.size(17.dp)
                     )
                 }
             }
@@ -1419,25 +1537,81 @@ private fun CourseDetail(
 }
 
 @Composable
-private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
-    Column(
-        modifier = modifier.padding(horizontal = 10.dp),
-        horizontalAlignment = Alignment.CenterHorizontally
+private fun SectionHeading(text: String) {
+    Text(
+        text = text,
+        fontFamily = MaisonNeueFontFamily,
+        fontSize = CT.section,
+        fontWeight = FontWeight.ExtraBold,
+        color = CcInk,
+        modifier = Modifier.padding(bottom = 6.dp)
+    )
+}
+
+/**
+ * Level, time and audience. Laid out as two columns *plus* a full-width row for
+ * "For", so a long audience list wraps instead of being clipped — on a 320dp
+ * phone this used to squeeze three columns into a third of the width each.
+ */
+@Composable
+private fun FactsCard(course: CatalogCourse) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, CcHairline),
+        modifier = Modifier.fillMaxWidth()
     ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                Fact(label = "Level", value = course.level, modifier = Modifier.weight(1f))
+                Box(
+                    modifier = Modifier
+                        .padding(horizontal = 12.dp)
+                        .width(1.dp)
+                        .height(36.dp)
+                        .background(CcHairline)
+                )
+                Fact(label = "Time", value = course.durationLabel, modifier = Modifier.weight(1f))
+            }
+            Spacer(Modifier.height(12.dp))
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(1.dp)
+                    .background(CcHairline)
+            )
+            Spacer(Modifier.height(12.dp))
+            Fact(
+                label = "For",
+                value = course.stages.joinToString(" · "),
+                modifier = Modifier.fillMaxWidth()
+            )
+        }
+    }
+}
+
+@Composable
+private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
+    Column(modifier = modifier) {
+        Text(
+            text = label.uppercase(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = CT.micro,
+            fontWeight = FontWeight.Bold,
+            color = CcFaint,
+            letterSpacing = 0.6.sp,
+            maxLines = 1
+        )
+        Spacer(Modifier.height(3.dp))
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = CT.body,
+            lineHeight = CT.metaHeight,
             fontWeight = FontWeight.Bold,
             color = CcInk,
-            maxLines = 2,
+            maxLines = 3,
             overflow = TextOverflow.Ellipsis
-        )
-        Text(
-            text = label,
-            fontFamily = MaisonNeueFontFamily,
-            fontSize = 9.sp,
-            color = CcFaint
         )
     }
 }
@@ -1447,9 +1621,14 @@ private fun Fact(label: String, value: String, modifier: Modifier = Modifier) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * A real embed, not a thumbnail that leaves the app: `youtube-nocookie.com`
- * keeps tracking off until the student presses play, and the channel name sits
- * under the player so the credit travels with the video.
+ * A real embed, not a thumbnail that leaves the app.
+ *
+ * YouTube rejects a bare `loadUrl("…/embed/…")` from an app WebView with a
+ * "video player configuration" error because the request arrives without a
+ * referer. Loading the same iframe from an HTML page with
+ * `https://www.youtube.com/` as its base URL gives the WebView that referer, so
+ * playback works; `youtube-nocookie.com` keeps tracking cookies away until the
+ * student presses play, and the channel stays credited underneath.
  */
 @Composable
 private fun YouTubeEmbedDialog(
@@ -1478,6 +1657,26 @@ private fun YouTubeEmbedDialog(
                     AndroidView(
                         modifier = Modifier.fillMaxSize(),
                         factory = { context ->
+                            val embedHtml = """
+                                <!DOCTYPE html>
+                                <html>
+                                  <head>
+                                    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+                                    <style>
+                                      html, body { margin:0; padding:0; height:100%; background:#000; overflow:hidden; }
+                                      iframe { position:absolute; top:0; left:0; width:100%; height:100%; border:0; }
+                                    </style>
+                                  </head>
+                                  <body>
+                                    <iframe
+                                      src="https://www.youtube-nocookie.com/embed/${video.videoId}?playsinline=1&rel=0&modestbranding=1"
+                                      title="${video.title}"
+                                      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                                      allowfullscreen></iframe>
+                                  </body>
+                                </html>
+                            """.trimIndent()
+
                             WebView(context).apply {
                                 setBackgroundColor(AndroidColor.BLACK)
                                 settings.javaScriptEnabled = true
@@ -1485,10 +1684,15 @@ private fun YouTubeEmbedDialog(
                                 settings.mediaPlaybackRequiresUserGesture = false
                                 settings.loadWithOverviewMode = true
                                 settings.useWideViewPort = true
+                                settings.setSupportMultipleWindows(false)
                                 webViewClient = WebViewClient()
-                                loadUrl(
-                                    "https://www.youtube-nocookie.com/embed/" +
-                                        "${video.videoId}?rel=0&modestbranding=1&playsinline=1"
+                                webChromeClient = WebChromeClient()
+                                loadDataWithBaseURL(
+                                    "https://www.youtube.com/",
+                                    embedHtml,
+                                    "text/html",
+                                    "UTF-8",
+                                    null
                                 )
                             }
                         },
@@ -1499,23 +1703,27 @@ private fun YouTubeEmbedDialog(
                         }
                     )
                 }
-                Column(modifier = Modifier.padding(14.dp)) {
+                Column(modifier = Modifier.padding(16.dp)) {
                     Text(
                         text = video.title,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = CT.cardTitle,
+                        lineHeight = 19.sp,
                         fontWeight = FontWeight.Bold,
                         color = CcInk,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
                     )
+                    Spacer(Modifier.height(2.dp))
                     Text(
                         text = "${video.channel} on YouTube",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 10.5.sp,
-                        color = CcMuted
+                        fontSize = CT.meta,
+                        color = CcMuted,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
-                    Spacer(Modifier.height(12.dp))
+                    Spacer(Modifier.height(14.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         Surface(
                             onClick = onDismiss,
@@ -1523,14 +1731,14 @@ private fun YouTubeEmbedDialog(
                             color = CcBg,
                             modifier = Modifier
                                 .weight(1f)
-                                .height(40.dp)
+                                .height(44.dp)
                                 .testTag("course_video_close")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "Close",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.sp,
+                                    fontSize = CT.body,
                                     fontWeight = FontWeight.Bold,
                                     color = CcInk
                                 )
@@ -1542,16 +1750,17 @@ private fun YouTubeEmbedDialog(
                             color = Color(0xFFDC2626),
                             modifier = Modifier
                                 .weight(1.4f)
-                                .height(40.dp)
+                                .height(44.dp)
                                 .testTag("course_video_open_youtube")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Text(
                                     text = "Watch on YouTube",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 12.sp,
+                                    fontSize = CT.body,
                                     fontWeight = FontWeight.Bold,
-                                    color = Color.White
+                                    color = Color.White,
+                                    maxLines = 1
                                 )
                             }
                         }

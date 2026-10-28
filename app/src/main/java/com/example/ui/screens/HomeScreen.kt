@@ -383,15 +383,16 @@ fun HomeScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = "Courses collection",
-                                    style = MaterialTheme.typography.titleSmall,
+                                    fontSize = 15.sp,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
                                 Text(
                                     text = "${CourseCatalog.courses.size} free courses from " +
                                         "${CourseCatalog.usedProviders.size} universities & platforms",
-                                    style = MaterialTheme.typography.labelSmall,
-                                    color = Color.White.copy(alpha = 0.72f)
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 15.sp,
+                                    color = Color.White.copy(alpha = 0.75f)
                                 )
                             }
                             Icon(
@@ -405,8 +406,9 @@ fun HomeScreen(
                         Text(
                             text = "MIT, Harvard, Moratuwa, IITs, IBM, Cisco and more — " +
                                 "every course credited to the people who made it.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = Color.White.copy(alpha = 0.82f)
+                            fontSize = 12.5.sp,
+                            lineHeight = 17.sp,
+                            color = Color.White.copy(alpha = 0.85f)
                         )
                         Spacer(Modifier.height(10.dp))
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -419,7 +421,7 @@ fun HomeScreen(
                                 ) {
                                     Text(
                                         text = label,
-                                        style = MaterialTheme.typography.labelSmall,
+                                        fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
                                         color = Color.White
                                     )
