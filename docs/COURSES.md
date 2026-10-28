@@ -276,3 +276,4 @@ mark is for; it is never used as TheStudent's own branding.
 | YouTube error 152-4 | embed arrived without a `Referer`; the library could not set it either | WebView embed with a `Referer` header and a matching `origin=`, spinner + fallback |
 | Editor's picks snapped back at the end | `(index + 1) % size` animated backwards from the last card | three copies, start in the middle, eased `animateScrollBy`, silent recentre |
 | Video played but painted white | dialog window + clipped WebView + no explicit hardware acceleration | inline overlay, no clip, `hardwareAccelerated=true` and `LAYER_TYPE_HARDWARE` |
+| Detail skeleton vanished twice | both player rewrites replaced the *end* of the file, where it lived | moved above the player section, with a note saying why |
