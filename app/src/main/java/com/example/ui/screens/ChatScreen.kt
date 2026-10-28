@@ -265,17 +265,29 @@ private fun ChatPeerProfileScreen(
         containerColor = Color.Transparent,
         contentWindowInsets = WindowInsets(0, 0, 0, 0)
     ) { innerPadding ->
-        TheStudentAppBackground(
-            baseColor = Color(0xFFF8FAFC),
-            modifier = Modifier.fillMaxSize()
+        // The hero is deliberately *not* a card. Photo, name and the Message
+        // button sit straight on a mint wash that fades into white, and only the
+        // white cards float on top of it. Wrapping the hero in its own surface
+        // was what made the page look like a form instead of a profile.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(
+                    Brush.verticalGradient(
+                        0.00f to Color(0xFFD7F0E1),
+                        0.36f to Color(0xFFE9F7EF),
+                        0.70f to Color(0xFFF5FBF8),
+                        1.00f to Color(0xFFFDFEFD)
+                    )
+                )
+                .padding(innerPadding)
         ) {
             Column(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(innerPadding)
                     .statusBarsPadding()
                     .verticalScroll(scrollState)
-                    .padding(bottom = 28.dp)
+                    .padding(bottom = 30.dp)
             ) {
                 // ── top bar ──────────────────────────────────────────────────
                 Row(
@@ -288,7 +300,7 @@ private fun ChatPeerProfileScreen(
                         onClick = onBack,
                         shape = CircleShape,
                         color = Color.White,
-                        border = BorderStroke(1.dp, ChatHairline),
+                        shadowElevation = 2.dp,
                         modifier = Modifier.size(38.dp)
                     ) {
                         Box(contentAlignment = Alignment.Center) {
@@ -310,82 +322,69 @@ private fun ChatPeerProfileScreen(
                     )
                 }
 
-                // ── hero ─────────────────────────────────────────────────────
-                Surface(
-                    shape = RoundedCornerShape(28.dp),
-                    color = Color.Transparent,
+                // ── hero: centred on the wash ────────────────────────────────
+                Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .padding(top = 4.dp, bottom = 22.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
                 ) {
-                    Box(
+                    ChatAvatar(
+                        peer = peer,
+                        size = 116.dp,
+                        showPresence = true,
+                        ringColor = Color.White
+                    )
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = peer.name,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 23.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = ChatInk,
+                        textAlign = TextAlign.Center,
+                        letterSpacing = (-0.4).sp,
+                        modifier = Modifier.padding(horizontal = 28.dp)
+                    )
+                    Spacer(Modifier.height(5.dp))
+                    Text(
+                        text = chatPresenceLine(peer),
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = if (peer.isOnline) EmeraldDark else ChatMuted,
+                        textAlign = TextAlign.Center
+                    )
+                    Spacer(Modifier.height(20.dp))
+                    // Only the Message button: there is no block / mute on the
+                    // relay yet, so the "..." of the mockup would be a dead tap.
+                    Surface(
+                        onClick = onMessage,
+                        shape = RoundedCornerShape(50),
+                        color = EmeraldPrimary,
+                        shadowElevation = 8.dp,
                         modifier = Modifier
-                            .fillMaxWidth()
-                            // A soft wash rather than a flat block: the same two
-                            // greens the rest of the app uses.
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(Color(0xFFD1FAE5), Color(0xFFECFDF5))
-                                )
-                            )
-                            .padding(vertical = 24.dp, horizontal = 20.dp)
+                            .height(46.dp)
+                            .testTag("chat_profile_message")
                     ) {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            ChatAvatar(
-                                peer = peer,
-                                size = 108.dp,
-                                showPresence = true,
-                                ringColor = Color.White
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.padding(horizontal = 26.dp)
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Send,
+                                contentDescription = null,
+                                tint = Color.White,
+                                modifier = Modifier.size(16.dp)
                             )
-                            Spacer(Modifier.height(12.dp))
+                            Spacer(Modifier.width(9.dp))
                             Text(
-                                text = peer.name,
+                                text = "Message",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 20.sp,
+                                fontSize = 13.5.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = ChatInk,
-                                textAlign = TextAlign.Center
+                                color = Color.White
                             )
-                            Spacer(Modifier.height(4.dp))
-                            Text(
-                                text = chatPresenceLine(peer),
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = if (peer.isOnline) EmeraldDark else ChatMuted
-                            )
-                            Spacer(Modifier.height(18.dp))
-                            Row(
-                                horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Surface(
-                                    onClick = onMessage,
-                                    shape = RoundedCornerShape(50),
-                                    color = EmeraldPrimary,
-                                    modifier = Modifier.height(44.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        modifier = Modifier.padding(horizontal = 22.dp)
-                                    ) {
-                                        Icon(
-                                            Icons.AutoMirrored.Filled.Send,
-                                            contentDescription = null,
-                                            tint = Color.White,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Spacer(Modifier.width(8.dp))
-                                        Text(
-                                            text = "Message",
-                                            fontFamily = MaisonNeueFontFamily,
-                                            fontSize = 13.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = Color.White
-                                        )
-                                    }
-                                }
-                            }
                         }
                     }
                 }
@@ -397,7 +396,7 @@ private fun ChatPeerProfileScreen(
                             ProfileInfoRow(
                                 icon = Icons.Default.MenuBook,
                                 tint = EmeraldPrimary,
-                                tintSoft = Color(0xFFECFDF5),
+                                tintSoft = Color(0xFFE3F8EC),
                                 label = "Target exam",
                                 value = profile.targetExam
                             )
@@ -414,8 +413,8 @@ private fun ChatPeerProfileScreen(
                         if (profile.institution.isNotBlank()) {
                             ProfileInfoRow(
                                 icon = Icons.Default.AccountBalance,
-                                tint = Color(0xFFF59E0B),
-                                tintSoft = Color(0xFFFEF3C7),
+                                tint = Color(0xFFF0A22E),
+                                tintSoft = Color(0xFFFFF1DC),
                                 label = "Institution",
                                 value = profile.institution
                             )
@@ -426,74 +425,87 @@ private fun ChatPeerProfileScreen(
                 // ── on the student app ───────────────────────────────────────
                 ProfileCard(title = "On TheStudent") {
                     profile.joinedEpoch?.let { joined ->
-                        ProfileInfoRow(
+                        ProfileFactRow(
                             icon = Icons.Default.CalendarToday,
                             tint = Color(0xFF8B5CF6),
-                            tintSoft = Color(0xFFF3E8FF),
+                            tintSoft = Color(0xFFF1EAFE),
                             label = "Joined",
                             value = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
                                 .format(Date(joined * 1000))
                         )
                     }
                     profile.chattingSinceEpoch?.let { since ->
-                        ProfileInfoRow(
+                        ProfileFactRow(
                             icon = Icons.Default.Forum,
                             tint = Color(0xFF14B8A6),
-                            tintSoft = Color(0xFFCCFBF1),
+                            tintSoft = Color(0xFFD9F7F1),
                             label = "Chatting since",
+                            // On this phone only: the relay deletes messages as
+                            // soon as they are delivered.
                             value = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
                                 .format(Date(since * 1000))
                         )
                     }
-                    ProfileInfoRow(
+                    ProfileFactRow(
                         icon = Icons.Default.Circle,
                         tint = if (peer.isOnline) ChatOnline else ChatFaint,
-                        tintSoft = if (peer.isOnline) Color(0xFFECFDF5) else Color(0xFFF1F5F9),
+                        tintSoft = if (peer.isOnline) Color(0xFFE3F8EC) else Color(0xFFF1F5F9),
                         label = "Currently",
                         value = chatPresenceLine(peer)
                     )
                 }
 
                 // ── privacy note ─────────────────────────────────────────────
+                // White shell, mint well — the same nested-card look the app
+                // uses on the settings screen.
                 Surface(
-                    shape = RoundedCornerShape(20.dp),
-                    color = Color(0xFFECFDF5),
-                    border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                    shape = RoundedCornerShape(24.dp),
+                    color = Color.White,
+                    shadowElevation = 8.dp,
                     modifier = Modifier
                         .fillMaxWidth()
                         .padding(horizontal = 16.dp, vertical = 6.dp)
                 ) {
-                    Row(modifier = Modifier.padding(16.dp)) {
-                        Icon(
-                            Icons.Default.Shield,
-                            contentDescription = null,
-                            tint = EmeraldDark,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Spacer(Modifier.width(12.dp))
-                        Column {
-                            Text(
-                                text = "Only what they chose to share",
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 13.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = EmeraldDark
+                    Surface(
+                        shape = RoundedCornerShape(18.dp),
+                        color = Color(0xFFE9F8F0),
+                        border = BorderStroke(1.dp, Color(0xFFBEE9D4)),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(7.dp)
+                    ) {
+                        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+                            Icon(
+                                Icons.Default.Shield,
+                                contentDescription = null,
+                                tint = EmeraldDark,
+                                modifier = Modifier.size(20.dp)
                             )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = "Phone numbers and e-mail addresses are never shown " +
-                                    "to other students.",
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
-                                lineHeight = 16.sp,
-                                color = ChatMuted
-                            )
+                            Spacer(Modifier.width(12.dp))
+                            Column {
+                                Text(
+                                    text = "Only what they chose to share",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 13.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = EmeraldDark
+                                )
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = "Phone numbers and e-mail addresses are never " +
+                                        "shown to other students.",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 11.5.sp,
+                                    lineHeight = 16.sp,
+                                    color = ChatMuted
+                                )
+                            }
                         }
                     }
                 }
 
                 if (isLoading) {
-                    Spacer(Modifier.height(10.dp))
+                    Spacer(Modifier.height(12.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.Center
@@ -511,35 +523,36 @@ private fun ChatPeerProfileScreen(
     }
 }
 
-/** White card with a small caps title, used by the profile sections. */
+/** White card with a small caps title, floating on the profile wash. */
 @Composable
 private fun ProfileCard(
     title: String,
     content: @Composable ColumnScope.() -> Unit
 ) {
     Surface(
-        shape = RoundedCornerShape(22.dp),
+        shape = RoundedCornerShape(24.dp),
         color = Color.White,
-        border = BorderStroke(1.dp, ChatHairline),
+        shadowElevation = 10.dp,
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 16.dp, vertical = 6.dp)
+            .padding(horizontal = 16.dp, vertical = 7.dp)
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 16.dp)) {
             Text(
                 text = title.uppercase(Locale.getDefault()),
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 10.sp,
                 fontWeight = FontWeight.Bold,
-                color = ChatFaint
+                color = ChatFaint,
+                letterSpacing = 1.1.sp
             )
-            Spacer(Modifier.height(10.dp))
+            Spacer(Modifier.height(12.dp))
             content()
         }
     }
 }
 
-/** One labelled row: tinted icon tile, label, value. */
+/** Education row: tinted icon tile, tiny label, value underneath. */
 @Composable
 private fun ProfileInfoRow(
     icon: androidx.compose.ui.graphics.vector.ImageVector,
@@ -551,13 +564,13 @@ private fun ProfileInfoRow(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 6.dp),
+            .padding(vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Box(
             modifier = Modifier
-                .size(34.dp)
-                .clip(RoundedCornerShape(10.dp))
+                .size(38.dp)
+                .clip(RoundedCornerShape(12.dp))
                 .background(tintSoft),
             contentAlignment = Alignment.Center
         ) {
@@ -565,7 +578,7 @@ private fun ProfileInfoRow(
                 imageVector = icon,
                 contentDescription = null,
                 tint = tint,
-                modifier = Modifier.size(17.dp)
+                modifier = Modifier.size(18.dp)
             )
         }
         Spacer(Modifier.width(12.dp))
@@ -585,6 +598,54 @@ private fun ProfileInfoRow(
                 color = ChatInk
             )
         }
+    }
+}
+
+/** Fact row: icon, label on the left, the value pushed to the right edge. */
+@Composable
+private fun ProfileFactRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    tintSoft: Color,
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(11.dp))
+                .background(tintSoft),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            text = label,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.5.sp,
+            color = ChatMuted,
+            modifier = Modifier.weight(1f)
+        )
+        Text(
+            text = value,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = FontWeight.SemiBold,
+            color = ChatInk,
+            textAlign = TextAlign.End
+        )
     }
 }
 
