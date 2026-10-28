@@ -85,10 +85,11 @@ class MainActivity : ComponentActivity() {
             // "Your EXP" is a page, so back leaves the page — not the tab.
             BackHandler(enabled = uiState.isExpOpen) { viewModel.closeExp() }
             BackHandler(enabled = uiState.isProgressOpen) { viewModel.closeProgress() }
+            BackHandler(enabled = uiState.isCourseCollectionOpen) { viewModel.closeCourseCollection() }
             // Same for the account page: back must not drop the session or the tab.
             BackHandler(enabled = uiState.isAccountOpen) { viewModel.closeAccount() }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -378,6 +379,10 @@ class MainActivity : ComponentActivity() {
                                     customZaiApiKey = uiState.customZaiApiKey,
                                     onUpdateZaiApiKey = { viewModel.updateZaiApiKey(it) }
                                 )
+                            } else if (uiState.isCourseCollectionOpen) {
+                                CourseCollectionScreen(
+                                    onBack = { viewModel.closeCourseCollection() }
+                                )
                             } else if (uiState.isProgressOpen) {
                                 val progress by viewModel.quizProgress.collectAsStateWithLifecycle()
                                 val isProgressLoading by viewModel.isProgressLoading.collectAsStateWithLifecycle()
@@ -475,6 +480,7 @@ class MainActivity : ComponentActivity() {
                                                  uiState.currentTab != TheStudentNavTab.PROFILE &&
                                                  uiState.currentTab != TheStudentNavTab.PAPERS &&
                                                  !uiState.isExpOpen &&
+                                                 !uiState.isCourseCollectionOpen &&
                                                  !uiState.isProgressOpen &&
                                                  !uiState.isAccountOpen
                                              ) {
@@ -494,7 +500,7 @@ class MainActivity : ComponentActivity() {
                                              }
                                          },
                                             bottomBar = {
-                                                if (!uiState.isExpOpen && !uiState.isProgressOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
+                                                if (!uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
                                                     TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
@@ -546,6 +552,7 @@ class MainActivity : ComponentActivity() {
                                                             quizProgress = quizProgress,
                                                             onOpenProgress = { viewModel.openProgress() },
                                                             onContinueLearning = { viewModel.practiseSuggested() },
+                                                            onOpenCourseCollection = { viewModel.openCourseCollection() },
                                                             onNavigateTab = { viewModel.setTab(it) }
                                                         )
                                                         LaunchedEffect(Unit) { viewModel.loadProgress() }

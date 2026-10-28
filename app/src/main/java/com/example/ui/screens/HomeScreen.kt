@@ -11,6 +11,7 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
@@ -28,6 +29,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.Course
+import com.example.data.model.CourseCatalog
 import com.example.data.model.QuizProgress
 import com.example.data.model.PastPaper
 import com.example.data.model.StudyNote
@@ -52,6 +54,7 @@ fun HomeScreen(
     quizProgress: QuizProgress = QuizProgress(),
     onOpenProgress: () -> Unit = {},
     onContinueLearning: () -> Unit = {},
+    onOpenCourseCollection: () -> Unit = {},
     onNavigateTab: (TheStudentNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -334,6 +337,94 @@ fun HomeScreen(
                                     else -> "Find a quiz"
                                 }
                             )
+                        }
+                    }
+                }
+            }
+        }
+
+        // Courses collection — everything here belongs to its provider, and the
+        // card says so before the student taps it.
+        item {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .clickable { onOpenCourseCollection() }
+                    .testTag("home_course_collection_card"),
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = Color(0xFF0F172A))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .background(
+                            Brush.linearGradient(
+                                listOf(Color(0xFF0F172A), Color(0xFF134E4A), Color(0xFF065F46))
+                            )
+                        )
+                ) {
+                    Column(modifier = Modifier.padding(16.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Box(
+                                modifier = Modifier
+                                    .size(34.dp)
+                                    .clip(RoundedCornerShape(11.dp))
+                                    .background(Color.White.copy(alpha = 0.14f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.School,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                            Spacer(Modifier.width(10.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Courses collection",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color.White
+                                )
+                                Text(
+                                    text = "${CourseCatalog.courses.size} free courses from " +
+                                        "${CourseCatalog.usedProviders.size} universities & platforms",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = Color.White.copy(alpha = 0.72f)
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                                contentDescription = null,
+                                tint = Color.White.copy(alpha = 0.85f),
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                        Spacer(Modifier.height(12.dp))
+                        Text(
+                            text = "MIT, Harvard, Moratuwa, IITs, IBM, Cisco and more — " +
+                                "every course credited to the people who made it.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = Color.White.copy(alpha = 0.82f)
+                        )
+                        Spacer(Modifier.height(10.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            listOf("Free cert", "Videos", "Sri Lanka").forEach { label ->
+                                Box(
+                                    modifier = Modifier
+                                        .clip(RoundedCornerShape(50))
+                                        .background(Color.White.copy(alpha = 0.14f))
+                                        .padding(horizontal = 8.dp, vertical = 3.dp)
+                                ) {
+                                    Text(
+                                        text = label,
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = Color.White
+                                    )
+                                }
+                            }
                         }
                     }
                 }

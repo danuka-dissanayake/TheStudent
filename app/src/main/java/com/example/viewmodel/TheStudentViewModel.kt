@@ -98,6 +98,8 @@ data class TheStudentUiState(
     val isAccountOpen: Boolean = false,
     /** "Your progress": subject accuracy, streak and what to practise next. */
     val isProgressOpen: Boolean = false,
+    /** The curated index of free courses owned by other universities and platforms. */
+    val isCourseCollectionOpen: Boolean = false,
     val activeLanguageSubTab: Int = 0, // 0: Voice Conv, 1: Vocabulary, 2: Grammar, 3: Pronunciation
     val isSpeakingActive: Boolean = false,
     val activeGrammarQuestionIndex: Int = 0,
@@ -619,6 +621,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun closeProgress() {
         _uiState.update { it.copy(isProgressOpen = false) }
+    }
+
+    // ── Courses collection ──────────────────────────────────────────────────
+    // The catalog is bundled (see CourseCatalog), so there is nothing to fetch:
+    // opening the page cannot fail, which matters for a screen students reach
+    // before the relay is configured.
+
+    fun openCourseCollection() {
+        _uiState.update { it.copy(isCourseCollectionOpen = true) }
+    }
+
+    fun closeCourseCollection() {
+        _uiState.update { it.copy(isCourseCollectionOpen = false) }
     }
 
     fun loadProgress() {
