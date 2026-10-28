@@ -104,6 +104,17 @@ private val HGreenDeep = Color(0xFF047857)
 private val HViolet = Color(0xFF7C3AED)
 private val HVioletSoft = Color(0xFFF5F3FF)
 private val HBlue = Color(0xFF2563EB)
+
+// The dark report card.
+private val DarkBase = Color(0xFF0B0F14)
+private val DarkMid = Color(0xFF111A24)
+private val DarkGreen = Color(0xFF0B2A24)
+private val DarkGreenBright = Color(0xFF34D399)
+private val DarkInk = Color(0xFFF8FAFC)
+private val DarkMuted = Color(0xFF94A3B8)
+private val DarkSegmentStrong = Color(0xFF10B981)
+private val DarkSegmentSteady = Color(0xFFFBBF24)
+private val DarkSegmentWeak = Color(0xFFFB7185)
 private val HBlueSoft = Color(0xFFEEF2FF)
 private val HAmber = Color(0xFFB45309)
 private val HAmberSoft = Color(0xFFFFFBEB)
@@ -475,32 +486,48 @@ private fun ReportCard(
     val weak = subjects.count { it.accuracy < 50 }
     val total = (strong + steady + weak).coerceAtLeast(1)
 
-    Surface(
-        shape = RoundedCornerShape(24.dp),
-        color = HCard,
-        border = BorderStroke(1.dp, HHairline),
+    // The one dark surface on the dashboard: a near-black sheet that makes the
+    // numbers look like an instrument panel, with a green cast in the corner so
+    // it still belongs to this app.
+    Box(
         modifier = modifier
             .fillMaxWidth()
+            .clip(RoundedCornerShape(24.dp))
+            .background(
+                Brush.linearGradient(
+                    0f to DarkBase,
+                    0.55f to DarkMid,
+                    1f to DarkGreen
+                )
+            )
             .testTag("home_report_card")
     ) {
-        Column(modifier = Modifier.padding(16.dp)) {
+        Column(modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 18.dp, bottom = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 AccuracyRing(
                     percent = averagePercent,
-                    modifier = Modifier.size(104.dp)
+                    modifier = Modifier.size(104.dp),
+                    track = Color.White.copy(alpha = 0.12f),
+                    arc = DarkGreenBright,
+                    ink = DarkInk,
+                    label = DarkMuted
                 )
-                Spacer(Modifier.width(16.dp))
+                Spacer(Modifier.width(18.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     KpiRow(
                         value = if (quizzesPublished > 0) "$quizzesPassed of $quizzesPublished" else "—",
-                        label = "quizzes passed"
+                        label = "quizzes passed",
+                        valueColor = DarkInk,
+                        labelColor = DarkMuted
                     )
-                    Hairline()
+                    Hairline(color = Color.White.copy(alpha = 0.09f))
                     KpiRow(
                         value = if (studySeconds > 0) StudyMetrics.duration(studySeconds) else "—",
-                        label = "studied"
+                        label = "studied",
+                        valueColor = DarkInk,
+                        labelColor = DarkMuted
                     )
-                    Hairline()
+                    Hairline(color = Color.White.copy(alpha = 0.09f))
                     // The EXP figure is the door to the ledger behind it.
                     Box(
                         modifier = Modifier
@@ -511,18 +538,21 @@ private fun ReportCard(
                     ) {
                         KpiRow(
                             value = if (exp > 0) "$exp XP" else "—",
-                            label = "earned from quizzes"
+                            label = "earned from quizzes",
+                            valueColor = DarkGreenBright,
+                            labelColor = DarkMuted
                         )
                     }
                 }
             }
 
             if (subjects.isNotEmpty()) {
-                Spacer(Modifier.height(16.dp))
+                Spacer(Modifier.height(18.dp))
                 SegmentedBar(
                     strong = strong,
                     steady = steady,
                     weak = weak,
+                    track = Color.White.copy(alpha = 0.12f),
                     modifier = Modifier.fillMaxWidth()
                 )
                 Spacer(Modifier.height(8.dp))
@@ -532,21 +562,25 @@ private fun ReportCard(
                         "Needs work ${percentOf(weak, total)}",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 12.sp,
-                    color = HMuted,
+                    color = DarkMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
             }
 
-            Spacer(Modifier.height(16.dp))
+            Spacer(Modifier.height(18.dp))
 
             Surface(
                 onClick = onPractise,
                 shape = RoundedCornerShape(50),
-                color = HGreen,
+                color = Color.Transparent,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(44.dp)
+                    .height(46.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(
+                        Brush.horizontalGradient(listOf(DarkGreenBright, HGreen))
+                    )
                     .testTag("hero_cta")
             ) {
                 Row(
@@ -557,33 +591,31 @@ private fun ReportCard(
                     Text(
                         text = if (hasData) "Keep practising" else "Take your first quiz",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.5.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
-                    Spacer(Modifier.width(6.dp))
+                    Spacer(Modifier.width(7.dp))
                     Icon(
                         imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
                         tint = Color.White,
-                        modifier = Modifier.size(15.dp)
+                        modifier = Modifier.size(16.dp)
                     )
                 }
             }
 
-            Spacer(Modifier.height(6.dp))
-
             Text(
                 text = "Full report",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = HT.micro,
+                fontSize = 13.sp,
                 fontWeight = FontWeight.Bold,
-                color = HGreen,
+                color = DarkGreenBright,
                 modifier = Modifier
                     .align(Alignment.CenterHorizontally)
                     .clip(RoundedCornerShape(50))
                     .clickable(onClick = onOpenProgress)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .padding(horizontal = 12.dp, vertical = 12.dp)
                     .testTag("home_open_progress")
             )
         }
@@ -594,7 +626,12 @@ private fun percentOf(part: Int, total: Int): String =
     if (total <= 0) "0%" else "${(part * 100 + total / 2) / total}%"
 
 @Composable
-private fun KpiRow(value: String, label: String) {
+private fun KpiRow(
+    value: String,
+    label: String,
+    valueColor: Color = HInk,
+    labelColor: Color = HFaint
+) {
     Column(modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Text(
             text = value,
@@ -602,7 +639,7 @@ private fun KpiRow(value: String, label: String) {
             fontSize = 19.sp,
             fontWeight = FontWeight.ExtraBold,
             letterSpacing = (-0.3).sp,
-            color = HInk,
+            color = valueColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -610,7 +647,7 @@ private fun KpiRow(value: String, label: String) {
             text = label,
             fontFamily = MaisonNeueFontFamily,
             fontSize = 12.sp,
-            color = HFaint,
+            color = labelColor,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -618,18 +655,25 @@ private fun KpiRow(value: String, label: String) {
 }
 
 @Composable
-private fun Hairline() {
+private fun Hairline(color: Color = HHairline) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .height(1.dp)
-            .background(HHairline)
+            .background(color)
     )
 }
 
 /** A colour-coded ring: emerald on a pale track, with the figure in the middle. */
 @Composable
-private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
+private fun AccuracyRing(
+    percent: Int,
+    modifier: Modifier = Modifier,
+    track: Color = HTrack,
+    arc: Color = HGreen,
+    ink: Color = HInk,
+    label: Color = HMuted
+) {
     val safe = percent.coerceIn(0, 100)
     Box(modifier = modifier, contentAlignment = Alignment.Center) {
         Canvas(modifier = Modifier.fillMaxSize()) {
@@ -637,7 +681,7 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
             val inset = stroke / 2f
             val arcSize = Size(size.width - stroke, size.height - stroke)
             drawArc(
-                color = HTrack,
+                color = track,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -647,7 +691,7 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
             )
             if (safe > 0) {
                 drawArc(
-                    color = HGreen,
+                    color = arc,
                     startAngle = -90f,
                     sweepAngle = 360f * (safe / 100f),
                     useCenter = false,
@@ -664,14 +708,14 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
                 fontSize = 26.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.8).sp,
-                color = HInk
+                color = ink
             )
             Text(
                 text = "accuracy",
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 11.5.sp,
                 fontWeight = FontWeight.Medium,
-                color = HMuted
+                color = label
             )
         }
     }
@@ -679,19 +723,25 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
 
 /** One bar, three segments: the subject mix at a glance. */
 @Composable
-private fun SegmentedBar(strong: Int, steady: Int, weak: Int, modifier: Modifier = Modifier) {
+private fun SegmentedBar(
+    strong: Int,
+    steady: Int,
+    weak: Int,
+    modifier: Modifier = Modifier,
+    track: Color = HTrack
+) {
     Row(
         modifier = modifier
-            .height(8.dp)
+            .height(7.dp)
             .clip(CircleShape)
-            .background(HTrack)
+            .background(track)
     ) {
         if (strong > 0) {
             Box(
                 modifier = Modifier
                     .weight(strong.toFloat())
                     .fillMaxHeight()
-                    .background(HGreen)
+                    .background(DarkSegmentStrong)
             )
         }
         if (steady > 0) {
@@ -699,7 +749,7 @@ private fun SegmentedBar(strong: Int, steady: Int, weak: Int, modifier: Modifier
                 modifier = Modifier
                     .weight(steady.toFloat())
                     .fillMaxHeight()
-                    .background(HBlue)
+                    .background(DarkSegmentSteady)
             )
         }
         if (weak > 0) {
@@ -707,7 +757,7 @@ private fun SegmentedBar(strong: Int, steady: Int, weak: Int, modifier: Modifier
                 modifier = Modifier
                     .weight(weak.toFloat())
                     .fillMaxHeight()
-                    .background(Color(0xFFF59E0B))
+                    .background(DarkSegmentWeak)
             )
         }
     }
