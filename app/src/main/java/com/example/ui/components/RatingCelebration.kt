@@ -2,11 +2,9 @@ package com.example.ui.components
 
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.CubicBezierEasing
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -19,8 +17,13 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material3.Icon
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -39,17 +42,17 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
-import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.foundation.BorderStroke
+import androidx.activity.compose.BackHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
@@ -77,11 +80,11 @@ import kotlinx.coroutines.launch
  * 150–1750   confetti spawns, falls, sways and flips
  * 640    "Nimal rated you" fades in (420, ease-out)
  * 760    the word pill fades in (420, ease-out)
- * 2400   exit: fade + lift (500) → gone by 2900
- * tap    exit in 300 ms
  * ```
  *
- * It never blocks the app: it finishes on its own, and a tap closes it early.
+ * Unlike the design file, it does **not** close itself: a rating is worth
+ * reading, so the card stays until the student taps the close button (or the
+ * system back gesture) — then it fades out over 300 ms.
  */
 @Composable
 fun RatingCelebrationOverlay(
@@ -114,7 +117,6 @@ fun RatingCelebrationOverlay(
     val starAnims = remember { List(5) { Animatable(0f) } }
     val whoAnim = remember { Animatable(0f) }
     val pillAnim = remember { Animatable(0f) }
-    val progressAnim = remember { Animatable(1f) }
     val exitAnim = remember { Animatable(0f) }
 
     val scope = rememberCoroutineScope()
@@ -128,14 +130,18 @@ fun RatingCelebrationOverlay(
         }
     }
 
-    fun close(quick: Boolean) {
+    // Closing is the only way out, so it must be a single, unmissable exit.
+    fun close() {
         if (closing) return
         closing = true
         scope.launch {
-            exitAnim.animateTo(1f, tween(if (quick) 300 else 500))
+            exitAnim.animateTo(1f, tween(300, easing = EASE_OUT))
             finish()
         }
     }
+
+    // Back closes it rather than leaving the chat tab the student is standing on.
+    BackHandler(enabled = !closing) { close() }
 
     LaunchedEffect(Unit) {
         coroutineScope {
@@ -161,22 +167,15 @@ fun RatingCelebrationOverlay(
                 delay(760)
                 pillAnim.animateTo(1f, tween(420, easing = EASE_OUT))
             }
-            launch {
-                progressAnim.animateTo(0f, tween(2600, easing = LinearEasing))
-            }
         }
-        // The bar has run out: leave the way the design asks, then hand control back.
-        close(quick = false)
+        // Nothing else to do: the overlay stays until the student closes it.
     }
 
     BoxWithConstraints(
         modifier = modifier
             .fillMaxSize()
             .background(Color.White)
-            .testTag("rating_celebration")
-            .pointerInput(Unit) {
-                detectTapGestures { close(quick = true) }
-            },
+            .testTag("rating_celebration"),
         contentAlignment = Alignment.Center
     ) {
         val width = maxWidth
@@ -374,22 +373,31 @@ fun RatingCelebrationOverlay(
             }
         }
 
-        // ── the "it will close itself" line ────────────────────────────────
-        Box(
+        // ── close ──────────────────────────────────────────────────────────
+        // The design's countdown bar became this button: the moment is worth
+        // reading at your own pace, so nothing takes it away mid-read.
+        Surface(
+            onClick = { close() },
+            shape = CircleShape,
+            color = Color.White,
+            border = BorderStroke(1.dp, Color(0xFFE8EDF3)),
+            shadowElevation = 2.dp,
             modifier = Modifier
-                .align(Alignment.BottomCenter)
-                .padding(bottom = width * 0.05f)
-                .width(width * 0.80f)
-                .height(2.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color(0xFF059669))
-                .graphicsLayer {
-                    val p = progressAnim.value
-                    alpha = (1f - exitAnim.value) * if (p <= 0.01f) 0f else 1f
-                    scaleX = p
-                    transformOrigin = TransformOrigin(0f, 0.5f)
-                }
-        )
+                .align(Alignment.TopEnd)
+                .statusBarsPadding()
+                .padding(top = 14.dp, end = 18.dp)
+                .size(40.dp)
+                .testTag("rating_celebration_close")
+        ) {
+            Box(contentAlignment = Alignment.Center) {
+                Icon(
+                    imageVector = Icons.Default.Close,
+                    contentDescription = "Close",
+                    tint = Color(0xFF0F172A),
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+        }
     }
 }
 
