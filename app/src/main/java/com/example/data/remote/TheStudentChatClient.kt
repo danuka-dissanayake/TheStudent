@@ -11,6 +11,7 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
 import com.example.data.model.ChatRateState
+import com.example.data.model.UserExp
 import com.example.data.model.ChatReceivedRating
 import com.example.data.model.ChatRating
 import com.example.data.model.ChatRatingResult
@@ -300,6 +301,19 @@ object TheStudentChatClient {
                 rating = parseRating(json.optJSONObject("rating")),
                 summary = parseRatingSummary(json.optJSONObject("summary"))
             )
+        }
+    }
+
+    /**
+     * The student's own EXP: total, today's allowance, tier and the newest awards.
+     * The server owns the arithmetic; this only carries it.
+     */
+    suspend fun fetchExpState(
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<UserExp> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "exp_state") { json ->
+            UserExp.from(json.optJSONObject("exp"))
         }
     }
 

@@ -635,6 +635,10 @@ object TheStudentAuthClient {
                 true
             },
             authProvider = userObj.optString("auth_provider", "email"),
+            // The server's EXP ledger is the only source of the XP number; a
+            // server that predates the ledger simply reports nothing, which is
+            // the same as a student who has not earned any yet.
+            points = userObj.optInt("exp_total", 0),
             academic = AcademicProfile.from(
                 examLevel = userObj.textOrEmpty("exam_level"),
                 streamCode = userObj.textOrEmpty("stream_code"),

@@ -48,6 +48,10 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 
 ---
 
+> **EXP** — points are a server-side ledger (`backend/api/_exp.php`,
+> `backend/database_exp.sql`), never a client counter. Read `docs/EXP.md` before
+> touching anything that awards or displays them.
+
 ## 3. Screens (`com.example.ui.screens`)
 
 | File | Lines | What it does |

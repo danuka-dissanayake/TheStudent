@@ -47,6 +47,7 @@ fun HomeScreen(
     onPaperClick: (PastPaper) -> Unit,
     onOpenAiAssistant: () -> Unit,
     onOpenLanguageLab: () -> Unit,
+    onOpenExp: () -> Unit = {},
     onNavigateTab: (TheStudentNavTab) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -109,10 +110,14 @@ fun HomeScreen(
                                 )
                             }
 
+                            // The XP pill is also the door to the ledger behind it:
+                            // tapping it explains where every point came from.
                             Surface(
+                                onClick = onOpenExp,
                                 shape = RoundedCornerShape(20.dp),
                                 color = EmeraldPrimary,
-                                contentColor = Color.White
+                                contentColor = Color.White,
+                                modifier = Modifier.testTag("home_exp_pill")
                             ) {
                                 Row(
                                     modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),

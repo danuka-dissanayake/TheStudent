@@ -61,11 +61,12 @@ ts_install_error_handlers();
 
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
+require_once __DIR__ . '/_exp.php';      // ts_exp_award(), ts_exp_summary()
 
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.8.2';
+const TS_CHAT_API_VERSION          = '2.9.0';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 0;    // no waiting: a question can be answered in two messages
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
@@ -1490,6 +1491,26 @@ switch ($action) {
             $pdo->prepare(
                 "UPDATE chat_help_requests SET status = 'completed', completed_at = NOW() WHERE id = :id"
             )->execute(['id' => $requestId]);
+
+            // The loop worked: the asker closed a request that was answered.
+            // The ref_key ties the EXP to this request, so closing the same
+            // request twice (or a retried tap) can never pay twice.
+            if ($helper > 0) {
+                ts_exp_award(
+                    $pdo,
+                    (int) $helper,
+                    'help_given',
+                    'help:' . $requestId . ':helper',
+                    'Helped a student with their question'
+                );
+            }
+            ts_exp_award(
+                $pdo,
+                $meId,
+                'help_closed',
+                'help:' . $requestId . ':seeker',
+                'Closed a request you got help with'
+            );
         } else {
             if ($meId !== $seeker && $meId !== $helper) {
                 ts_chat_json('error', 'That request is not yours.', [], 403);
@@ -2228,9 +2249,31 @@ switch ($action) {
         $fresh->execute(['id' => $savedId]);
         $freshRow = $fresh->fetch();
 
+        // EXP for the pair. The rating's own id is the ref_key, so editing a
+        // rating inside its 24-hour window never pays a second time, and the
+        // five-star bonus has its own key for the same reason.
+        ts_exp_award($pdo, $meId, 'rated', 'rating:' . $savedId . ':rater', 'Rated the help you got');
+        ts_exp_award(
+            $pdo,
+            $peerId,
+            'rating_received',
+            'rating:' . $savedId . ':ratee',
+            'Somebody rated your help'
+        );
+        if ($stars === 5) {
+            ts_exp_award(
+                $pdo,
+                $peerId,
+                'rating_five',
+                'rating:' . $savedId . ':five',
+                'A five-star rating'
+            );
+        }
+
         ts_chat_json('success', 'Rating saved.', [
             'rating'  => $freshRow ? ts_chat_rating_public($freshRow, $meId, $now) : null,
             'summary' => ts_chat_rating_summary($pdo, $peerId),
+            'exp'     => ts_exp_summary($pdo, $meId, false),
         ]);
         break;
     }
@@ -2331,13 +2374,22 @@ switch ($action) {
         break;
     }
 
+    case 'exp_state': {
+        // The student's own EXP: total, what was earned today, the tier, and the
+        // newest awards so the number can be explained rather than just shown.
+        ts_chat_json('success', 'Your EXP loaded.', [
+            'exp' => ts_exp_summary($pdo, $meId),
+        ]);
+        break;
+    }
+
     default:
         ts_chat_json('error', 'Unknown action.', [
             'actions' => [
                 'threads', 'profile', 'set_purpose',
                 'help_request', 'help_state',
                 'help_accept', 'help_close', 'help_cancel',
-                'rate', 'rate_state', 'rating_summary', 'my_ratings',
+                'rate', 'rate_state', 'rating_summary', 'my_ratings', 'exp_state',
                 'inbox', 'send', 'read', 'typing', 'ack_safety',
                 'heartbeat', 'set_key', 'version',
             ],

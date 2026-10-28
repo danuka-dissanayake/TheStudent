@@ -91,6 +91,8 @@ data class TheStudentUiState(
     val activePaperDetail: PastPaper? = null,
     val activeCourseDetail: Course? = null,
     val isLanguageLabOpen: Boolean = false,
+    /** The "Your EXP" page: what was earned, today's allowance and the tier. */
+    val isExpOpen: Boolean = false,
     val activeLanguageSubTab: Int = 0, // 0: Voice Conv, 1: Vocabulary, 2: Grammar, 3: Pronunciation
     val isSpeakingActive: Boolean = false,
     val activeGrammarQuestionIndex: Int = 0,
@@ -1455,7 +1457,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private fun chatFailureMessage(raw: String): String =
         if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
             "This server is running an older chat API. Upload backend/api/chat.php " +
-                "(needs version 2.8.1 or newer)."
+                "(needs version $CHAT_MIN_SERVER_VERSION or newer)."
         } else {
             raw
         }
@@ -2315,7 +2317,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
          * action is added, so a host that was never updated says so out loud
          * instead of silently hiding the feature.
          */
-        const val CHAT_MIN_SERVER_VERSION = "2.8.1"
+        const val CHAT_MIN_SERVER_VERSION = "2.9.0"
         /** Two "track this question?" offers a day, app-wide, is plenty. */
         private const val MAX_OFFERS_PER_DAY = 2
         /** Purpose string the server stores for a tracked question. */
@@ -2869,7 +2871,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     // Navigation and tabs
     fun setTab(tab: TheStudentNavTab) {
         val wasDifferent = _uiState.value.currentTab != tab
-        _uiState.update { it.copy(currentTab = tab, isLanguageLabOpen = false) }
+        _uiState.update { it.copy(currentTab = tab, isLanguageLabOpen = false, isExpOpen = false) }
         if (wasDifferent && (tab == TheStudentNavTab.HOME || tab == TheStudentNavTab.CHAT || tab == TheStudentNavTab.PAPERS)) {
             simulateSkeletonRefresh()
         }
@@ -2881,6 +2883,47 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun closeLanguageLab() {
         _uiState.update { it.copy(isLanguageLabOpen = false) }
+    }
+
+    // ── EXP ──────────────────────────────────────────────────────────────────
+    private val _expState = MutableStateFlow(UserExp())
+    val expState: StateFlow<UserExp> = _expState.asStateFlow()
+
+    private val _isExpLoading = MutableStateFlow(false)
+    val isExpLoading: StateFlow<Boolean> = _isExpLoading.asStateFlow()
+
+    /** Open "Your EXP" and refresh it from the ledger. */
+    fun openExp() {
+        _uiState.update { it.copy(isExpOpen = true) }
+        refreshExp()
+    }
+
+    fun closeExp() {
+        _uiState.update { it.copy(isExpOpen = false) }
+    }
+
+    /**
+     * Pull the ledger. This is the only place the EXP total is ever written on
+     * the client — no optimistic "+25" anywhere — so the number on screen is
+     * always one the server agrees with.
+     */
+    fun refreshExp() {
+        val session = chatSession() ?: return
+        if (_isExpLoading.value) return
+        _isExpLoading.value = true
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            val exp = TheStudentChatClient.fetchExpState(baseUrl, token).dataOrNull()
+            if (exp != null) {
+                _expState.value = exp
+                // Keep the home pill in step with the ledger.
+                val profile = repository.userProfileFlow.first()
+                if (profile.points != exp.total) {
+                    repository.saveUserProfile(profile.copy(points = exp.total))
+                }
+            }
+            _isExpLoading.value = false
+        }
     }
 
     fun setLanguageSubTab(subTab: Int) {

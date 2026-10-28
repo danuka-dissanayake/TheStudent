@@ -82,7 +82,10 @@ class MainActivity : ComponentActivity() {
                 // consumed on purpose
             }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            // "Your EXP" is a page, so back leaves the page — not the tab.
+            BackHandler(enabled = uiState.isExpOpen) { viewModel.closeExp() }
+
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -314,6 +317,15 @@ class MainActivity : ComponentActivity() {
                                     customZaiApiKey = uiState.customZaiApiKey,
                                     onUpdateZaiApiKey = { viewModel.updateZaiApiKey(it) }
                                 )
+                            } else if (uiState.isExpOpen) {
+                                val exp by viewModel.expState.collectAsStateWithLifecycle()
+                                val isExpLoading by viewModel.isExpLoading.collectAsStateWithLifecycle()
+                                ExpScreen(
+                                    exp = exp,
+                                    isLoading = isExpLoading,
+                                    onClose = { viewModel.closeExp() },
+                                    onRefresh = { viewModel.refreshExp() }
+                                )
                             } else if (uiState.isLanguageLabOpen) {
                                 AiLanguageScreen(
                                     activeSubTab = uiState.activeLanguageSubTab,
@@ -376,7 +388,12 @@ class MainActivity : ComponentActivity() {
                                             .fillMaxSize()
                                             .testTag("main_scaffold"),
                                          topBar = {
-                                             if (uiState.currentTab != TheStudentNavTab.CHAT) {
+                                             // "Your EXP" brings its own header and its
+                                             // own back button: the app bar and the tab
+                                             // bar would only box it in.
+                                             if (uiState.currentTab != TheStudentNavTab.CHAT &&
+                                                 !uiState.isExpOpen
+                                             ) {
                                                  TheStudentTopAppBar(
                                                      currentTab = uiState.currentTab,
                                                      streakDays = userProfile.streakDays,
@@ -393,7 +410,7 @@ class MainActivity : ComponentActivity() {
                                              }
                                          },
                                             bottomBar = {
-                                                if (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen) {
+                                                if (!uiState.isExpOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
                                                     TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
@@ -441,6 +458,7 @@ class MainActivity : ComponentActivity() {
                                                             onPaperClick = { viewModel.openPaperDetail(it) },
                                                             onOpenAiAssistant = { viewModel.openAiAssistant() },
                                                             onOpenLanguageLab = { viewModel.openLanguageLab(0) },
+                                                            onOpenExp = { viewModel.openExp() },
                                                             onNavigateTab = { viewModel.setTab(it) }
                                                         )
                                                     }

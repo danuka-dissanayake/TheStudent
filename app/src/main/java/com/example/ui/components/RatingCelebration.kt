@@ -73,13 +73,13 @@ import kotlinx.coroutines.launch
  * confetti. Timeline (ms):
  *
  * ```
- * 0      progress line starts shrinking (2600, linear)
  * 80     headline rises and settles (640, cubic-bezier(.22,1,.36,1))
  * 140    score rises and settles (640, same)
  * 120 / 210 / 300 / 390 / 480   stars 1→5 burst from the score centre (700, back-out)
  * 150–1750   confetti spawns, falls, sways and flips
  * 640    "Nimal rated you" fades in (420, ease-out)
  * 760    the word pill fades in (420, ease-out)
+ * tap close button / system back   fade out (300) → gone
  * ```
  *
  * Unlike the design file, it does **not** close itself: a rating is worth
@@ -489,8 +489,12 @@ private val CONFETTI_COLORS = listOf(
     0xFF6EE7B7, 0xFFA7F3D0, 0xFFFFFFFF
 ).map { Color(it) }
 
-/** How long confetti keeps ticking: the design's last piece lands well before this. */
-private const val CONFETTI_SECONDS = 4.6f
+/**
+ * How long the confetti clock keeps ticking. The slowest piece of the design's
+ * 84 lands at about 5 s; after that every piece is off screen, so the layer
+ * stops animating even though the overlay is still up waiting for a close.
+ */
+private const val CONFETTI_SECONDS = 6f
 
 private val CONFETTI = buildList {
     val random = kotlin.random.Random(20260301)

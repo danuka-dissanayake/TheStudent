@@ -52,6 +52,7 @@ ts_install_error_handlers();
 require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/../smtp_mailer.php';
 require_once __DIR__ . '/_avatar.php';   // hardened profile-picture pipeline
+require_once __DIR__ . '/_exp.php';      // EXP ledger (ts_exp_summary, ts_exp_award)
 
 // ---------------------------------------------------------------------------
 // Tunables
@@ -905,6 +906,23 @@ function ts_academic_complete(array $user, array $subjects): bool
         && count($subjects) === 3;
 }
 
+/**
+ * Add the student's EXP to a `publicUser()` payload.
+ *
+ * Kept separate from `publicUser()` so that a sign-in response never pays for a
+ * ledger query it does not need, and so an older database without `user_exp`
+ * still gets a perfectly good user object (`total` 0, tier "Learner").
+ */
+function withExp(PDO $pdo, array $payload, int $userId): array
+{
+    $total = ts_exp_total($pdo, $userId);
+    $payload['exp_total'] = $total;
+    $payload['exp_today'] = ts_exp_today($pdo, $userId);
+    $payload['exp_daily_cap'] = TS_EXP_DAILY_CAP;
+    $payload['exp_tier'] = ts_exp_tier($total);
+    return $payload;
+}
+
 function publicUser(array $user, array $subjects = []): array
 {
     return [
@@ -1325,9 +1343,24 @@ if ($action === 'complete_profile') {
     $fresh->execute(['id' => $userId]);
     $updatedUser = $fresh->fetch() ?: $user;
 
+    if (!$alreadyComplete) {
+        // First time through setup: one small welcome bonus, once ever.
+        ts_exp_award(
+            $pdo,
+            $userId,
+            'profile_complete',
+            'profile:complete',
+            'Finished setting up your profile'
+        );
+    }
+
     $message = $alreadyComplete ? 'Profile updated.' : 'Profile complete. Welcome to TheStudent!';
     sendJsonResponse('success', $message, [
-        'user'       => publicUser($updatedUser, ts_user_subjects($pdo, (int) $updatedUser['id'])),
+        'user'       => withExp(
+            $pdo,
+            publicUser($updatedUser, ts_user_subjects($pdo, (int) $updatedUser['id'])),
+            (int) $updatedUser['id']
+        ),
         'role'       => $updatedUser['role'] ?? 'student',
         'expires_at' => null,
     ]);
@@ -2202,7 +2235,11 @@ if ($action === 'me' || $action === 'profile') {
 
     sendJsonResponse('success', 'User profile retrieved', [
         'expires_at' => $expiresAt,
-        'user'       => publicUser($user, ts_user_subjects($pdo, (int) $user['id'])),
+        'user'       => withExp(
+            $pdo,
+            publicUser($user, ts_user_subjects($pdo, (int) $user['id'])),
+            (int) $user['id']
+        ),
     ]);
 }
 
