@@ -65,7 +65,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.7.0';
+const TS_CHAT_API_VERSION          = '2.7.1';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 600;  // accept -> complete cannot happen instantly
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
@@ -819,6 +819,7 @@ try {
     error_log('[TheStudent] chat relay cleanup skipped: ' . $e->getMessage());
 }
 
+try {
 switch ($action) {
 
     // -----------------------------------------------------------------------
@@ -1068,14 +1069,23 @@ switch ($action) {
         ts_chat_help_expire($pdo);
 
         // One open request per pair: asking twice is noise, not signal.
+        // NOTE: PDO runs with ATTR_EMULATE_PREPARES = false, so a named
+        // placeholder may appear only ONCE per statement. Repeating :me/:peer
+        // on both sides of a pair check throws "Invalid parameter number" and
+        // the whole request dies with a 500 — so each side gets its own name.
         $openStmt = $pdo->prepare(
             ts_chat_help_select() . "
-             WHERE ((seeker_id = :me AND helper_id = :peer)
-                 OR (seeker_id = :peer AND helper_id = :me))
+             WHERE ((seeker_id = :me_a AND helper_id = :peer_a)
+                 OR (seeker_id = :peer_b AND helper_id = :me_b))
                AND status IN ('pending','accepted')
              ORDER BY id DESC LIMIT 1"
         );
-        $openStmt->execute(['me' => $meId, 'peer' => $peerId]);
+        $openStmt->execute([
+            'me_a'   => $meId,
+            'peer_a' => $peerId,
+            'peer_b' => $peerId,
+            'me_b'   => $meId,
+        ]);
         $open = $openStmt->fetch();
         if ($open) {
             ts_chat_json(
@@ -1148,15 +1158,21 @@ switch ($action) {
         $peerId = ts_chat_peer_id($_GET);
         ts_chat_help_expire($pdo);
 
+        // Same one-placeholder-per-statement rule as in help_request.
         $stmt = $pdo->prepare(
             ts_chat_help_select() . "
-             WHERE ((seeker_id = :me AND helper_id = :peer)
-                 OR (seeker_id = :peer AND helper_id = :me))
+             WHERE ((seeker_id = :me_a AND helper_id = :peer_a)
+                 OR (seeker_id = :peer_b AND helper_id = :me_b))
                AND (status IN ('pending','accepted')
                     OR (status = 'completed' AND completed_at > (NOW() - INTERVAL 7 DAY)))
              ORDER BY id DESC LIMIT 1"
         );
-        $stmt->execute(['me' => $meId, 'peer' => $peerId]);
+        $stmt->execute([
+            'me_a'   => $meId,
+            'peer_a' => $peerId,
+            'peer_b' => $peerId,
+            'me_b'   => $meId,
+        ]);
         $row = $stmt->fetch();
 
         // Students need help more than once: show how often this pair has
@@ -1170,10 +1186,15 @@ switch ($action) {
             $countStmt = $pdo->prepare(
                 "SELECT COUNT(*) FROM chat_help_requests
                  WHERE status = 'completed'
-                   AND ((seeker_id = :me AND helper_id = :peer)
-                     OR (seeker_id = :peer AND helper_id = :me))"
+                   AND ((seeker_id = :me_a AND helper_id = :peer_a)
+                     OR (seeker_id = :peer_b AND helper_id = :me_b))"
             );
-            $countStmt->execute(['me' => $meId, 'peer' => $peerId]);
+            $countStmt->execute([
+                'me_a'   => $meId,
+                'peer_a' => $peerId,
+                'peer_b' => $peerId,
+                'me_b'   => $meId,
+            ]);
             $closedWithPeer = (int) $countStmt->fetchColumn();
 
             $openStmt = $pdo->prepare(
@@ -1844,4 +1865,17 @@ switch ($action) {
                 'heartbeat', 'set_key', 'version',
             ],
         ], 400);
+}
+} catch (Throwable $e) {
+    // A JSON answer with something to act on beats a bare 500: the app shows
+    // this message, the log keeps the detail, and the deploy reference lets us
+    // find it afterwards.
+    $ref = bin2hex(random_bytes(4));
+    error_log('[TheStudent][chat][' . $ref . '] action=' . $action . ' failed: ' . $e->getMessage());
+    ts_chat_json(
+        'error',
+        'The chat server could not complete that (' . $action . '). Reference: ' . $ref,
+        ['ref' => $ref, 'action' => $action],
+        500
+    );
 }

@@ -1284,7 +1284,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private fun chatFailureMessage(raw: String): String =
         if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
             "This server is running an older chat API. Upload backend/api/chat.php " +
-                "(needs version 2.7.0 or newer)."
+                "(needs version 2.7.1 or newer)."
         } else {
             raw
         }
@@ -2107,7 +2107,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
          * action is added, so a host that was never updated says so out loud
          * instead of silently hiding the feature.
          */
-        const val CHAT_MIN_SERVER_VERSION = "2.6.0"
+        const val CHAT_MIN_SERVER_VERSION = "2.7.1"
         /** Two "track this question?" offers a day, app-wide, is plenty. */
         private const val MAX_OFFERS_PER_DAY = 2
         /** Purpose string the server stores for a tracked question. */

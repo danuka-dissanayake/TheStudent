@@ -142,6 +142,11 @@ plus a local Room table that owns the actual history.
   transaction; the app owns the catalog (`AcademicCatalog`), the server owns
   the shape (exactly 3 distinct subjects, one per O/L bucket, sane year).
   Matching must JOIN `user_subjects`, never `LIKE` on the free text.
+* **Never repeat a named placeholder in one statement.** PDO runs with
+  `ATTR_EMULATE_PREPARES = false`, so `... (a = :me AND b = :peer) OR (a = :peer
+  AND b = :me)` throws *Invalid parameter number* and the endpoint 500s. Use
+  `:me_a/:peer_a/:me_b/:peer_b`. This is what broke help requests (and hid the
+  help card) until chat.php 2.7.1.
 * **The chat purpose is a label, never a gate.** It lives in `chat_purposes`
   (per owner + peer) and is mirrored into the chat list. The ask is always
   *after* the action: the app never blocks the composer, and the offer to track
