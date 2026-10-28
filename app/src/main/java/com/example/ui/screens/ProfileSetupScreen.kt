@@ -868,3 +868,46 @@ private fun ProfileField(
     )
 }
 
+@Composable
+private fun PasswordStrengthBar(password: String) {
+    var score = 0
+    if (password.length >= 8) score++
+    if (password.length >= 12) score++
+    if (password.any { it.isDigit() }) score++
+    if (password.any { !it.isLetterOrDigit() }) score++
+    if (password.any { it.isUpperCase() }) score++
+
+    val (label, color) = when {
+        score <= 2 -> "Weak" to RedError
+        score == 3 -> "Fair" to Color(0xFFF59E0B)
+        score == 4 -> "Good" to Color(0xFF10B981)
+        else -> "Strong" to EmeraldDark
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .heightIn(min = 16.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        repeat(5) { index ->
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(5.dp)
+                    .clip(CircleShape)
+                    .background(
+                        if (index < score) color
+                        else MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)
+                    )
+            )
+        }
+        Text(
+            text = label,
+            style = MaterialTheme.typography.labelSmall,
+            fontWeight = FontWeight.SemiBold,
+            color = color
+        )
+    }
+}
