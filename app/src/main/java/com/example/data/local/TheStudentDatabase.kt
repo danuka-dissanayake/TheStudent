@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserProfileEntity::class,
         ChatMessageEntity::class
     ],
-    version = 5,
+    version = 6,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -101,6 +101,24 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v5 -> v6: the structured academic profile (level, stream, exam year,
+         * medium and the three subjects).
+         *
+         * Purely additive with defaults, so an existing install keeps its
+         * profile and simply reports "no academic details yet" until the
+         * student fills the step in.
+         */
+        private val MIGRATION_5_6 = object : Migration(5, 6) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN examLevel TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN streamCode TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN examYear INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN medium TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN academicSubjects TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -109,10 +127,17 @@ abstract class TheStudentDatabase : RoomDatabase() {
                     "the_student_database"
                 )
                     // v2 adds the profile-setup columns; v3 the chat history;
-                    // v4 attachments; v5 replies and voice notes.
+                    // v4 attachments; v5 replies and voice notes; v6 the
+                    // structured academic profile.
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
-                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3, MIGRATION_3_4, MIGRATION_4_5)
+                    .addMigrations(
+                        MIGRATION_1_2,
+                        MIGRATION_2_3,
+                        MIGRATION_3_4,
+                        MIGRATION_4_5,
+                        MIGRATION_5_6
+                    )
                     // Last resort only: if the file on the device cannot be
                     // migrated for any reason (interrupted update, a build from
                     // another branch), recreate it instead of throwing during the

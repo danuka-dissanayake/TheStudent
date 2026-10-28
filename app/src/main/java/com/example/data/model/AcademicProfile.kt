@@ -74,6 +74,39 @@ data class AcademicProfile(
     fun subjectLabels(): List<String> = subjects.map { it.label }
 
     companion object {
+        // ── on-device encoding ───────────────────────────────────────────────
+        // The academic profile is cached in the single user_profile row so the
+        // subjects survive an app restart without a second network call. Room
+        // has no list column, so the three subjects travel as one string:
+        //   "label|code|bucket~label|code|bucket"
+        // '|' and '~' never appear in a subject label chosen from the catalog.
+        private const val SUBJECT_SEPARATOR = "~"
+        private const val FIELD_SEPARATOR = "|"
+
+        fun encodeSubjects(subjects: List<AcademicSubject>): String =
+            subjects.joinToString(SUBJECT_SEPARATOR) { subject ->
+                listOf(
+                    subject.label.replace(FIELD_SEPARATOR, "/").replace(SUBJECT_SEPARATOR, "/"),
+                    subject.code.replace(FIELD_SEPARATOR, "/").replace(SUBJECT_SEPARATOR, "/"),
+                    subject.bucket?.toString().orEmpty()
+                ).joinToString(FIELD_SEPARATOR)
+            }
+
+        fun decodeSubjects(encoded: String): List<AcademicSubject> {
+            if (encoded.isBlank()) return emptyList()
+            return encoded.split(SUBJECT_SEPARATOR).mapNotNull { chunk ->
+                if (chunk.isBlank()) return@mapNotNull null
+                val parts = chunk.split(FIELD_SEPARATOR)
+                val label = parts.getOrNull(0)?.trim().orEmpty()
+                if (label.isEmpty()) return@mapNotNull null
+                val code = parts.getOrNull(1)?.trim().orEmpty().ifBlank {
+                    AcademicCatalog.codeFor(label)
+                }
+                val bucket = parts.getOrNull(2)?.trim()?.toIntOrNull()?.takeIf { it in 1..3 }
+                AcademicSubject(code = code, label = label, bucket = bucket)
+            }
+        }
+
         /**
          * Tolerant parser for the server payload. Unknown shapes degrade to an
          * empty profile rather than throwing, because this runs on sign-in.

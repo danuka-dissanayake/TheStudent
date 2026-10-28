@@ -416,7 +416,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     phone = entity.phone,
                     avatarUrl = entity.avatarUrl,
                     profileCompleted = entity.profileCompleted,
-                    hasPassword = entity.hasPassword
+                    hasPassword = entity.hasPassword,
+                    academic = AcademicProfile(
+                        examLevel = entity.examLevel,
+                        streamCode = entity.streamCode,
+                        examYear = entity.examYear.takeIf { it > 0 },
+                        medium = entity.medium,
+                        subjects = AcademicProfile.decodeSubjects(entity.academicSubjects)
+                    )
                 )
             } else {
                 UserProfile()
@@ -924,12 +931,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         // My own subjects pre-fill the help-request subject; the intent sheet
         // only appears for a brand-new conversation.
-        viewModelScope.launch {
-            runCatching {
-                repository.userProfileFlow.first().academic.subjectLabels()
-            }.onSuccess { subjects ->
-                _chatState.update { it.copy(mySubjects = subjects) }
-            }
+        // Read from the mapped profile state, not the raw Room flow: the entity
+        // stores the academic fields packed and `userProfile` is what unpacks
+        // them (and what the UI already observes, so there is no extra query).
+        _chatState.update {
+            it.copy(mySubjects = userProfile.value.academic.subjectLabels())
         }
         refreshHelpState(peer.id)
 

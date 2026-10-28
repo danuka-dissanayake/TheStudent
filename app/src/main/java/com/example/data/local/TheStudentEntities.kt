@@ -59,7 +59,18 @@ data class UserProfileEntity(
     val phone: String = "",
     val avatarUrl: String = "",
     val profileCompleted: Boolean = true,
-    val hasPassword: Boolean = true
+    val hasPassword: Boolean = true,
+    // Added in schema v6 with the structured academic profile. These are a
+    // cache of the server's copy: they let the profile screen and the chat
+    // intent sheet show the student's own subjects without a network round
+    // trip, and they are overwritten on every save / sign-in.
+    val examLevel: String = "",
+    val streamCode: String = "",
+    /** 0 means "not chosen" (Room has no nullable Int column here by design). */
+    val examYear: Int = 0,
+    val medium: String = "",
+    /** Subjects encoded by `AcademicProfile.encodeSubjects`. */
+    val academicSubjects: String = ""
 )
 
 /**

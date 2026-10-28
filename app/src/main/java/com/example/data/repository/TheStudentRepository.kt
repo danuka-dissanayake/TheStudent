@@ -168,7 +168,12 @@ class TheStudentRepository(private val dao: TheStudentDao) {
                 phone = profile.phone,
                 avatarUrl = profile.avatarUrl,
                 profileCompleted = profile.profileCompleted,
-                hasPassword = profile.hasPassword
+                hasPassword = profile.hasPassword,
+                examLevel = profile.academic.examLevel,
+                streamCode = profile.academic.streamCode,
+                examYear = profile.academic.examYear ?: 0,
+                medium = profile.academic.medium,
+                academicSubjects = AcademicProfile.encodeSubjects(profile.academic.subjects)
             )
         )
     }
