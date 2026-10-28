@@ -46,7 +46,6 @@ import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
 import com.example.data.remote.VoiceTutorResponse
 import com.example.data.remote.PastPapersRemoteRepository
-import com.example.data.remote.DefaultPastPapersSeed
 import com.example.ui.components.AssistantVoiceState
 import android.content.Intent
 import android.os.Bundle
@@ -285,7 +284,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private val _isAdmin = MutableStateFlow(preferences.isAdmin)
     val isAdmin: StateFlow<Boolean> = _isAdmin.asStateFlow()
 
-    private val _dynamicPapers = MutableStateFlow<List<PastPaper>>(DefaultPastPapersSeed.allPapers)
+    // Empty until the library answers: there is no bundled sample catalog any
+    // more, so an empty list means "nothing loaded yet", never fake papers.
+    private val _dynamicPapers = MutableStateFlow<List<PastPaper>>(emptyList())
     val dynamicPapers: StateFlow<List<PastPaper>> = _dynamicPapers.asStateFlow()
     val allPapers: List<PastPaper> get() = _dynamicPapers.value
 
@@ -478,15 +479,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             try {
                 _uiState.update { it.copy(isLoadingContent = true) }
                 val (fetched, isLive) = pastPapersRepository.fetchPapers()
-                if (fetched.isNotEmpty()) {
+                // A live answer always wins, even an empty one: keeping stale
+                // papers because the library now returns nothing would show a
+                // catalog the server no longer has. An offline answer only
+                // replaces the list when it actually brought something, so the
+                // last papers this phone loaded stay visible.
+                if (isLive || fetched.isNotEmpty()) {
                     _dynamicPapers.value = fetched
                 }
                 _isLiveDatabaseConnected.value = isLive
                 _uiState.update { it.copy(isLoadingContent = false) }
-                if (isLive) {
-                    showSnackbar("Synced ${fetched.size} papers from MySQL Cloud Database")
-                } else if (forceRefresh) {
-                    showSnackbar("Refreshed papers catalog (${fetched.size} papers)")
+                when {
+                    isLive && forceRefresh ->
+                        showSnackbar("${fetched.size} papers available")
+                    !isLive && forceRefresh ->
+                        showSnackbar("Couldn't reach the paper library. Check your connection and try again.")
                 }
             } catch (e: Exception) {
                 Log.e("TheStudentViewModel", "Safe error handling in loadDynamicPapers: ${e.message}", e)
@@ -3202,7 +3209,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun downloadPaperOffline(paper: PastPaper) {
         viewModelScope.launch {
             pastPapersRepository.downloadPaperPdf(paper)
-            repository.markPaperDownloaded(paper.id)
+            repository.markPaperDownloaded(paper)
             showSnackbar("Downloading ${paper.title} from server...")
         }
     }

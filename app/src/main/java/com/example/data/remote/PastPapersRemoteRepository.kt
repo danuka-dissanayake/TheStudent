@@ -9,7 +9,6 @@ import android.util.Log
 import android.widget.Toast
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
-import com.example.data.repository.SampleEducationalData
 import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
@@ -159,12 +158,15 @@ class PastPapersRemoteRepository(private val context: Context) {
                 Log.d(TAG, "Successfully loaded ${mapped.size} papers from MySQL API at $backendBaseUrl")
                 return@withContext Pair(mapped, true) // isLiveDatabase = true
             } else {
-                Log.w(TAG, "Empty response from remote database, falling back to local dataset")
-                return@withContext Pair(getFallbackPapers(cleanCategory, cleanGrade, cleanStream, cleanSubject, year, search), false)
+                // An empty catalog is a real answer: either the library has
+                // nothing yet or the filters exclude everything. Never invent
+                // papers to fill the screen.
+                Log.w(TAG, "Empty response from remote database")
+                return@withContext Pair(emptyList(), false)
             }
         } catch (e: Exception) {
-            Log.w(TAG, "Error connecting to InfinityFree MySQL API ($backendBaseUrl): ${e.message}")
-            return@withContext Pair(getFallbackPapers(category, grade, stream, subject, year, search), false)
+            Log.w(TAG, "Error connecting to the papers API ($backendBaseUrl): ${e.message}")
+            return@withContext Pair(emptyList(), false)
         }
     }
 
@@ -306,44 +308,4 @@ class PastPapersRemoteRepository(private val context: Context) {
         }
     }
 
-    /**
-     * Comprehensive seed papers covering Grade 6 through Grade 13 (A/L & O/L)
-     * matching the exact MySQL database schema for seamless testing.
-     */
-    fun getFallbackPapers(
-        categoryFilter: String? = null,
-        gradeFilter: String? = null,
-        streamFilter: String? = null,
-        subjectFilter: String? = null,
-        yearFilter: Int? = null,
-        searchQuery: String? = null
-    ): List<PastPaper> {
-        val baseList = DefaultPastPapersSeed.allPapers
-        return baseList.filter { paper ->
-            val matchesCategory = categoryFilter.isNullOrBlank() || categoryFilter == "All" || categoryFilter == "All Categories" ||
-                    paper.category.equals(categoryFilter, ignoreCase = true) ||
-                    paper.grade.contains(categoryFilter, ignoreCase = true)
-
-            val matchesGrade = gradeFilter.isNullOrBlank() || gradeFilter == "All" || gradeFilter == "All Grades" ||
-                    paper.grade.equals(gradeFilter, ignoreCase = true)
-
-            val matchesStream = streamFilter.isNullOrBlank() || streamFilter == "All" || streamFilter == "All Streams" ||
-                    paper.stream.equals(streamFilter, ignoreCase = true)
-
-            val matchesSubject = subjectFilter.isNullOrBlank() || subjectFilter == "All" || subjectFilter == "All Subjects" ||
-                    paper.subject.contains(subjectFilter, ignoreCase = true)
-
-            val matchesYear = yearFilter == null || paper.year == yearFilter
-
-            val matchesSearch = searchQuery.isNullOrBlank() ||
-                    paper.title.contains(searchQuery, ignoreCase = true) ||
-                    paper.subject.contains(searchQuery, ignoreCase = true) ||
-                    paper.grade.contains(searchQuery, ignoreCase = true) ||
-                    (paper.stream?.contains(searchQuery, ignoreCase = true) == true) ||
-                    paper.year.toString().contains(searchQuery) ||
-                    paper.description.contains(searchQuery, ignoreCase = true)
-
-            matchesCategory && matchesGrade && matchesStream && matchesSubject && matchesYear && matchesSearch
-        }
-    }
 }

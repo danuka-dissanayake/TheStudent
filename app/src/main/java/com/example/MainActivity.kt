@@ -396,10 +396,12 @@ class MainActivity : ComponentActivity() {
                                              // Each of these screens draws its own header, so
                                              // the app bar would stack a second one on top:
                                              // chat has its conversation bar, Profile has the
-                                             // "Profile / Your studies" header, and EXP and
-                                             // Account are pages with their own back button.
+                                             // "Profile / Your studies" header, Papers has the
+                                             // library header with search and filters, and EXP
+                                             // and Account are pages with their own back button.
                                              if (uiState.currentTab != TheStudentNavTab.CHAT &&
                                                  uiState.currentTab != TheStudentNavTab.PROFILE &&
+                                                 uiState.currentTab != TheStudentNavTab.PAPERS &&
                                                  !uiState.isExpOpen &&
                                                  !uiState.isAccountOpen
                                              ) {
@@ -496,7 +498,8 @@ class MainActivity : ComponentActivity() {
                                                             onToggleSavePaper = { viewModel.toggleSavePaper(it) },
                                                             onDownloadPaper = { viewModel.downloadPaperOffline(it) },
                                                             onRefreshPapers = { viewModel.loadDynamicPapers(forceRefresh = true) },
-                                                            onUpdateServerUrl = { viewModel.updateBackendUrl(it) }
+                                                            onUpdateServerUrl = { viewModel.updateBackendUrl(it) },
+                                                            onNavigateHome = { viewModel.setTab(TheStudentNavTab.HOME) }
                                                         )
                                                     }
                                                     TheStudentNavTab.AI_TUTOR -> {

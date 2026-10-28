@@ -67,10 +67,14 @@ class TheStudentRepository(private val dao: TheStudentDao) {
         dao.deleteSavedPaper(paperId)
     }
 
-    suspend fun markPaperDownloaded(paperId: String) = withContext(Dispatchers.IO) {
-        val paper = SampleEducationalData.pastPapers.find { it.id == paperId }
-        if (paper != null) {
-            val entity = SavedPaperEntity(
+    /**
+     * Record a paper the user downloaded. The paper itself is passed in: there
+     * is no bundled catalog to look ids up in any more, and looking one up
+     * there meant downloads of live papers were never marked offline.
+     */
+    suspend fun markPaperDownloaded(paper: PastPaper) = withContext(Dispatchers.IO) {
+        dao.insertSavedPaper(
+            SavedPaperEntity(
                 id = paper.id,
                 title = paper.title,
                 examination = paper.examination,
@@ -80,16 +84,15 @@ class TheStudentRepository(private val dao: TheStudentDao) {
                 fileSize = paper.fileSize,
                 isDownloaded = true
             )
-            dao.insertSavedPaper(entity)
-            dao.insertActivity(
-                LearningActivityEntity(
-                    title = "Downloaded: ${paper.title}",
-                    category = "Download",
-                    description = "Offline PDF & Marking Scheme cached successfully",
-                    scoreOrDuration = paper.fileSize
-                )
+        )
+        dao.insertActivity(
+            LearningActivityEntity(
+                title = "Downloaded: ${paper.title}",
+                category = "Download",
+                description = "Offline PDF & Marking Scheme cached successfully",
+                scoreOrDuration = paper.fileSize
             )
-        }
+        )
     }
 
     suspend fun toggleSaveCourse(course: Course) = withContext(Dispatchers.IO) {
@@ -202,21 +205,8 @@ class TheStudentRepository(private val dao: TheStudentDao) {
         // Seed educational content only - strictly NO dummy user profiles or credentials
         // Profiles are populated solely from verified server-side authentication
 
-        // Seed an initial saved course and paper for realistic experience
-        val initialPaper = SampleEducationalData.pastPapers.first()
-        dao.insertSavedPaper(
-            SavedPaperEntity(
-                id = initialPaper.id,
-                title = initialPaper.title,
-                examination = initialPaper.examination,
-                subject = initialPaper.subject,
-                year = initialPaper.year,
-                medium = initialPaper.medium,
-                fileSize = initialPaper.fileSize,
-                isDownloaded = true
-            )
-        )
-
+        // Only a starter course is pre-saved. Saved papers stay empty: a user
+        // who has saved nothing should see nothing, not someone else's picks.
         val initialCourse = SampleEducationalData.courses.first()
         dao.insertSavedCourse(
             SavedCourseEntity(
