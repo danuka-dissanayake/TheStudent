@@ -57,6 +57,11 @@ const TS_EXP_RULES = [
     // Profile/paper contributions (kept here so every award is one mechanism).
     'paper_uploaded'  => 15,
     'profile_complete' => 20,
+    // Quizzes. Paid once per quiz: a pass, and a bonus for a perfect score on
+    // top of it. Retakes are free but never pay again (see the ref keys the
+    // quizzes API uses: quiz:{id}:pass, quiz:{id}:perfect).
+    'quiz_passed'     => 20,
+    'quiz_perfect'    => 10,
 ];
 
 /**
