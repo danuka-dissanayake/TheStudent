@@ -2518,31 +2518,9 @@ private fun ChatThreadRow(
                 )
                 Spacer(Modifier.height(3.dp))
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    // What this chat is about, so fifteen rows are readable at a
-                    // glance instead of fifteen identical previews.
-                    if (thread.purposeLine.isNotBlank() && !peer.isTyping) {
-                        Box(
-                            modifier = Modifier
-                                .widthIn(max = 132.dp)
-                                .clip(RoundedCornerShape(50))
-                                .background(
-                                    if (thread.purpose == "help") Color(0xFFE9F8F0)
-                                    else Color(0xFFF1F5F9)
-                                )
-                                .padding(horizontal = 6.dp, vertical = 1.dp)
-                        ) {
-                            Text(
-                                text = thread.purposeLine,
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 9.5.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                color = if (thread.purpose == "help") EmeraldDark else ChatMuted,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Spacer(Modifier.width(6.dp))
-                    }
+                    // Only the last message here. The "what's this chat about"
+                    // label used to sit in front of it, and it turned fifteen
+                    // rows of real conversation into fifteen labels.
                     Text(
                         text = preview,
                         fontFamily = MaisonNeueFontFamily,
@@ -2551,8 +2529,6 @@ private fun ChatThreadRow(
                         fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
                         overflow = TextOverflow.Ellipsis,
-                        // The label comes first, so the preview takes whatever
-                        // room is left instead of pushing the row off the edge.
                         modifier = Modifier.weight(1f)
                     )
                 }
@@ -4973,18 +4949,21 @@ private fun ChatAvatar(
         }
 
         if (showPresence && peer.isOnline) {
-            // The square's bottom-right corner is outside the circle, so the dot
-            // is nudged in along the diagonal to sit on the rim with its white
-            // ring, the way a chat head does.
+            // The dot is centred exactly on the circle's rim, on the 45° line
+            // through the bottom-right corner: the rim sits at 0.8536 · size
+            // from the top-left, so the dot starts half its own width earlier.
+            // Placing it by the corner instead left it drifting inside the photo
+            // at big sizes and outside the circle at small ones.
             val dot = size * 0.30f
+            val dotStart = size * 0.8536f - dot / 2f
             Box(
                 modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = -(size - dot) * 0.12f, y = -(size - dot) * 0.12f)
+                    .align(Alignment.TopStart)
+                    .offset(x = dotStart, y = dotStart)
                     .size(dot)
                     .clip(CircleShape)
                     .background(ringColor)
-                    .padding(size * 0.055f),
+                    .padding(size * 0.05f),
                 contentAlignment = Alignment.Center
             ) {
                 Box(

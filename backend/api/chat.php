@@ -65,9 +65,9 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.8.0';
+const TS_CHAT_API_VERSION          = '2.8.1';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
-const TS_CHAT_HELP_MIN_CLOSE_SEC   = 600;  // accept -> complete cannot happen instantly
+const TS_CHAT_HELP_MIN_CLOSE_SEC   = 0;    // no waiting: a question can be answered in two messages
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
 const TS_CHAT_RATING_MAX_TAGS      = 3;    // tags a rating may carry
 const TS_CHAT_RATING_MAX_NOTE      = 40;   // characters in the private note
@@ -1471,8 +1471,14 @@ switch ($action) {
             if ($status !== 'accepted') {
                 ts_chat_json('error', 'Accept the help before closing the request.', [], 409);
             }
+            // Closing is the student's call, not a stopwatch's: a doubt can be
+            // cleared in two messages, so there is no minimum wait any more. If
+            // a site ever wants one back, the constant is the only knob.
             $acceptedEpoch = $row['accepted_epoch'] !== null ? (int) $row['accepted_epoch'] : 0;
-            if ($acceptedEpoch > 0 && ($now - $acceptedEpoch) < TS_CHAT_HELP_MIN_CLOSE_SEC) {
+            if (TS_CHAT_HELP_MIN_CLOSE_SEC > 0
+                && $acceptedEpoch > 0
+                && ($now - $acceptedEpoch) < TS_CHAT_HELP_MIN_CLOSE_SEC
+            ) {
                 header('Retry-After: 60');
                 ts_chat_json(
                     'error',
