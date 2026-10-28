@@ -104,6 +104,29 @@ data class ChatDirectory(
 )
 
 
+/**
+ * What the chat profile screen is allowed to show about another student.
+ *
+ * Deliberately narrow: name, photo, the three education fields they chose to
+ * fill in, presence and the month they joined. E-mail, phone, role and every
+ * login detail stay on the server — see `action=profile` in chat.php.
+ */
+data class ChatPeerProfile(
+    val peer: ChatPeer,
+    val targetExam: String = "",
+    val streamOrDegree: String = "",
+    val institution: String = "",
+    /** Unix seconds, when the account was created; null if unknown. */
+    val joinedEpoch: Long? = null,
+    /** Unix seconds of the first message between us on this phone; null if none. */
+    val chattingSinceEpoch: Long? = null
+) {
+    /** True when there is at least one education row worth rendering. */
+    val hasEducation: Boolean
+        get() = targetExam.isNotBlank() || streamOrDegree.isNotBlank() ||
+            institution.isNotBlank()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 //  Attachments
 // ─────────────────────────────────────────────────────────────────────────────

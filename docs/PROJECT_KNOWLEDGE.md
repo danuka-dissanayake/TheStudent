@@ -133,6 +133,9 @@ plus a local Room table that owns the actual history.
   message**, so the renderer must mirror it on the other device
   (`if (bubble.isMine) reply.isMine else !reply.isMine`); otherwise every quote
   reads "You" on both phones.
+* `action=profile` returns an allow-list only (name, photo, target exam, stream,
+  institution, presence, joined month). Nothing account-identifying is in the
+  SELECT at all, so the chat profile screen cannot leak contact details.
 * Read receipts update **my** messages only (`markMyMessagesRead`) — marking the
   incoming rows there is what used to clear unread badges on the chat list.
 * **Never touch a property from the ViewModel `init` block without suspending

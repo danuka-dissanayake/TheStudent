@@ -36,6 +36,8 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -53,6 +55,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
@@ -85,6 +88,7 @@ import com.example.data.model.ChatAttachment
 import com.example.data.model.ChatAttachmentDraft
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
+import com.example.data.model.ChatPeerProfile
 import com.example.data.model.ChatReply
 import com.example.data.model.ChatThread
 import com.example.ui.components.TheStudentAppBackground
@@ -176,6 +180,24 @@ fun ChatScreen(
         onDispose { viewModel.stopChatSync() }
     }
 
+    val viewedProfile = chatState.viewedProfile
+    if (viewedProfile != null) {
+        BackHandler { viewModel.closeChatProfile() }
+        ChatPeerProfileScreen(
+            profile = viewedProfile,
+            isLoading = chatState.isLoadingProfile,
+            onBack = { viewModel.closeChatProfile() },
+            onMessage = {
+                // Closing the profile first keeps the conversation's own back
+                // gesture going to the chat list, not to this screen.
+                viewModel.closeChatProfile()
+                viewModel.openChat(viewedProfile.peer)
+            },
+            modifier = modifier
+        )
+        return
+    }
+
     val activePeer = chatState.activePeer
     if (activePeer != null) {
         BackHandler { viewModel.closeChat() }
@@ -196,6 +218,7 @@ fun ChatScreen(
             onStopVoiceNote = { viewModel.stopVoiceNote() },
             onCancelVoiceNote = { viewModel.cancelVoiceNote() },
             onStopTyping = { viewModel.stopChatTyping() },
+            onOpenProfile = { viewModel.openChatProfile(it) },
             modifier = modifier
         )
         return
@@ -204,11 +227,379 @@ fun ChatScreen(
     ChatDirectoryScreen(
         state = chatState,
         onOpenChat = { viewModel.openChat(it) },
+        onOpenProfile = { viewModel.openChatProfile(it) },
         onRefresh = { viewModel.refreshChatDirectoryNow() },
         onDismissError = { viewModel.dismissChatError() },
         onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
         modifier = modifier
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Student profile
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Read-only profile of another student, opened from their avatar.
+ *
+ * Shows exactly what they chose to share — name, photo, target exam, stream,
+ * institution, presence and when they joined — and nothing that identifies their
+ * account. E-mail, phone and role never leave the server (`action=profile`), and
+ * the privacy card says so, because students ask.
+ */
+@Composable
+private fun ChatPeerProfileScreen(
+    profile: ChatPeerProfile,
+    isLoading: Boolean,
+    onBack: () -> Unit,
+    onMessage: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val peer = profile.peer
+    val scrollState = rememberScrollState()
+
+    Scaffold(
+        modifier = modifier
+            .fillMaxSize()
+            .testTag("chat_profile_screen"),
+        containerColor = Color.Transparent,
+        contentWindowInsets = WindowInsets(0, 0, 0, 0)
+    ) { innerPadding ->
+        TheStudentAppBackground(
+            baseColor = Color(0xFFF8FAFC),
+            modifier = Modifier.fillMaxSize()
+        ) {
+            Column(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding)
+                    .statusBarsPadding()
+                    .verticalScroll(scrollState)
+                    .padding(bottom = 28.dp)
+            ) {
+                // ── top bar ──────────────────────────────────────────────────
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Surface(
+                        onClick = onBack,
+                        shape = CircleShape,
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier.size(38.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "Back",
+                                tint = ChatInk,
+                                modifier = Modifier.size(19.dp)
+                            )
+                        }
+                    }
+                    Spacer(Modifier.width(10.dp))
+                    Text(
+                        text = "Profile",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 15.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ChatInk
+                    )
+                }
+
+                // ── hero ─────────────────────────────────────────────────────
+                Surface(
+                    shape = RoundedCornerShape(28.dp),
+                    color = Color.Transparent,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            // A soft wash rather than a flat block: the same two
+                            // greens the rest of the app uses.
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0xFFD1FAE5), Color(0xFFECFDF5))
+                                )
+                            )
+                            .padding(vertical = 24.dp, horizontal = 20.dp)
+                    ) {
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            ChatAvatar(
+                                peer = peer,
+                                size = 108.dp,
+                                showPresence = true,
+                                ringColor = Color.White
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            Text(
+                                text = peer.name,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 20.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = ChatInk,
+                                textAlign = TextAlign.Center
+                            )
+                            Spacer(Modifier.height(4.dp))
+                            Text(
+                                text = chatPresenceLine(peer),
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Medium,
+                                color = if (peer.isOnline) EmeraldDark else ChatMuted
+                            )
+                            Spacer(Modifier.height(18.dp))
+                            Row(
+                                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Surface(
+                                    onClick = onMessage,
+                                    shape = RoundedCornerShape(50),
+                                    color = EmeraldPrimary,
+                                    modifier = Modifier.height(44.dp)
+                                ) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 22.dp)
+                                    ) {
+                                        Icon(
+                                            Icons.AutoMirrored.Filled.Send,
+                                            contentDescription = null,
+                                            tint = Color.White,
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Spacer(Modifier.width(8.dp))
+                                        Text(
+                                            text = "Message",
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = 13.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color.White
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── education ────────────────────────────────────────────────
+                if (profile.hasEducation) {
+                    ProfileCard(title = "Education") {
+                        if (profile.targetExam.isNotBlank()) {
+                            ProfileInfoRow(
+                                icon = Icons.Default.MenuBook,
+                                tint = EmeraldPrimary,
+                                tintSoft = Color(0xFFECFDF5),
+                                label = "Target exam",
+                                value = profile.targetExam
+                            )
+                        }
+                        if (profile.streamOrDegree.isNotBlank()) {
+                            ProfileInfoRow(
+                                icon = Icons.Default.School,
+                                tint = Color(0xFF0EA5E9),
+                                tintSoft = Color(0xFFE0F2FE),
+                                label = "Stream / degree",
+                                value = profile.streamOrDegree
+                            )
+                        }
+                        if (profile.institution.isNotBlank()) {
+                            ProfileInfoRow(
+                                icon = Icons.Default.AccountBalance,
+                                tint = Color(0xFFF59E0B),
+                                tintSoft = Color(0xFFFEF3C7),
+                                label = "Institution",
+                                value = profile.institution
+                            )
+                        }
+                    }
+                }
+
+                // ── on the student app ───────────────────────────────────────
+                ProfileCard(title = "On TheStudent") {
+                    profile.joinedEpoch?.let { joined ->
+                        ProfileInfoRow(
+                            icon = Icons.Default.CalendarToday,
+                            tint = Color(0xFF8B5CF6),
+                            tintSoft = Color(0xFFF3E8FF),
+                            label = "Joined",
+                            value = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+                                .format(Date(joined * 1000))
+                        )
+                    }
+                    profile.chattingSinceEpoch?.let { since ->
+                        ProfileInfoRow(
+                            icon = Icons.Default.Forum,
+                            tint = Color(0xFF14B8A6),
+                            tintSoft = Color(0xFFCCFBF1),
+                            label = "Chatting since",
+                            value = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+                                .format(Date(since * 1000))
+                        )
+                    }
+                    ProfileInfoRow(
+                        icon = Icons.Default.Circle,
+                        tint = if (peer.isOnline) ChatOnline else ChatFaint,
+                        tintSoft = if (peer.isOnline) Color(0xFFECFDF5) else Color(0xFFF1F5F9),
+                        label = "Currently",
+                        value = chatPresenceLine(peer)
+                    )
+                }
+
+                // ── privacy note ─────────────────────────────────────────────
+                Surface(
+                    shape = RoundedCornerShape(20.dp),
+                    color = Color(0xFFECFDF5),
+                    border = BorderStroke(1.dp, Color(0xFFA7F3D0)),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp)
+                ) {
+                    Row(modifier = Modifier.padding(16.dp)) {
+                        Icon(
+                            Icons.Default.Shield,
+                            contentDescription = null,
+                            tint = EmeraldDark,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(Modifier.width(12.dp))
+                        Column {
+                            Text(
+                                text = "Only what they chose to share",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = EmeraldDark
+                            )
+                            Spacer(Modifier.height(3.dp))
+                            Text(
+                                text = "Phone numbers and e-mail addresses are never shown " +
+                                    "to other students.",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 11.5.sp,
+                                lineHeight = 16.sp,
+                                color = ChatMuted
+                            )
+                        }
+                    }
+                }
+
+                if (isLoading) {
+                    Spacer(Modifier.height(10.dp))
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Text(
+                            text = "Loading details…",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            color = ChatFaint
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** White card with a small caps title, used by the profile sections. */
+@Composable
+private fun ProfileCard(
+    title: String,
+    content: @Composable ColumnScope.() -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(22.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, ChatHairline),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 16.dp, vertical = 6.dp)
+    ) {
+        Column(modifier = Modifier.padding(16.dp)) {
+            Text(
+                text = title.uppercase(Locale.getDefault()),
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Bold,
+                color = ChatFaint
+            )
+            Spacer(Modifier.height(10.dp))
+            content()
+        }
+    }
+}
+
+/** One labelled row: tinted icon tile, label, value. */
+@Composable
+private fun ProfileInfoRow(
+    icon: androidx.compose.ui.graphics.vector.ImageVector,
+    tint: Color,
+    tintSoft: Color,
+    label: String,
+    value: String
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 6.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(RoundedCornerShape(10.dp))
+                .background(tintSoft),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                imageVector = icon,
+                contentDescription = null,
+                tint = tint,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 10.5.sp,
+                color = ChatFaint
+            )
+            Spacer(Modifier.height(1.dp))
+            Text(
+                text = value,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 13.5.sp,
+                fontWeight = FontWeight.SemiBold,
+                color = ChatInk
+            )
+        }
+    }
+}
+
+/** "Online now" / "Last seen 12 min ago" — the same wording as the chat header. */
+private fun chatPresenceLine(peer: ChatPeer): String {
+    if (peer.isOnline) return "Online now"
+    val seconds = peer.lastSeenSeconds ?: return "Offline"
+    val minutes = seconds / 60
+    return when {
+        seconds < 60 -> "Last seen just now"
+        minutes < 60 -> "Last seen $minutes min ago"
+        minutes < 60 * 24 -> "Last seen ${minutes / 60} h ago"
+        minutes < 60 * 24 * 7 -> "Last seen ${minutes / (60 * 24)} d ago"
+        else -> "Offline"
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -218,6 +609,7 @@ fun ChatScreen(
 private fun ChatDirectoryScreen(
     state: ChatUiState,
     onOpenChat: (ChatPeer) -> Unit,
+    onOpenProfile: (ChatPeer) -> Unit,
     onRefresh: () -> Unit,
     onDismissError: () -> Unit,
     onAcknowledgeSafety: () -> Unit,
@@ -540,7 +932,8 @@ private fun ChatDirectoryScreen(
                             items(visibleThreads, key = { it.peer.id }) { thread ->
                                 ChatThreadRow(
                                     thread = thread,
-                                    onClick = { onOpenChat(thread.peer) }
+                                    onClick = { onOpenChat(thread.peer) },
+                                    onOpenProfile = { onOpenProfile(thread.peer) }
                                 )
                             }
                         }
@@ -568,7 +961,8 @@ private fun ChatDirectoryScreen(
 @Composable
 private fun ChatThreadRow(
     thread: ChatThread,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    onOpenProfile: () -> Unit = {}
 ) {
     val peer = thread.peer
     val preview = when {
@@ -591,7 +985,18 @@ private fun ChatThreadRow(
                 .padding(horizontal = 8.dp, vertical = 10.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            ChatAvatar(peer = peer, size = 52.dp, showPresence = true, ringColor = Color.White)
+            // The avatar opens the profile; the rest of the row opens the chat,
+            // so one tap never has to guess what the student meant.
+            ChatAvatar(
+                peer = peer,
+                size = 52.dp,
+                showPresence = true,
+                ringColor = Color.White,
+                modifier = Modifier
+                    .clip(CircleShape)
+                    .clickable(onClick = onOpenProfile)
+                    .testTag("chat_profile_${peer.id}")
+            )
             Spacer(Modifier.width(12.dp))
 
             Column(modifier = Modifier.weight(1f)) {
@@ -685,6 +1090,7 @@ private fun ChatConversationScreen(
     onStopVoiceNote: () -> Unit,
     onCancelVoiceNote: () -> Unit,
     onStopTyping: () -> Unit,
+    onOpenProfile: (ChatPeer) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -917,7 +1323,17 @@ private fun ChatConversationScreen(
                         }
                     }
                     Spacer(Modifier.width(10.dp))
-                    ChatAvatar(peer = peer, size = 42.dp, showPresence = true, ringColor = Color.White)
+                    // Header photo also opens the profile — the natural place to
+                    // tap when you want to know who you are talking to.
+                    ChatAvatar(
+                        peer = peer,
+                        size = 42.dp,
+                        showPresence = true,
+                        ringColor = Color.White,
+                        modifier = Modifier
+                            .clip(CircleShape)
+                            .clickable { onOpenProfile(peer) }
+                    )
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
                         Text(

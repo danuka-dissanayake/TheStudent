@@ -98,11 +98,12 @@ object TheStudentChatClient {
         .retryOnConnectionFailure(true)
         .build()
 
-    private fun endpoint(baseUrl: String, action: String): String {
+    private fun endpoint(baseUrl: String, action: String, query: String? = null): String {
         val base = baseUrl.trim().ifEmpty { DEFAULT_BASE_URL }.let {
             if (it.endsWith("/")) it else "$it/"
         }
-        return "${base}api/chat.php?action=$action"
+        val suffix = if (query.isNullOrBlank()) "" else "&$query"
+        return "${base}api/chat.php?action=$action$suffix"
     }
 
     // -----------------------------------------------------------------------
@@ -334,6 +335,35 @@ object TheStudentChatClient {
     }
 
     /**
+     * Public profile of one student.
+     *
+     * The response is an explicit allow-list (education + presence), so nothing
+     * account-identifying can leak into the chat profile screen even if the
+     * server grows new columns later.
+     */
+    suspend fun fetchProfile(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int
+    ): ChatResult<ChatPeerProfile> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "profile", query = "peer_id=$peerId") { json ->
+            val peerJson = json.optJSONObject("peer") ?: JSONObject()
+            val education = json.optJSONObject("education") ?: JSONObject()
+            ChatPeerProfile(
+                peer = parsePeer(peerJson),
+                targetExam = education.optString("target_exam"),
+                streamOrDegree = education.optString("stream_or_degree"),
+                institution = education.optString("institution"),
+                joinedEpoch = if (json.isNull("joined_epoch")) {
+                    null
+                } else {
+                    json.optLong("joined_epoch", 0L).takeIf { it > 0L }
+                }
+            )
+        }
+    }
+
+    /**
      * Hand this device's push token to the relay.
      *
      * The token is what lets the server wake this phone with a data message the
@@ -520,11 +550,12 @@ object TheStudentChatClient {
         backendBaseUrl: String,
         token: String,
         action: String,
+        query: String? = null,
         parse: (JSONObject) -> T
     ): ChatResult<T> {
         return try {
             val request = Request.Builder()
-                .url(endpoint(backendBaseUrl, action))
+                .url(endpoint(backendBaseUrl, action, query))
                 .get()
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer $token")

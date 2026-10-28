@@ -17,6 +17,9 @@
  *                     flag, published encryption key. No message content.
  *   GET  inbox        Fetch (and immediately delete) messages + read receipts
  *                     waiting for the caller.
+ *   GET  profile      ?peer_id=N  Public student profile for the chat profile
+ *                     screen: education fields + presence. Never e-mail, phone,
+ *                     role or anything else that identifies the account.
  *   POST send         {peer_id, body}          body is E2EE ciphertext
  *   POST read         {peer_id, up_to_server_id}  read receipt for the sender
  *   POST delete_message  {peer_id, server_id}  delete one of my messages for
@@ -62,7 +65,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.3.0';
+const TS_CHAT_API_VERSION          = '2.4.0';
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -762,6 +765,54 @@ switch ($action) {
             'server_epoch'          => $now,
             'my_public_key'         => $me['chat_public_key'] ?? null,
         ]);
+        break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Public profile of one student (the chat profile screen)
+    // -----------------------------------------------------------------------
+    case 'profile': {
+        $peerId = ts_chat_peer_id($_GET);
+        if ($peerId <= 0) {
+            ts_chat_json('error', 'Choose a student first.', [], 422);
+        }
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'That is your own profile.', [], 422);
+        }
+
+        try {
+            $stmt = $pdo->prepare(
+                'SELECT id, full_name, profile_picture, target_exam, institution,
+                        stream_or_degree, last_seen_at,
+                        UNIX_TIMESTAMP(last_seen_at) AS last_seen_epoch,
+                        UNIX_TIMESTAMP(created_at) AS joined_epoch
+                 FROM users
+                 WHERE id = :id AND is_active = 1 AND is_email_verified = 1
+                 LIMIT 1'
+            );
+            $stmt->execute(['id' => $peerId]);
+            $row = $stmt->fetch();
+            if (!$row) {
+                ts_chat_json('error', 'That student is no longer available.', [], 404);
+            }
+
+            // Allow-list only: the SELECT above never touches email, phone,
+            // password_hash, role, auth_provider or any login metadata.
+            $joinedEpoch = (int) ($row['joined_epoch'] ?? 0);
+            ts_chat_json('success', 'Profile loaded.', [
+                'peer' => ts_chat_public_peer($row, $now),
+                'education' => [
+                    'target_exam'      => trim((string) ($row['target_exam'] ?? '')),
+                    'stream_or_degree' => trim((string) ($row['stream_or_degree'] ?? '')),
+                    'institution'      => trim((string) ($row['institution'] ?? '')),
+                ],
+                'joined_epoch' => $joinedEpoch > 0 ? $joinedEpoch : null,
+                'server_epoch' => $now,
+            ]);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] chat profile failed: ' . $e->getMessage());
+            ts_chat_json('error', 'Could not load that profile right now.', [], 500);
+        }
         break;
     }
 

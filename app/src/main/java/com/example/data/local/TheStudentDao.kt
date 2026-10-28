@@ -123,6 +123,14 @@ interface TheStudentDao {
     @Query("SELECT MAX(serverId) FROM chat_messages WHERE peerId = :peerId AND isMine = 0")
     suspend fun newestServerIdFromPeer(peerId: Int): Long?
 
+    /**
+     * When the conversation with [peerId] started, as far as this phone knows.
+     * Used for "Chatting since" on the profile screen; null when there is no
+     * history here (a different device, or a cleared chat).
+     */
+    @Query("SELECT MIN(sentAtEpoch) FROM chat_messages WHERE peerId = :peerId")
+    suspend fun firstMessageEpochWith(peerId: Int): Long?
+
     @Query("SELECT COUNT(*) FROM chat_messages WHERE isMine = 0 AND isRead = 0")
     fun observeTotalUnread(): Flow<Int>
 

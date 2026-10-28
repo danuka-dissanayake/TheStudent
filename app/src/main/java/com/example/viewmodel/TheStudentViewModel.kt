@@ -176,6 +176,10 @@ data class ChatUiState(
     val safetyAcknowledged: Boolean = false,
     val activePeer: ChatPeer? = null,
     val messages: List<ChatMessage> = emptyList(),
+    /** Student whose profile is open (null when the profile screen is closed). */
+    val viewedProfile: ChatPeerProfile? = null,
+    /** True while that profile is being fetched. */
+    val isLoadingProfile: Boolean = false,
     /** True once this device's encryption key is what the server published. */
     val isEncryptionReady: Boolean = false,
     /** Image or document picked in the composer, not sent yet. */
@@ -488,6 +492,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatInboxJob: Job? = null
     private var chatPresenceJob: Job? = null
     private var chatMessagesJob: Job? = null
+    private var profileJob: Job? = null
     private var chatTypingJob: Job? = null
     private var chatBackgroundJob: Job? = null
     private var chatIsDirectoryVisible = false
@@ -712,6 +717,62 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 .thenBy { it.peer.name.lowercase() }
         )
         _chatState.update { it.copy(threads = threads) }
+    }
+
+    // ── Student profile ──────────────────────────────────────────────────────
+
+    /**
+     * Open the read-only profile of [peer].
+     *
+     * Shows only what they chose to share (education + presence) — never e-mail,
+     * phone or role. The directory entry is used as an instant placeholder, so
+     * the screen has a name and photo while the request is in flight.
+     */
+    fun openChatProfile(peer: ChatPeer) {
+        _chatState.update {
+            it.copy(
+                viewedProfile = ChatPeerProfile(peer = peer),
+                isLoadingProfile = true
+            )
+        }
+        profileJob?.cancel()
+        profileJob = viewModelScope.launch {
+            val session = chatSession()
+            val profile = if (session == null) {
+                null
+            } else {
+                val (baseUrl, token) = session
+                TheStudentChatClient.fetchProfile(baseUrl, token, peer.id).dataOrNull()
+            }
+            // "Chatting since" is not on the server (message bodies are deleted
+            // after delivery), so it comes from the first message stored here.
+            val firstEpoch = runCatching {
+                chatDao.firstMessageEpochWith(peer.id)
+            }.getOrNull()
+
+            _chatState.update { state ->
+                val current = state.viewedProfile
+                // The student may have closed the screen while this was in flight.
+                if (current == null || current.peer.id != peer.id) {
+                    state
+                } else {
+                    state.copy(
+                        viewedProfile = (profile ?: current)
+                            .copy(chattingSinceEpoch = firstEpoch?.takeIf { it > 0L }),
+                        isLoadingProfile = false,
+                        // A failed fetch is not worth an error banner here: the
+                        // screen still shows the name, photo and presence it had.
+                        errorMessage = null
+                    )
+                }
+            }
+        }
+    }
+
+    fun closeChatProfile() {
+        profileJob?.cancel()
+        profileJob = null
+        _chatState.update { it.copy(viewedProfile = null, isLoadingProfile = false) }
     }
 
     /**
@@ -2038,6 +2099,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             runCatching { ChatAttachmentStore.clearAll(appContext) }
             chatSummaries = emptyList()
             chatPeers = emptyList()
+            profileJob?.cancel()
+            profileJob = null
             ChatNotifier.reset()
             pendingNotificationPeerId = null
             ChatNotifications.clearAll(appContext)
