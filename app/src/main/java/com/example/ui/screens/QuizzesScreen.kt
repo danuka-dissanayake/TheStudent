@@ -687,8 +687,10 @@ private fun QuizEmptyState(error: String?, isOffline: Boolean, onRefresh: () -> 
 private fun matchesChip(quiz: QuizSummary, chip: String): Boolean = when (chip) {
     "A/L" -> quiz.category.equals("A/L", true) || quiz.grade == "Grade 12" || quiz.grade == "Grade 13"
     "O/L" -> quiz.category.equals("O/L", true) || quiz.grade == "Grade 10" || quiz.grade == "Grade 11"
+    // Parse the whole grade number: "Grade 13" must not fall into 6–9 just
+    // because it ends in 3.
     "Grades 6–9" -> quiz.category.contains("Junior", true) ||
-        (quiz.grade.startsWith("Grade ") && (quiz.grade.lastOrNull()?.digitToIntOrNull() ?: 0) in 6..9)
+        (quiz.grade.removePrefix("Grade ").trim().toIntOrNull() ?: 0) in 6..9
     "University" -> quiz.category.contains("University", true) ||
         quiz.grade.contains("Undergraduate", true) || quiz.grade.contains("Year", true)
     else -> true

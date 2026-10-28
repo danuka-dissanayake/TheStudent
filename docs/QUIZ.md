@@ -400,6 +400,7 @@ admin can test what they wrote immediately.
 Every phase is one commit (plus fixes) and updates this document as it lands.
 
 **Deploy checklist (once, on the live server):** import `database_quizzes.sql`,
+then (optionally) `seed_quizzes.sql` for the three starter quizzes,
 upload `api/quizzes.php`, add the two EXP kinds to `_exp.php`. No new web pages —
 authoring is in the app.
 
@@ -462,7 +463,8 @@ Deviations from the plan, both deliberate:
    survives process death, which is all the plan promised, without a schema
    migration for a document the app reads exactly once.
 
-Still to do before students see it: import `database_quizzes.sql` and upload
+Still to do before students see it: import `database_quizzes.sql`, then
+`seed_quizzes.sql` for the three starter quizzes, and upload
 `api/quizzes.php` (see the deploy checklist in §10). The app shows "Quizzes are
 not set up on this server yet" until it is there.
 
@@ -480,3 +482,51 @@ not set up on this server yet" until it is there.
 ---
 
 ---
+
+---
+
+## 14. Starter quizzes (`backend/seed_quizzes.sql`)
+
+Three real quizzes ship as an optional SQL seed, so a fresh install is not an
+empty screen. They are ordinary rows — the same ones the in-app builder writes —
+and can be edited or deleted from **Admin panel → Quizzes** afterwards.
+
+| # | Quiz | Subject / grade | Category | Time | Questions |
+| --- | --- | --- | --- | --- | --- |
+| 1 | Current Electricity — O/L Science | Science, Grade 11 | O/L | 15 min | 10 |
+| 2 | Magnetism & Electromagnetic Induction — A/L Physics | Physics, Grade 13 (Physical Science) | A/L | 20 min | 10 |
+| 3 | Nutrition & Digestion — Grade 9 Science | Science, Grade 9 | Junior | 12 min | 10 |
+
+Content basis:
+
+- **Quiz 1** follows the NIE Grade 10/11 Science syllabus unit *"uses fundamental
+  principles and laws of current electricity to understand and control the action
+  of simple circuits"* — current and its unit, e.m.f. and potential difference,
+  Ohm's law, the factors affecting resistance, series and parallel combinations,
+  electrical power, and household wiring safety with kW h as the billing unit.
+- **Quiz 2** covers the A/L Physics magnetism/induction unit: flux and flux
+  density and their units, F = BIl, Faraday's law, Lenz's law and eddy currents,
+  the ideal transformer equation and Fleming's left-hand rule. Two numerical
+  items (flux and induced emf) are included so the quiz tests arithmetic, not only
+  recall.
+- **Quiz 3** covers the junior secondary nutrition unit: organs and enzymes of
+  digestion, absorption in the small and large intestine, roughage, protein
+  sources, and the deficiency diseases (scurvy, goitre, kwashiorkor) that the
+  Grade 8–9 syllabus names.
+
+Every question has exactly four options, one correct answer, and a worked
+explanation that the app reveals after grading. Distractors are plausible
+misconceptions (for example "resistance increases when the wire is made thicker",
+"current flows from the negative terminal", "bile is produced in the gall
+bladder") rather than random wrong answers.
+
+Import order and notes:
+
+1. `database_quizzes.sql` — creates the four tables.
+2. `seed_quizzes.sql` — inserts the three quizzes as `published`. Safe to re-run:
+   each quiz is deleted by its stable `code` first, and the table's foreign keys
+   cascade to its questions and options.
+
+Because the seed deletes by `code`, re-running it after students have attempted a
+quiz would also remove those attempts (`quiz_attempts` cascades). Run it once on
+a new server, or edit the quizzes in the app after that.
