@@ -70,6 +70,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -95,7 +96,7 @@ import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import com.example.data.model.CatalogCertificate
 import com.example.data.model.CatalogCourse
 import com.example.data.model.CatalogProvider
@@ -497,7 +498,13 @@ private fun CourseCatalogBrowse(
                         CourseRowsSkeleton(brush = shimmer, count = pageItems.size.coerceAtMost(6))
                     }
                 } else {
-                    items(pageItems, key = { it.id }) { course ->
+                    items(
+                        items = pageItems,
+                        key = { it.id },
+                        // Every item here is the same shape, so one content type
+                        // lets Compose reuse slots instead of rebuilding them.
+                        contentType = { "course_row" }
+                    ) { course ->
                         CourseRow(course = course, onClick = { onOpenCourse(course) })
                         Spacer(Modifier.height(8.dp))
                     }
@@ -1137,13 +1144,22 @@ private fun FeaturedSlider(featured: List<CatalogCourse>, onOpenCourse: (Catalog
         }
         if (loop) {
             Spacer(Modifier.height(10.dp))
+            // derivedStateOf: the raw scroll index changes on every pixel, and
+            // reading it straight in composition recomposes this column (and its
+            // dots) continuously while the rail moves. This only changes when the
+            // *card* changes.
+            val active by remember(featured) {
+                derivedStateOf {
+                    ((state.firstVisibleItemIndex % featured.size) + featured.size) %
+                        featured.size
+                }
+            }
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
                     .padding(horizontal = 18.dp),
                 horizontalArrangement = Arrangement.Center
             ) {
-                val active = ((state.firstVisibleItemIndex % featured.size) + featured.size) % featured.size
                 featured.indices.forEach { index ->
                     Box(
                         modifier = Modifier
@@ -1274,16 +1290,15 @@ private fun ProviderLogo(
             ),
         contentAlignment = Alignment.Center
     ) {
-        if (provider == null) {
-            ProviderInitials(name = name, size = size, onDark = onDark)
-        } else {
-            SubcomposeAsyncImage(
+        // Initials are drawn first and the logo paints over them, so "loading"
+        // and "no network" look identical without subcomposing each row.
+        ProviderInitials(name = name, size = size, onDark = onDark)
+        if (provider != null) {
+            AsyncImage(
                 model = provider.logoUrl,
                 contentDescription = provider.name,
                 contentScale = ContentScale.Fit,
-                modifier = Modifier.size((size * 0.64f).dp),
-                loading = { ProviderInitials(name = name, size = size, onDark = onDark) },
-                error = { ProviderInitials(name = name, size = size, onDark = onDark) }
+                modifier = Modifier.size((size * 0.64f).dp)
             )
         }
     }
@@ -1326,13 +1341,11 @@ private fun VideoRail(videos: List<CatalogVideo>, onPlayVideo: (CatalogVideo) ->
                         .clip(RoundedCornerShape(16.dp))
                         .background(Color(0xFF0F172A))
                 ) {
-                    SubcomposeAsyncImage(
+                    AsyncImage(
                         model = video.thumbnailUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                        loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
-                        error = { Box(Modifier.fillMaxSize().background(CcInk)) }
+                        modifier = Modifier.fillMaxSize()
                     )
                     Box(
                         modifier = Modifier
@@ -2047,13 +2060,11 @@ private fun CourseDetail(
                                 .clickable { onPlayVideo(video.videoId) }
                                 .testTag("course_detail_video")
                         ) {
-                            SubcomposeAsyncImage(
+                            AsyncImage(
                                 model = video.thumbnailUrl,
                                 contentDescription = null,
                                 contentScale = ContentScale.Crop,
-                                modifier = Modifier.fillMaxSize(),
-                                loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
-                                error = { Box(Modifier.fillMaxSize().background(CcInk)) }
+                                modifier = Modifier.fillMaxSize()
                             )
                             Box(
                                 modifier = Modifier
@@ -2446,13 +2457,11 @@ private fun YouTubePlayerOverlay(
                     .testTag("course_video_player")
             ) {
                 if (failed) {
-                    SubcomposeAsyncImage(
+                    AsyncImage(
                         model = video.thumbnailUrl,
                         contentDescription = null,
                         contentScale = ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize(),
-                        loading = { Box(Modifier.fillMaxSize().background(CcInk)) },
-                        error = { Box(Modifier.fillMaxSize().background(CcInk)) }
+                        modifier = Modifier.fillMaxSize()
                     )
                     Box(
                         modifier = Modifier

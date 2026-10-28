@@ -24,7 +24,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.SubcomposeAsyncImage
+import coil.compose.AsyncImage
 import com.example.data.model.PastPaper
 import com.example.ui.theme.MaisonNeueFontFamily
 
@@ -51,19 +51,21 @@ fun PaperCover(
         border = BorderStroke(1.dp, Color(0x140F172A)),
         modifier = modifier
     ) {
+        // The drawn cover sits *underneath* the image and shows through until a
+        // thumbnail paints over it. That is the same look as the old
+        // `SubcomposeAsyncImage(loading = { CoverArt })`, without subcomposition:
+        // subcomposing every row is one of the most expensive things a lazy list
+        // can do, and this list is the app's main scrolling surface.
+        CoverArt(paper, tint)
         if (paper.thumbnailUrl.isNotBlank()) {
-            SubcomposeAsyncImage(
+            AsyncImage(
                 model = paper.thumbnailUrl,
                 contentDescription = paper.title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
                     .fillMaxSize()
-                    .clip(RoundedCornerShape(corner)),
-                loading = { CoverArt(paper, tint) },
-                error = { CoverArt(paper, tint) }
+                    .clip(RoundedCornerShape(corner))
             )
-        } else {
-            CoverArt(paper, tint)
         }
     }
 }
@@ -154,13 +156,21 @@ fun PaperYearPill(paper: PastPaper, modifier: Modifier = Modifier) {
     }
 }
 
-/** Stable colour per subject, so the same subject always looks the same. */
+private val PAPER_COVER_PALETTE = listOf(
+    Color(0xFF059669), Color(0xFF2563EB), Color(0xFF7C3AED),
+    Color(0xFFDB2777), Color(0xFFEA580C), Color(0xFF0891B2),
+    Color(0xFF65A30D), Color(0xFF9333EA)
+)
+
+/**
+ * Stable colour per subject, so the same subject always looks the same.
+ *
+ * The palette is a top-level value: this is called a few times per row in every
+ * list, and building the list of eight colours on each call was pure allocation
+ * on the scrolling path.
+ */
 fun paperCoverTint(subject: String): Color {
-    val palette = listOf(
-        Color(0xFF059669), Color(0xFF2563EB), Color(0xFF7C3AED),
-        Color(0xFFDB2777), Color(0xFFEA580C), Color(0xFF0891B2),
-        Color(0xFF65A30D), Color(0xFF9333EA)
-    )
-    val index = (subject.hashCode().rem(palette.size) + palette.size).rem(palette.size)
-    return palette[index]
+    val size = PAPER_COVER_PALETTE.size
+    val index = (subject.hashCode().rem(size) + size).rem(size)
+    return PAPER_COVER_PALETTE[index]
 }

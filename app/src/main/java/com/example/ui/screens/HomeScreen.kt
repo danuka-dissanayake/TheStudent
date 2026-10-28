@@ -711,7 +711,7 @@ fun HomeScreen(
                 LazyRow(
                     horizontalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
-                    items(popularCourses) { course ->
+                    items(popularCourses, key = { it.id }) { course ->
                         CourseMiniCard(course = course, onClick = { onCourseClick(course) })
                     }
                 }

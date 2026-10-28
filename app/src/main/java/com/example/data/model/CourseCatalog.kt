@@ -913,11 +913,22 @@ object CourseCatalog {
             return providers.filter { it.name in names }
         }
 
-    fun provider(name: String): CatalogProvider? = providers.firstOrNull { it.name == name }
+    // Looked up from every card, several times per row: a map, not a scan.
+    private val providerIndex: Map<String, CatalogProvider> by lazy {
+        providers.associateBy { it.name }
+    }
+    private val courseIndex: Map<String, CatalogCourse> by lazy {
+        courses.associateBy { it.id }
+    }
+    private val videoIndex: Map<String, CatalogVideo> by lazy {
+        videos.associateBy { it.videoId }
+    }
 
-    fun course(id: String): CatalogCourse? = courses.firstOrNull { it.id == id }
+    fun provider(name: String): CatalogProvider? = providerIndex[name]
 
-    fun video(id: String): CatalogVideo? = videos.firstOrNull { it.videoId == id }
+    fun course(id: String): CatalogCourse? = courseIndex[id]
+
+    fun video(id: String): CatalogVideo? = videoIndex[id]
 
     /** The four filters the screen offers, in order. */
     val subjects: List<String>

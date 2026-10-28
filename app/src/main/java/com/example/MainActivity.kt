@@ -64,7 +64,6 @@ class MainActivity : ComponentActivity() {
             val savedCourses by viewModel.savedCourses.collectAsStateWithLifecycle()
             val recentActivities by viewModel.recentActivities.collectAsStateWithLifecycle()
             val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
-            val chatMessages by viewModel.chatMessages.collectAsStateWithLifecycle()
 
             val appContext = androidx.compose.ui.platform.LocalContext.current.applicationContext
             val snackbarHostState = remember { SnackbarHostState() }

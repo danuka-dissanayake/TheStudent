@@ -233,7 +233,7 @@ fun LearnScreen(
                     }
                 }
             } else {
-                items(filteredCourses) { course ->
+                items(filteredCourses, key = { it.id }) { course ->
                     val isEnrolled = savedCourses.any { it.id == course.id }
                     CourseCardDetailed(
                         course = course,
@@ -271,7 +271,7 @@ fun LearnScreen(
                     }
                 }
             } else {
-                items(filteredNotes) { note ->
+                items(filteredNotes, key = { it.id }) { note ->
                     NoteCard(note = note)
                 }
             }
