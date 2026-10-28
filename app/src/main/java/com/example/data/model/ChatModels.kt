@@ -215,6 +215,20 @@ data class ChatRating(
     val locksEpoch: Long? = null
 )
 
+/**
+ * The newest rating *received* by the signed-in student.
+ *
+ * This is what the little celebration plays for. The phone stores the last id it
+ * celebrated, so opening the inbox twice never replays the same moment, and a
+ * rating without a note still counts.
+ */
+data class ChatReceivedRating(
+    val id: Long,
+    val stars: Int,
+    val raterName: String,
+    val createdEpoch: Long = 0L
+)
+
 /** A student's public reputation. Never contains a note or a rater's name. */
 data class ChatRatingSummary(
     val count: Int = 0,

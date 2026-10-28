@@ -104,6 +104,7 @@ import com.example.data.model.ChatHelpRequest
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
+import com.example.ui.components.RatingCelebrationOverlay
 import com.example.data.model.ChatRateState
 import com.example.data.model.ChatRatingSummary
 import com.example.data.model.chatRatingTagLabels
@@ -185,8 +186,38 @@ private fun formatThreadStamp(epochSeconds: Long): String {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Chat tab
 // ─────────────────────────────────────────────────────────────────────────────
+/**
+ * The chat tab.
+ *
+ * A thin wrapper so the rating celebration can sit *over* everything the tab
+ * draws — list, conversation or profile — without any of those screens having
+ * to know about it.
+ */
 @Composable
 fun ChatScreen(
+    viewModel: TheStudentViewModel,
+    modifier: Modifier = Modifier
+) {
+    val chatState by viewModel.chatState.collectAsStateWithLifecycle()
+
+    Box(modifier = modifier.fillMaxSize()) {
+        ChatScreenBody(viewModel = viewModel, modifier = Modifier.fillMaxSize())
+
+        // "You've been rated": stars, the score and who gave it — then it leaves
+        // on its own. It never covers a button for longer than it takes to read.
+        val celebration = chatState.celebratingRating
+        if (celebration != null) {
+            RatingCelebrationOverlay(
+                raterName = celebration.raterName,
+                stars = celebration.stars,
+                onFinished = { viewModel.dismissRatingCelebration() }
+            )
+        }
+    }
+}
+
+@Composable
+private fun ChatScreenBody(
     viewModel: TheStudentViewModel,
     modifier: Modifier = Modifier
 ) {
@@ -1039,17 +1070,6 @@ private fun RatingCardOverlay(
                     }
                 }
 
-                Spacer(Modifier.height(10.dp))
-
-                Text(
-                    text = "Only $firstName sees this. One rating per subject, " +
-                        "editable for 24 hours.",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
-                    color = ChatMuted,
-                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
-                    modifier = Modifier.fillMaxWidth()
-                )
             }
         }
     }
@@ -1140,12 +1160,6 @@ private fun ChatIntentSheet(
                     fontSize = 19.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = ChatInk
-                )
-                Text(
-                    text = "Only you see this label · ${peer.name}",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
-                    color = ChatMuted
                 )
                 Spacer(Modifier.height(12.dp))
 
@@ -1606,6 +1620,114 @@ private fun HelpRequestCard(
                         color = ChatMuted
                     )
                 }
+            }
+        }
+    }
+}
+
+/**
+ * A help request *arriving* — somebody in this chat needs a hand.
+ *
+ * It is a small card pinned under the header rather than a row in the thread:
+ * the asker's question is what the next message is about, so the card has to stay
+ * in front of the reader while they scroll. Accept or wave it away in one tap;
+ * the full story of the request stays in the thread underneath.
+ */
+@Composable
+private fun PinnedHelpRequestCard(
+    request: ChatHelpRequest,
+    peerName: String,
+    isBusy: Boolean,
+    onAccept: () -> Unit,
+    onDecline: () -> Unit
+) {
+    val firstName = peerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "They" }
+
+    Surface(
+        shape = RoundedCornerShape(18.dp),
+        color = Color.White,
+        shadowElevation = 10.dp,
+        border = BorderStroke(1.dp, Color(0xFFD1FAE5)),
+        modifier = Modifier
+            .widthIn(max = 300.dp)
+            .testTag("chat_help_banner")
+    ) {
+        Column(modifier = Modifier.padding(horizontal = 13.dp, vertical = 11.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(26.dp)
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Color(0xFFD1FAE5)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Forum,
+                        contentDescription = null,
+                        tint = EmeraldDark,
+                        modifier = Modifier.size(14.dp)
+                    )
+                }
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    text = "$firstName needs help",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = ChatInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+
+            Spacer(Modifier.height(3.dp))
+            Text(
+                text = request.subjectLine,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                color = ChatMuted,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+
+            Spacer(Modifier.height(9.dp))
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    onClick = { if (!isBusy) onAccept() },
+                    enabled = !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = EmeraldPrimary,
+                    modifier = Modifier
+                        .height(30.dp)
+                        .testTag("chat_help_banner_accept")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            text = if (isBusy) "Accepting…" else "I can help",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+                Text(
+                    text = "Not now",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = ChatMuted,
+                    modifier = Modifier
+                        .clickable(enabled = !isBusy, onClick = onDecline)
+                        .padding(vertical = 4.dp)
+                        .testTag("chat_help_banner_decline")
+                )
             }
         }
     }
@@ -3088,6 +3210,44 @@ private fun ChatConversationScreen(
                     )
                 }
 
+                // ── an incoming request, pinned under the header ─────────────
+                // A question that needs an answer right now stays in front of the
+                // reader while they scroll; it is not a message in the thread.
+                val incomingHelp = state.helpRequest
+                    ?.takeIf { it.status == "pending" && it.canAccept }
+                AnimatedVisibility(
+                    visible = incomingHelp != null,
+                    enter = fadeIn(tween(160)) +
+                        scaleIn(
+                            initialScale = 0.94f,
+                            transformOrigin = TransformOrigin(1f, 0f),
+                            animationSpec = tween(180)
+                        ),
+                    exit = fadeOut(tween(120)) +
+                        scaleOut(
+                            targetScale = 0.96f,
+                            transformOrigin = TransformOrigin(1f, 0f),
+                            animationSpec = tween(120)
+                        )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 20.dp, end = 14.dp, top = 4.dp, bottom = 2.dp),
+                        horizontalArrangement = Arrangement.End
+                    ) {
+                        incomingHelp?.let { help ->
+                            PinnedHelpRequestCard(
+                                request = help,
+                                peerName = peer.name,
+                                isBusy = state.isHelpBusy,
+                                onAccept = onAcceptHelp,
+                                onDecline = onCancelHelp
+                            )
+                        }
+                    }
+                }
+
                 // ── messages ─────────────────────────────────────────────────
                 // The list is composed even while the loader is up: it gets parked
                 // at the newest message underneath, then the overlay fades away.
@@ -3183,7 +3343,10 @@ private fun ChatConversationScreen(
                                 // it is context for the whole conversation, not
                                 // a message in it.
                                 state.helpRequest?.let { help ->
-                                    if (help.isOpen || help.isCompleted) {
+                                    // A request that still needs an answer lives in
+                                    // the pinned card above, not twice in the thread.
+                                    val pinned = help.status == "pending" && help.canAccept
+                                    if ((help.isOpen || help.isCompleted) && !pinned) {
                                         item(key = "help-request") {
                                             HelpRequestCard(
                                                 request = help,
@@ -3251,8 +3414,10 @@ private fun ChatConversationScreen(
                     ConversationLoadingOverlay(visible = !conversationSettled)
 
                     // The help bubble floats over the conversation, parked above
-                    // the microphone by default and draggable from there.
-                    if (conversationSettled) {
+                    // the microphone by default and draggable from there. While a
+                    // request is waiting for an answer the pinned card says it all,
+                    // so the bubble steps aside instead of repeating it.
+                    if (conversationSettled && incomingHelp == null) {
                         FloatingHelpBubble(
                             state = state,
                             peerName = peer.name,

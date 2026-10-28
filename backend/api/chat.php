@@ -65,7 +65,7 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.8.1';
+const TS_CHAT_API_VERSION          = '2.8.2';
 const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
 const TS_CHAT_HELP_MIN_CLOSE_SEC   = 0;    // no waiting: a question can be answered in two messages
 const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
@@ -2295,9 +2295,38 @@ switch ($action) {
             ];
         }
 
+        // The newest rating received. The phone remembers the last id it
+        // celebrated, so opening the inbox twice never replays the same moment.
+        $latest = null;
+        try {
+            $latestStmt = $pdo->prepare(
+                'SELECT r.id, r.stars,
+                        UNIX_TIMESTAMP(r.created_at) AS created_epoch,
+                        u.full_name
+                 FROM chat_ratings r
+                 JOIN users u ON u.id = r.rater_id
+                 WHERE r.ratee_id = :me
+                 ORDER BY r.id DESC LIMIT 1'
+            );
+            $latestStmt->execute(['me' => $meId]);
+            $latestRow = $latestStmt->fetch();
+            if ($latestRow) {
+                $raterName = trim((string) ($latestRow['full_name'] ?? ''));
+                $latest = [
+                    'id'             => (int) $latestRow['id'],
+                    'stars'          => (int) $latestRow['stars'],
+                    'rater_name'     => $raterName !== '' ? $raterName : 'A student',
+                    'created_epoch'  => (int) ($latestRow['created_epoch'] ?? 0),
+                ];
+            }
+        } catch (Throwable $e) {
+            error_log('[TheStudent] latest rating lookup failed: ' . $e->getMessage());
+        }
+
         ts_chat_json('success', 'Your ratings loaded.', [
             'summary' => ts_chat_rating_summary($pdo, $meId),
             'notes'   => $notes,
+            'latest'  => $latest,
         ]);
         break;
     }

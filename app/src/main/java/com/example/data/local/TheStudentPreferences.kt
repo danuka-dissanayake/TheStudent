@@ -135,6 +135,16 @@ class TheStudentPreferences(context: Context) {
             .apply()
     }
 
+    /**
+     * The id of the last rating whose celebration this phone has played.
+     *
+     * The moment is supposed to feel rare: it plays once per rating, not every
+     * time the inbox is opened.
+     */
+    var lastCelebratedRatingId: Long
+        get() = prefs.getLong(KEY_CELEBRATED_RATING, 0L)
+        set(value) = prefs.edit().putLong(KEY_CELEBRATED_RATING, value).apply()
+
     fun hasUsableSession(): Boolean {
         val token = sessionToken
         return !token.isNullOrBlank() && isLoggedIn
@@ -171,6 +181,7 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_USER_EMAIL = "user_email"
         private const val KEY_USER_NAME = "user_name"
         private const val KEY_QUESTION_DISMISSALS = "question_offer_dismissals"
+        private const val KEY_CELEBRATED_RATING = "celebrated_rating_id"
         private const val LAST_DISMISSALS_KEPT = 40
 
         const val ROLE_STUDENT = "student"

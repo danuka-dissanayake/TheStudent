@@ -234,7 +234,12 @@ data class ChatUiState(
     /** True while a rating is being sent. */
     val isRatingBusy: Boolean = false,
     /** Subject codes I have already rated this peer in (this session). */
-    val ratedSubjects: Set<String> = emptySet()
+    val ratedSubjects: Set<String> = emptySet(),
+    /**
+     * A rating I have just received, while its celebration is on screen. Null
+     * the rest of the time — the moment is meant to be rare.
+     */
+    val celebratingRating: ChatReceivedRating? = null
 ) {
     val activePeerIsTyping: Boolean get() = activePeer?.isTyping == true
     val totalUnread: Int get() = threads.sumOf { it.unreadCount }
@@ -635,6 +640,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             verifyChatServerVersion()
             publishChatIdentityIfNeeded()
             refreshChatDirectory(showSpinner = _chatState.value.threads.isEmpty())
+            // A rating that arrived since the last visit gets one celebration.
+            maybeCelebrateRating()
             while (true) {
                 delay(CHAT_DIRECTORY_POLL_MS)
                 refreshChatDirectory(showSpinner = false)
@@ -1159,6 +1166,30 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 }
             }
         }
+    }
+
+    /**
+     * Play the "you've been rated" moment if this phone has not shown it yet.
+     *
+     * The newest rating received is fetched once per inbox visit and compared
+     * with the id stored in preferences: the same rating never celebrates twice,
+     * and a rating given while the app was closed still gets its moment.
+     */
+    private fun maybeCelebrateRating() {
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            val latest = TheStudentChatClient.fetchLatestReceivedRating(baseUrl, token)
+                .dataOrNull() ?: return@launch
+            if (latest.id <= preferences.lastCelebratedRatingId) return@launch
+            preferences.lastCelebratedRatingId = latest.id
+            _chatState.update { it.copy(celebratingRating = latest) }
+        }
+    }
+
+    /** The celebration has finished (or was tapped away). */
+    fun dismissRatingCelebration() {
+        _chatState.update { it.copy(celebratingRating = null) }
     }
 
     /** "Not now" on the rating card. */

@@ -11,6 +11,7 @@ import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
 import com.example.data.model.ChatRateState
+import com.example.data.model.ChatReceivedRating
 import com.example.data.model.ChatRating
 import com.example.data.model.ChatRatingResult
 import com.example.data.model.ChatRatingSubject
@@ -298,6 +299,27 @@ object TheStudentChatClient {
             ChatRatingResult(
                 rating = parseRating(json.optJSONObject("rating")),
                 summary = parseRatingSummary(json.optJSONObject("summary"))
+            )
+        }
+    }
+
+    /**
+     * The newest rating I have received, or null when nobody has rated me yet.
+     * Used only to decide whether the celebration should play once.
+     */
+    suspend fun fetchLatestReceivedRating(
+        backendBaseUrl: String,
+        token: String
+    ): ChatResult<ChatReceivedRating?> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "my_ratings") { json ->
+            val latest = json.optJSONObject("latest") ?: return@get null
+            val id = latest.optLong("id", 0L)
+            if (id <= 0L) return@get null
+            ChatReceivedRating(
+                id = id,
+                stars = latest.optInt("stars", 0),
+                raterName = latest.optString("rater_name").ifBlank { "A student" },
+                createdEpoch = latest.optLong("created_epoch", 0L)
             )
         }
     }
