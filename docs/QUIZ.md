@@ -5,8 +5,8 @@ take them in the app, and a passed quiz pays EXP through the existing ledger.
 Nothing is bundled with the APK — like the papers library after turn 74, an empty
 quiz list means "nothing published yet", never sample content.
 
-Status: **plan agreed in shape, ready to build phase 1.** Nothing is implemented
-yet.
+Status: **implemented** (turns 76–77). See §13 for what shipped and the two
+places where the build deviated from this plan.
 
 ## Locked decisions (2026-10-28)
 
@@ -435,6 +435,39 @@ as written.
 
 ---
 
+## 13. What shipped
+
+| Layer | File | Notes |
+| --- | --- | --- |
+| Schema | `backend/database_quizzes.sql` | four tables, nothing seeded |
+| API | `backend/api/quizzes.php` | student read path + admin write path, grading server-side |
+| EXP | `backend/api/_exp.php` | `quiz_passed` 20, `quiz_perfect` 10 |
+| Models | `app/.../data/model/QuizModels.kt` | summaries, attempt, result, review, authoring draft |
+| Wire | `app/.../data/remote/QuizzesApiService.kt` | Moshi DTOs + envelope |
+| Data | `app/.../data/remote/QuizzesRepository.kt` | `QuizOutcome.Ok/Err`, offline kept separate |
+| Local | `TheStudentEntities/Dao/Database` v8 | `quiz_results` mirror, `MIGRATION_7_8` |
+| State | `TheStudentViewModel` | quizzes, attempt, answers, result, admin list, saving |
+| Screens | `QuizzesScreen.kt`, `QuizRunnerScreen.kt`, `QuizAdminScreen.kt` | hub, runner + result, list + builder |
+| Entry | `PapersScreen.kt` | `Papers \| Quizzes` segments under the existing header |
+| Admin | `AdminPanelScreen.kt` | new `QUIZZES` tab, scrollable tab row |
+
+Deviations from the plan, both deliberate:
+
+1. **One `quiz_results` table, not three.** Attempt answers live in the server's
+   `quiz_attempts`; the phone only mirrors best scores. A local attempt draft was
+   dropped because the runner keeps its answers in the view model for the length
+   of a session, which is how long an attempt realistically lives.
+2. **The builder stores its draft in SharedPreferences, not Room.** One JSON
+   document per quiz, keyed `new_quiz` / `quiz_{id}`, deleted on success. It
+   survives process death, which is all the plan promised, without a schema
+   migration for a document the app reads exactly once.
+
+Still to do before students see it: import `database_quizzes.sql` and upload
+`api/quizzes.php` (see the deploy checklist in §10). The app shows "Quizzes are
+not set up on this server yet" until it is there.
+
+---
+
 ## Design references
 
 - `designs/18-quiz-hub.png` — the quiz list (cards, badges, best-score chips).
@@ -443,5 +476,7 @@ as written.
 - `designs/1x-papers-screen.png` — the header the segment control sits under; the
   hub mockup predates the "second segment" decision, so in the app the
   `Papers | Quizzes` pills replace its standalone header.
+
+---
 
 ---

@@ -158,6 +158,10 @@ fun QuizRunnerScreen(
 
                 isStarting || attempt == null -> RunnerSkeleton()
 
+                // The server refuses to start a quiz with no questions; this is
+                // only a guard so a malformed payload can never index past the end.
+                attempt.questions.isEmpty() -> RunnerSkeleton()
+
                 else -> {
                     val questions = attempt.questions
                     val safeIndex = index.coerceIn(0, (questions.size - 1).coerceAtLeast(0))
