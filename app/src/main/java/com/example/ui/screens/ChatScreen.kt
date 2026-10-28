@@ -1962,177 +1962,172 @@ private fun ChatPeerProfileScreen(
                     }
                 }
 
-                // ── level ────────────────────────────────────────────────────
-                // The same hero the EXP screen uses, so a level reads the same
-                // everywhere in the app. Hidden entirely for a student with no
-                // EXP yet rather than showing a zero.
-                profile.exp.total.takeIf { it > 0 }?.let { total ->
-                    ExpHeroCard(
-                        total = total,
-                        tier = profile.exp.tier,
-                        compact = true,
-                        modifier = Modifier
-                            .padding(horizontal = 16.dp, vertical = 6.dp)
-                            .testTag("chat_profile_exp")
+                // While the details are in flight the hero above is already
+                // real (name, photo, presence come from the directory), so the
+                // whole card stack is replaced by the app's orbit spinner in the
+                // same place — no half-filled card with empty rows.
+                if (isLoading) {
+                    ProfileLoadingState(
+                        modifier = Modifier.padding(top = 26.dp, bottom = 22.dp)
                     )
-                }
-
-                // ── ratings ──────────────────────────────────────────────────
-                PeerRatingsCard(profile.ratings)
-
-                // ── badges ───────────────────────────────────────────────────
-                if (profile.exp.total > 0) {
-                    ProfileCard(title = "Badges") {
-                        ExpBadgeLadder(
-                            total = profile.exp.total,
-                            medallionSize = 42.dp
+                } else {
+                    // ── level ────────────────────────────────────────────────────
+                    // The same hero the EXP screen uses, so a level reads the same
+                    // everywhere in the app. Hidden entirely for a student with no
+                    // EXP yet rather than showing a zero.
+                    profile.exp.total.takeIf { it > 0 }?.let { total ->
+                        ExpHeroCard(
+                            total = total,
+                            tier = profile.exp.tier,
+                            compact = true,
+                            modifier = Modifier
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .testTag("chat_profile_exp")
                         )
                     }
-                }
 
-                // ── education ────────────────────────────────────────────────
-                if (profile.hasEducation) {
-                    ProfileCard(title = "Education") {
-                        if (profile.targetExam.isNotBlank()) {
-                            ProfileInfoRow(
-                                icon = Icons.Default.MenuBook,
-                                tint = EmeraldPrimary,
-                                tintSoft = Color(0xFFE3F8EC),
-                                label = "Target exam",
-                                value = profile.targetExam
-                            )
-                        }
-                        if (profile.streamLine.isNotBlank()) {
-                            ProfileInfoRow(
-                                icon = Icons.Default.School,
-                                tint = Color(0xFF0EA5E9),
-                                tintSoft = Color(0xFFE0F2FE),
-                                label = "Stream",
-                                value = profile.streamLine
-                            )
-                        }
-                        if (profile.subjects.isNotEmpty()) {
-                            // The three subjects are what decide whether this
-                            // student can help with a specific question, so each
-                            // one gets its own line. Joined with " · " they ran
-                            // off the card and wrapped mid-subject.
-                            SubjectListRow(subjects = profile.subjects)
-                        }
-                        if (profile.medium.isNotBlank()) {
-                            ProfileInfoRow(
-                                icon = Icons.Default.Translate,
-                                tint = Color(0xFF14B8A6),
-                                tintSoft = Color(0xFFD9F7F1),
-                                label = "Medium",
-                                value = profile.medium
-                            )
-                        }
-                        if (profile.institution.isNotBlank()) {
-                            ProfileInfoRow(
-                                icon = Icons.Default.AccountBalance,
-                                tint = Color(0xFFF0A22E),
-                                tintSoft = Color(0xFFFFF1DC),
-                                label = "Institution",
-                                value = profile.institution
+                    // ── ratings ──────────────────────────────────────────────────
+                    PeerRatingsCard(profile.ratings)
+
+                    // ── badges ───────────────────────────────────────────────────
+                    if (profile.exp.total > 0) {
+                        ProfileCard(title = "Badges") {
+                            ExpBadgeLadder(
+                                total = profile.exp.total,
+                                medallionSize = 42.dp
                             )
                         }
                     }
-                }
 
-                // ── on the student app ───────────────────────────────────────
-                ProfileCard(title = "On TheStudent") {
-                    profile.joinedEpoch?.let { joined ->
-                        ProfileFactRow(
-                            icon = Icons.Default.CalendarToday,
-                            tint = Color(0xFF8B5CF6),
-                            tintSoft = Color(0xFFF1EAFE),
-                            label = "Joined",
-                            value = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
-                                .format(Date(joined * 1000))
-                        )
-                    }
-                    profile.chattingSinceEpoch?.let { since ->
-                        ProfileFactRow(
-                            icon = Icons.Default.Forum,
-                            tint = Color(0xFF14B8A6),
-                            tintSoft = Color(0xFFD9F7F1),
-                            label = "Chatting since",
-                            // On this phone only: the relay deletes messages as
-                            // soon as they are delivered.
-                            value = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
-                                .format(Date(since * 1000))
-                        )
-                    }
-                    ProfileFactRow(
-                        icon = Icons.Default.Circle,
-                        tint = if (peer.isOnline) ChatOnline else ChatFaint,
-                        tintSoft = if (peer.isOnline) Color(0xFFE3F8EC) else Color(0xFFF1F5F9),
-                        label = "Currently",
-                        value = chatPresenceLine(peer)
-                    )
-                }
-
-                // ── privacy note ─────────────────────────────────────────────
-                // White shell, mint well — the same nested-card look the app
-                // uses on the settings screen.
-                Surface(
-                    shape = RoundedCornerShape(24.dp),
-                    color = Color.White,
-                    shadowElevation = 8.dp,
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 16.dp, vertical = 6.dp)
-                ) {
-                    Surface(
-                        shape = RoundedCornerShape(18.dp),
-                        color = Color(0xFFE9F8F0),
-                        border = BorderStroke(1.dp, Color(0xFFBEE9D4)),
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(7.dp)
-                    ) {
-                        Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
-                            Icon(
-                                Icons.Default.Shield,
-                                contentDescription = null,
-                                tint = EmeraldDark,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "Only what they chose to share",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = EmeraldDark
+                    // ── education ────────────────────────────────────────────────
+                    if (profile.hasEducation) {
+                        ProfileCard(title = "Education") {
+                            if (profile.targetExam.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.MenuBook,
+                                    tint = EmeraldPrimary,
+                                    tintSoft = Color(0xFFE3F8EC),
+                                    label = "Target exam",
+                                    value = profile.targetExam
                                 )
-                                Spacer(Modifier.height(3.dp))
-                                Text(
-                                    text = "Phone numbers and e-mail addresses are never " +
-                                        "shown to other students.",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 11.5.sp,
-                                    lineHeight = 16.sp,
-                                    color = ChatMuted
+                            }
+                            if (profile.streamLine.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.School,
+                                    tint = Color(0xFF0EA5E9),
+                                    tintSoft = Color(0xFFE0F2FE),
+                                    label = "Stream",
+                                    value = profile.streamLine
+                                )
+                            }
+                            if (profile.subjects.isNotEmpty()) {
+                                // The three subjects are what decide whether this
+                                // student can help with a specific question, so each
+                                // one gets its own line. Joined with " · " they ran
+                                // off the card and wrapped mid-subject.
+                                SubjectListRow(subjects = profile.subjects)
+                            }
+                            if (profile.medium.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.Translate,
+                                    tint = Color(0xFF14B8A6),
+                                    tintSoft = Color(0xFFD9F7F1),
+                                    label = "Medium",
+                                    value = profile.medium
+                                )
+                            }
+                            if (profile.institution.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.AccountBalance,
+                                    tint = Color(0xFFF0A22E),
+                                    tintSoft = Color(0xFFFFF1DC),
+                                    label = "Institution",
+                                    value = profile.institution
                                 )
                             }
                         }
                     }
-                }
 
-                if (isLoading) {
-                    Spacer(Modifier.height(12.dp))
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.Center
-                    ) {
-                        Text(
-                            text = "Loading details…",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.5.sp,
-                            color = ChatFaint
+                    // ── on the student app ───────────────────────────────────────
+                    ProfileCard(title = "On TheStudent") {
+                        profile.joinedEpoch?.let { joined ->
+                            ProfileFactRow(
+                                icon = Icons.Default.CalendarToday,
+                                tint = Color(0xFF8B5CF6),
+                                tintSoft = Color(0xFFF1EAFE),
+                                label = "Joined",
+                                value = SimpleDateFormat("MMMM yyyy", Locale.getDefault())
+                                    .format(Date(joined * 1000))
+                            )
+                        }
+                        profile.chattingSinceEpoch?.let { since ->
+                            ProfileFactRow(
+                                icon = Icons.Default.Forum,
+                                tint = Color(0xFF14B8A6),
+                                tintSoft = Color(0xFFD9F7F1),
+                                label = "Chatting since",
+                                // On this phone only: the relay deletes messages as
+                                // soon as they are delivered.
+                                value = SimpleDateFormat("d MMM yyyy", Locale.getDefault())
+                                    .format(Date(since * 1000))
+                            )
+                        }
+                        ProfileFactRow(
+                            icon = Icons.Default.Circle,
+                            tint = if (peer.isOnline) ChatOnline else ChatFaint,
+                            tintSoft = if (peer.isOnline) Color(0xFFE3F8EC) else Color(0xFFF1F5F9),
+                            label = "Currently",
+                            value = chatPresenceLine(peer)
                         )
+                    }
+
+                    // ── privacy note ─────────────────────────────────────────────
+                    // White shell, mint well — the same nested-card look the app
+                    // uses on the settings screen.
+                    Surface(
+                        shape = RoundedCornerShape(24.dp),
+                        color = Color.White,
+                        shadowElevation = 8.dp,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(18.dp),
+                            color = Color(0xFFE9F8F0),
+                            border = BorderStroke(1.dp, Color(0xFFBEE9D4)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(7.dp)
+                        ) {
+                            Row(modifier = Modifier.padding(horizontal = 14.dp, vertical = 14.dp)) {
+                                Icon(
+                                    Icons.Default.Shield,
+                                    contentDescription = null,
+                                    tint = EmeraldDark,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(Modifier.width(12.dp))
+                                Column {
+                                    Text(
+                                        text = "Only what they chose to share",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = 13.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = EmeraldDark
+                                    )
+                                    Spacer(Modifier.height(3.dp))
+                                    Text(
+                                        text = "Phone numbers and e-mail addresses are never " +
+                                            "shown to other students.",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = 11.5.sp,
+                                        lineHeight = 16.sp,
+                                        color = ChatMuted
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }
@@ -2320,6 +2315,33 @@ private fun SubjectListRow(subjects: List<String>) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The orbit spinner, in the space where a peer's cards will appear.
+ *
+ * Reuses `OrbitLoader` — the same loader the conversation shows while it is
+ * being fetched — so a two-second wait anywhere in chat looks like one app rather
+ * than three different spinners.
+ */
+@Composable
+private fun ProfileLoadingState(modifier: Modifier = Modifier) {
+    Column(
+        horizontalAlignment = Alignment.CenterHorizontally,
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("chat_profile_loading")
+    ) {
+        OrbitLoader(size = 44.dp)
+        Spacer(Modifier.height(16.dp))
+        Text(
+            text = "Loading their profile…",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Medium,
+            color = ChatMuted
+        )
     }
 }
 
