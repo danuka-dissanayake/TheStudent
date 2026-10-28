@@ -1316,6 +1316,33 @@ switch ($action) {
         ]);
         $requestId = (int) $pdo->lastInsertId();
 
+        // The chat list draws its label from `chat_purposes`, so a question must
+        // leave a label behind for BOTH students. Without this the list only
+        // ever said "Just talking", and a Physics question looked like small talk.
+        try {
+            $purposeStmt = $pdo->prepare(
+                "INSERT INTO chat_purposes (user_id, peer_id, purpose, subject_code, subject_label)
+                 VALUES (:owner, :other, 'help', :code, :label)
+                 ON DUPLICATE KEY UPDATE purpose = 'help',
+                     subject_code = VALUES(subject_code),
+                     subject_label = VALUES(subject_label)"
+            );
+            $purposeStmt->execute([
+                'owner' => $meId,
+                'other' => $peerId,
+                'code'  => $subjectCode,
+                'label' => $subjectLabel,
+            ]);
+            $purposeStmt->execute([
+                'owner' => $peerId,
+                'other' => $meId,
+                'code'  => $subjectCode,
+                'label' => $subjectLabel,
+            ]);
+        } catch (Throwable $e) {
+            error_log('[TheStudent] help purpose label skipped: ' . $e->getMessage());
+        }
+
         $rowStmt = $pdo->prepare(ts_chat_help_select() . ' WHERE id = :id LIMIT 1');
         $rowStmt->execute(['id' => $requestId]);
         $row = $rowStmt->fetch();
@@ -1385,6 +1412,11 @@ switch ($action) {
             if ($purposeRow) {
                 $purpose = (string) $purposeRow['purpose'];
                 $purposeSubject = (string) $purposeRow['subject_label'];
+            } elseif ($row) {
+                // No label stored (an older request, or a row written before the
+                // list learned to label): the request itself is the truth.
+                $purpose = 'help';
+                $purposeSubject = (string) ($row['subject_label'] ?? '');
             }
         } catch (Throwable $e) {
             // Counts are a nicety; never fail the state read for them.

@@ -97,14 +97,21 @@ data class ChatThread(
 ) {
     val hasConversation: Boolean get() = lastMessageEpoch > 0L
 
-    /** "Question · Physics" when this chat is a help chat, else "". */
+    /**
+     * The label on the chat-list row: "Question · Physics", "Notes & papers",
+     * "Just talking"…
+     *
+     * Never blank. A row with no declared purpose is honestly "Just talking" —
+     * an empty slot made the list look unfinished, and the server now labels a
+     * question chat from the help request itself.
+     */
     val purposeLine: String
         get() = when (purpose) {
             "help" -> if (purposeSubject.isBlank()) "Question" else "Question · $purposeSubject"
             "notes" -> "Notes & papers"
             "partner" -> "Study partner"
             "talk" -> "Chatting"
-            else -> ""
+            else -> "Just talking"
         }
 }
 

@@ -33,7 +33,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
@@ -401,103 +400,27 @@ private fun FloatingHelpBubble(
         1f
     }
 
+    // Where the circle actually sits in the window. The drag needs it because
+    // the circle moves as it is dragged, so its own coordinates shift under the
+    // finger; adding this back gives the true finger position every event.
+    var bubbleOrigin by remember(state.activePeer?.id) { mutableStateOf(Offset.Zero) }
+
+    // The tap-anywhere-else catcher only exists while the card is open. Even an
+    // inert `pointerInput` is still a hit target, and a full-screen hit target
+    // sitting over the thread takes every touch away from the message list —
+    // that is what froze scrolling.
+    val dismissLayer = if (expanded) {
+        Modifier.pointerInput("dismiss") {
+            detectTapGestures(onTap = { expanded = false })
+        }
+    } else {
+        Modifier
+    }
+
     Box(
         modifier = modifier
             .onSizeChanged { containerSize = it }
-            // The gesture lives on this full-screen layer, NOT on the circle.
-            // A node that moves itself while it reads pointer positions reports
-            // the finger in a coordinate space that shifts under it, so every
-            // move was counted twice and the circle shivered. This layer never
-            // moves, so `position` is stable and the drag is exact.
-            .pointerInput(Unit) {
-                awaitEachGesture {
-                    val down = awaitFirstDown(requireUnconsumed = false)
-                    val pad = bubblePx * 0.35f
-                    val left = containerSize.width - edgePadPx - bubblePx + offsetX
-                    val top = containerSize.height - bottomPadPx - bubblePx + offsetY
-                    val onBubble = down.position.x >= left - pad &&
-                        down.position.x <= left + bubblePx + pad &&
-                        down.position.y >= top - pad &&
-                        down.position.y <= top + bubblePx + pad
-
-                    if (!onBubble) {
-                        // Not ours: let the thread scroll. But a press that ends
-                        // without scrolling closes the little card, so the sheet
-                        // behind it is never opened by accident.
-                        if (expanded) {
-                            val up = waitForUpOrCancellation()
-                            if (up != null) {
-                                up.consume()
-                                expanded = false
-                            }
-                        }
-                        return@awaitEachGesture
-                    }
-
-                    // The circle owns this touch from the first frame.
-                    snapJob?.cancel()
-                    down.consume()
-                    val startX = offsetX
-                    val startY = offsetY
-                    var dragging = false
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                        change.consume()
-
-                        val dx = change.position.x - down.position.x
-                        val dy = change.position.y - down.position.y
-                        if (!dragging &&
-                            (dx * dx + dy * dy) > viewConfiguration.touchSlop * viewConfiguration.touchSlop
-                        ) {
-                            dragging = true
-                            expanded = false
-                        }
-                        if (dragging) {
-                            // Absolute, not accumulated: the circle is exactly
-                            // where the finger is, from the first pixel past the
-                            // slop. Nothing is animated while it moves.
-                            val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
-                                .coerceAtLeast(0f)
-                            val maxUp = (containerSize.height - bubblePx - bottomPadPx - edgePadPx)
-                                .coerceAtLeast(0f)
-                            offsetX = (startX + dx).coerceIn(-maxLeft, 0f)
-                            offsetY = (startY + dy).coerceIn(-maxUp, 0f)
-                        }
-                        if (!change.pressed) break
-                    }
-                    if (!dragging) {
-                        // A press that never really moved opens the card.
-                        expanded = !expanded
-                        return@awaitEachGesture
-                    }
-                    // Chat-head behaviour: it never rests in the middle of the
-                    // conversation. On release it slides to whichever side it
-                    // was dropped nearer to, at the height it was dropped at.
-                    val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
-                        .coerceAtLeast(0f)
-                    val from = offsetX
-                    val targetX = if (from > -maxLeft / 2f) 0f else -maxLeft
-                    parkedLeft = targetX < -maxLeft / 2f
-                    if (targetX != from) {
-                        snapJob = scope.launch {
-                            val startNanos = withFrameNanos { it }
-                            while (true) {
-                                val done = withFrameNanos { now ->
-                                    // 200 ms eased out: long enough to read as a
-                                    // movement, short enough to never feel sticky.
-                                    val t = ((now - startNanos) / 200_000_000f)
-                                        .coerceIn(0f, 1f)
-                                    val eased = 1f - (1f - t) * (1f - t)
-                                    offsetX = from + (targetX - from) * eased
-                                    t >= 1f
-                                }
-                                if (done) break
-                            }
-                        }
-                    }
-                }
-            }
+            .then(dismissLayer)
     ) {
         // ── the card, anchored to the circle ───────────────────────────────
         AnimatedVisibility(
@@ -587,8 +510,83 @@ private fun FloatingHelpBubble(
                 }
                 .size(44.dp)
                 .testTag("chat_help_bubble")
-                // The gesture is handled by the overlay, so the screen reader
-                // still needs to be told this circle is a button.
+                .onGloballyPositioned { coordinates ->
+                    bubbleOrigin = coordinates.positionInRoot()
+                }
+                .pointerInput(state.activePeer?.id) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        snapJob?.cancel()
+                        down.consume()
+
+                        // Finger and circle position in *window* coordinates:
+                        // stable even though the circle itself is moving, so the
+                        // movement is measured once instead of twice.
+                        val startFinger = down.position + bubbleOrigin
+                        val startX = offsetX
+                        val startY = offsetY
+                        var dragging = false
+
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            change.consume()
+
+                            val finger = change.position + bubbleOrigin
+                            val dx = finger.x - startFinger.x
+                            val dy = finger.y - startFinger.y
+                            if (!dragging &&
+                                (dx * dx + dy * dy) >
+                                viewConfiguration.touchSlop * viewConfiguration.touchSlop
+                            ) {
+                                dragging = true
+                                expanded = false
+                            }
+                            if (dragging) {
+                                val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
+                                    .coerceAtLeast(0f)
+                                val maxUp = (containerSize.height - bubblePx - bottomPadPx - edgePadPx)
+                                    .coerceAtLeast(0f)
+                                offsetX = (startX + dx).coerceIn(-maxLeft, 0f)
+                                offsetY = (startY + dy).coerceIn(-maxUp, 0f)
+                            }
+                            if (!change.pressed) break
+                        }
+                        if (!dragging) {
+                            // A press that never really moved opens the card.
+                            expanded = !expanded
+                            return@awaitEachGesture
+                        }
+                        // Chat-head behaviour: it never rests in the middle of the
+                        // conversation. On release it slides to whichever side it
+                        // was dropped nearer to, at the height it was dropped at.
+                        val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
+                            .coerceAtLeast(0f)
+                        val from = offsetX
+                        val targetX = if (from > -maxLeft / 2f) 0f else -maxLeft
+                        parkedLeft = targetX < -maxLeft / 2f
+                        if (targetX != from) {
+                            snapJob = scope.launch {
+                                val startNanos = withFrameNanos { it }
+                                while (true) {
+                                    val done = withFrameNanos { now ->
+                                        // 200 ms eased out: long enough to read
+                                        // as a movement, short enough that it
+                                        // never feels sticky.
+                                        val t = ((now - startNanos) / 200_000_000f)
+                                            .coerceIn(0f, 1f)
+                                        val eased = 1f - (1f - t) * (1f - t)
+                                        offsetX = from + (targetX - from) * eased
+                                        t >= 1f
+                                    }
+                                    if (done) break
+                                }
+                            }
+                        }
+                    }
+                }
+                // The gesture is on the circle, so the screen reader needs to be
+                // told this circle is a button.
                 .semantics {
                     contentDescription = "Chat help"
                     onClick(label = "Open help options") {
@@ -2460,8 +2458,10 @@ private fun ChatThreadRow(
                 size = 52.dp,
                 showPresence = true,
                 ringColor = Color.White,
+                // No outer clip: it also cut the little green presence dot in
+                // half, which is why it looked out of place. The avatar clips
+                // its own picture; the ripple just gets a square bound.
                 modifier = Modifier
-                    .clip(CircleShape)
                     .clickable(onClick = onOpenProfile)
                     .testTag("chat_profile_${peer.id}")
             )
@@ -2484,6 +2484,7 @@ private fun ChatThreadRow(
                     if (thread.purposeLine.isNotBlank() && !peer.isTyping) {
                         Box(
                             modifier = Modifier
+                                .widthIn(max = 132.dp)
                                 .clip(RoundedCornerShape(50))
                                 .background(
                                     if (thread.purpose == "help") Color(0xFFE9F8F0)
@@ -2497,7 +2498,8 @@ private fun ChatThreadRow(
                                 fontSize = 9.5.sp,
                                 fontWeight = FontWeight.SemiBold,
                                 color = if (thread.purpose == "help") EmeraldDark else ChatMuted,
-                                maxLines = 1
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Spacer(Modifier.width(6.dp))
@@ -2509,7 +2511,10 @@ private fun ChatThreadRow(
                         color = if (peer.isTyping) EmeraldPrimary else ChatMuted,
                         fontWeight = if (peer.isTyping) FontWeight.SemiBold else FontWeight.Normal,
                         maxLines = 1,
-                        overflow = TextOverflow.Ellipsis
+                        overflow = TextOverflow.Ellipsis,
+                        // The label comes first, so the preview takes whatever
+                        // room is left instead of pushing the row off the edge.
+                        modifier = Modifier.weight(1f)
                     )
                 }
             }
@@ -2831,9 +2836,9 @@ private fun ChatConversationScreen(
                         size = 42.dp,
                         showPresence = true,
                         ringColor = Color.White,
-                        modifier = Modifier
-                            .clip(CircleShape)
-                            .clickable { onOpenProfile(peer) }
+                        // Unclipped for the same reason as the list row: a clip
+                        // here shaves the presence dot.
+                        modifier = Modifier.clickable { onOpenProfile(peer) }
                     )
                     Spacer(Modifier.width(10.dp))
                     Column(modifier = Modifier.weight(1f)) {
@@ -4929,10 +4934,15 @@ private fun ChatAvatar(
         }
 
         if (showPresence && peer.isOnline) {
+            // The square's bottom-right corner is outside the circle, so the dot
+            // is nudged in along the diagonal to sit on the rim with its white
+            // ring, the way a chat head does.
+            val dot = size * 0.30f
             Box(
                 modifier = Modifier
-                    .size(size * 0.30f)
                     .align(Alignment.BottomEnd)
+                    .offset(x = -(size - dot) * 0.12f, y = -(size - dot) * 0.12f)
+                    .size(dot)
                     .clip(CircleShape)
                     .background(ringColor)
                     .padding(size * 0.055f),
