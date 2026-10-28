@@ -21,9 +21,9 @@ import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
-import androidx.compose.animation.expandVertically
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.scaleOut
 import androidx.compose.animation.fadeOut
-import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.graphics.TransformOrigin
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -84,6 +85,7 @@ import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -272,15 +274,6 @@ fun ChatScreen(
 //  Help requests (intent sheet + the card in the thread)
 // ─────────────────────────────────────────────────────────────────────────────
 
-/** Purpose code -> the words shown under the student's name in a chat. */
-private fun chatPurposeLabel(purpose: String, subject: String): String = when (purpose) {
-    "help" -> if (subject.isBlank()) "Question" else "Question · $subject"
-    "notes" -> "Notes & papers"
-    "partner" -> "Study partner"
-    "talk" -> "Chatting"
-    else -> "Just talking"
-}
-
 /**
  * The floating help bubble.
  *
@@ -304,6 +297,7 @@ private fun FloatingHelpBubble(
     onOpenPurpose: () -> Unit,
     onAskForHelp: () -> Unit,
     onAskAgain: () -> Unit,
+    onAcceptHelp: () -> Unit,
     onCompleteHelp: () -> Unit,
     onCancelHelp: () -> Unit,
     modifier: Modifier = Modifier
@@ -345,12 +339,24 @@ private fun FloatingHelpBubble(
     }
 
     var expanded by remember(state.activePeer?.id) { mutableStateOf(false) }
-    var offsetX by remember(state.activePeer?.id) { mutableStateOf(0f) }
-    var offsetY by remember(state.activePeer?.id) { mutableStateOf(0f) }
+    // Primitive state, read only in the layout phase: dragging repositions the
+    // bubble without recomposing anything, which is what made it feel like it
+    // was trailing the finger.
+    var offsetX by remember(state.activePeer?.id) { mutableFloatStateOf(0f) }
+    var offsetY by remember(state.activePeer?.id) { mutableFloatStateOf(0f) }
+    // Which side the bubble is parked on. Only changes on release, so the card
+    // can sit on the inside of the screen without recomposing mid-drag.
+    var parkedLeft by remember(state.activePeer?.id) { mutableStateOf(false) }
+    var cardWidthPx by remember(state.activePeer?.id) { mutableFloatStateOf(0f) }
     var containerSize by remember { mutableStateOf(IntSize.Zero) }
+    val scope = rememberCoroutineScope()
+    // The snap-to-edge animation, so a new drag can cancel it at once instead of
+    // fighting the finger for a frame.
+    var snapJob by remember(state.activePeer?.id) { mutableStateOf<Job?>(null) }
 
     val bubblePx = with(LocalDensity.current) { 44.dp.toPx() }
     val edgePadPx = with(LocalDensity.current) { 13.dp.toPx() }
+    val gapPx = with(LocalDensity.current) { 8.dp.toPx() }
 
     // While there is something to act on the bubble breathes; idle bubbles sit
     // still so the screen is not permanently animated.
@@ -382,87 +388,167 @@ private fun FloatingHelpBubble(
                 }
             }
     ) {
-        Column(
+        // ── the card, anchored to the circle ───────────────────────────────
+        AnimatedVisibility(
+            visible = expanded,
+            // Scaled from the corner nearest the circle instead of animating
+            // the height: a height animation measures the card a little short
+            // for a frame or two, and the elevated Surface's shadow then gets
+            // squared off at the bottom corners.
+            enter = fadeIn(tween(140)) +
+                scaleIn(
+                    initialScale = 0.90f,
+                    transformOrigin = TransformOrigin(1f, 1f),
+                    animationSpec = tween(170)
+                ),
+            exit = fadeOut(tween(110)) +
+                scaleOut(
+                    targetScale = 0.90f,
+                    transformOrigin = TransformOrigin(1f, 1f),
+                    animationSpec = tween(120)
+                ),
             modifier = Modifier
                 .align(Alignment.BottomEnd)
                 .padding(end = 13.dp, bottom = 12.dp)
-                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) },
-            horizontalAlignment = Alignment.End
-        ) {
-            AnimatedVisibility(
-                visible = expanded,
-                enter = fadeIn(tween(140)) + expandVertically(),
-                exit = fadeOut(tween(120)) + shrinkVertically()
-            ) {
-                HelpBubbleCard(
-                    headline = headline,
-                    body = body,
-                    isSeeker = request?.isSeeker ?: true,
-                    status = request?.status,
-                    canAskAgain = state.helpCompletedWithPeer > 0,
-                    isBusy = state.isAskingHelp || state.isHelpBusy,
-                    onPrimary = {
-                        expanded = false
-                        when {
-                            state.questionOfferVisible -> onAskForHelp()
-                            request?.status == "accepted" && request.isSeeker -> onCompleteHelp()
-                            state.helpCompletedWithPeer > 0 -> onAskAgain()
-                            request == null -> onAskForHelp()
-                            else -> onOpenPurpose()
-                        }
-                    },
-                    onSecondary = {
-                        expanded = false
-                        when {
-                            request?.status == "accepted" && request.isSeeker -> onCancelHelp()
-                            else -> onOpenPurpose()
-                        }
+                .offset {
+                    // Sits just above the circle. When the circle is parked on
+                    // the left, the card shifts so it opens inwards instead of
+                    // hanging off the edge of the screen.
+                    val cardWidth = if (cardWidthPx > 0f) cardWidthPx else bubblePx
+                    val maxShift = (containerSize.width - edgePadPx * 2f - cardWidth)
+                        .coerceAtLeast(0f)
+                    val dx = if (parkedLeft) {
+                        (offsetX - bubblePx + cardWidth).coerceIn(-maxShift, 0f)
+                    } else {
+                        0f
                     }
-                )
-            }
+                    IntOffset(
+                        dx.roundToInt(),
+                        (-(bubblePx + gapPx) + offsetY).roundToInt()
+                    )
+                }
+        ) {
+            HelpBubbleCard(
+                headline = headline,
+                body = body,
+                isSeeker = request?.isSeeker ?: true,
+                status = request?.status,
+                canAskAgain = state.helpCompletedWithPeer > 0,
+                isBusy = state.isAskingHelp || state.isHelpBusy,
+                onPrimary = {
+                    expanded = false
+                    when {
+                        state.questionOfferVisible -> onAskForHelp()
+                        // The other student's request: accept it right here, so
+                        // the card is not a dead end pointing at another card.
+                        request?.status == "pending" && !request.isSeeker -> onAcceptHelp()
+                        request?.status == "accepted" && request.isSeeker -> onCompleteHelp()
+                        state.helpCompletedWithPeer > 0 -> onAskAgain()
+                        request == null -> onAskForHelp()
+                        else -> onOpenPurpose()
+                    }
+                },
+                onSecondary = {
+                    expanded = false
+                    when {
+                        // Both a waiting and an accepted request can be cancelled
+                        // by the student who asked — this is the button that used
+                        // to do nothing.
+                        request != null && request.isSeeker &&
+                            (request.status == "pending" || request.status == "accepted") ->
+                            onCancelHelp()
+                        else -> onOpenPurpose()
+                    }
+                },
+                modifier = Modifier.onSizeChanged { cardWidthPx = it.width.toFloat() }
+            )
+        }
 
-            Spacer(Modifier.height(8.dp))
+        // ── the circle itself ───────────────────────────────────────────────
+        Box(
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .padding(end = 13.dp, bottom = 12.dp)
+                .offset { IntOffset(offsetX.roundToInt(), offsetY.roundToInt()) }
+                .graphicsLayer {
+                    // Draw-phase read: the breathing animation never recomposes,
+                    // so it cannot fight the drag.
+                    scaleX = pulse
+                    scaleY = pulse
+                }
+                .size(44.dp)
+                .testTag("chat_help_bubble")
+                .pointerInput(state.activePeer?.id, containerSize) {
+                    awaitEachGesture {
+                        // The circle owns this touch from the first frame: a drag
+                        // must never scroll the thread, and a tap must never reach
+                        // the "tap outside to dismiss" layer behind it.
+                        val down = awaitFirstDown(requireUnconsumed = false)
+                        snapJob?.cancel()
+                        down.consume()
+                        val startX = offsetX
+                        val startY = offsetY
+                        var dragging = false
+                        while (true) {
+                            val event = awaitPointerEvent()
+                            val change = event.changes.firstOrNull { it.id == down.id } ?: break
+                            change.consume()
 
-            // ── the circle itself ───────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .graphicsLayer(scaleX = pulse, scaleY = pulse)
-                    .size(44.dp)
-                    .testTag("chat_help_bubble")
-                    .pointerInput(state.activePeer?.id, containerSize) {
-                        awaitEachGesture {
-                            val down = awaitFirstDown(requireUnconsumed = false)
-                            var previous = down.position
-                            var travelled = 0f
-                            var dragging = false
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                val change = event.changes.firstOrNull { it.id == down.id } ?: break
-                                if (!change.pressed) break
-                                val delta = change.position - previous
-                                previous = change.position
-                                travelled += delta.getDistance()
-
-                                if (!dragging && travelled > viewConfiguration.touchSlop) {
-                                    dragging = true
-                                    expanded = false
-                                }
-                                if (dragging) {
-                                    change.consume()
-                                    // Keep the whole circle on screen: the
-                                    // container is the message area, and the
-                                    // column is anchored bottom-end.
-                                    val maxLeft = containerSize.width - bubblePx - edgePadPx
-                                    val maxUp = containerSize.height - bubblePx - edgePadPx
-                                    offsetX = (offsetX + delta.x).coerceIn(-maxLeft, 0f)
-                                    offsetY = (offsetY + delta.y).coerceIn(-maxUp, 0f)
+                            val dx = change.position.x - down.position.x
+                            val dy = change.position.y - down.position.y
+                            if (!dragging &&
+                                (dx * dx + dy * dy) > viewConfiguration.touchSlop * viewConfiguration.touchSlop
+                            ) {
+                                dragging = true
+                                expanded = false
+                            }
+                            if (dragging) {
+                                // Absolute, not accumulated: the circle is
+                                // always exactly where the finger is, including
+                                // the moment it starts moving. Nothing is
+                                // animated while it moves.
+                                val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
+                                    .coerceAtLeast(0f)
+                                val maxUp = (containerSize.height - bubblePx - edgePadPx * 2f)
+                                    .coerceAtLeast(0f)
+                                offsetX = (startX + dx).coerceIn(-maxLeft, 0f)
+                                offsetY = (startY + dy).coerceIn(-maxUp, 0f)
+                            }
+                            if (!change.pressed) break
+                        }
+                        if (!dragging) {
+                            // A press that never really moved opens the card.
+                            expanded = !expanded
+                            return@awaitEachGesture
+                        }
+                        // Chat-head behaviour: it never rests in the middle of the
+                        // conversation. On release it slides to whichever side it
+                        // was dropped nearer to, at the height it was dropped at.
+                        val maxLeft = (containerSize.width - bubblePx - edgePadPx * 2f)
+                            .coerceAtLeast(0f)
+                        val from = offsetX
+                        val targetX = if (from > -maxLeft / 2f) 0f else -maxLeft
+                        parkedLeft = targetX < -maxLeft / 2f
+                        if (targetX != from) {
+                            snapJob = scope.launch {
+                                val startNanos = withFrameNanos { it }
+                                while (true) {
+                                    val done = withFrameNanos { now ->
+                                        // 200 ms eased out: long enough to read
+                                        // as a movement, short enough that it
+                                        // never feels sticky.
+                                        val t = ((now - startNanos) / 200_000_000f)
+                                            .coerceIn(0f, 1f)
+                                        val eased = 1f - (1f - t) * (1f - t)
+                                        offsetX = from + (targetX - from) * eased
+                                        t >= 1f
+                                    }
+                                    if (done) break
                                 }
                             }
-                            // A tap is a press that never really moved: that is
-                            // what opens the card, so dragging can never do it.
-                            if (!dragging) expanded = !expanded
                         }
-                    },
+                    }
+                },
                 contentAlignment = Alignment.Center
             ) {
                 Box(
@@ -515,7 +601,6 @@ private fun FloatingHelpBubble(
             }
         }
     }
-}
 
 /** The compact card that opens above the bubble. Two actions at most. */
 @Composable
@@ -527,10 +612,11 @@ private fun HelpBubbleCard(
     canAskAgain: Boolean,
     isBusy: Boolean,
     onPrimary: () -> Unit,
-    onSecondary: () -> Unit
+    onSecondary: () -> Unit,
+    modifier: Modifier = Modifier
 ) {
     val primaryLabel = when {
-        status == "pending" && !isSeeker -> "Open"
+        status == "pending" && !isSeeker -> "I can help"
         status == "pending" -> "Change"
         status == "accepted" && isSeeker -> "This helped — close"
         status == "accepted" -> "Open chat"
@@ -538,7 +624,10 @@ private fun HelpBubbleCard(
         else -> "Ask for help"
     }
     val secondaryLabel = when {
-        status == "accepted" && isSeeker -> "Cancel"
+        // Cancel is reachable from the bubble too — that was the button that
+        // looked dead when it lived only inside the thread card.
+        status == "pending" && isSeeker -> "Cancel request"
+        status == "accepted" && isSeeker -> "Cancel request"
         else -> "What's this chat?"
     }
 
@@ -546,7 +635,7 @@ private fun HelpBubbleCard(
         shape = RoundedCornerShape(20.dp),
         color = Color.White,
         shadowElevation = 12.dp,
-        modifier = Modifier
+        modifier = modifier
             .widthIn(max = 250.dp)
             .testTag("chat_help_bubble_card")
     ) {
@@ -614,58 +703,6 @@ private fun HelpBubbleCard(
                 }
             }
         }
-    }
-}
-
-/**
- * Small tappable line under the student's name in the conversation header.
- *
- * This is the *home* of the conversation purpose: always visible, always
- * changeable, and it is what replaces the old blocking sheet. A student can see
- * what this chat is and fix it in one tap without ever being interrupted while
- * typing.
- */
-@Composable
-private fun ChatPurposeChip(
-    purpose: String,
-    subject: String,
-    onClick: () -> Unit
-) {
-    val isHelp = purpose == "help"
-    Row(
-        modifier = Modifier
-            .clip(RoundedCornerShape(50))
-            .background(
-                if (isHelp) Color(0xFFE9F8F0) else Color(0xFFF1F5F9)
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 8.dp, vertical = 3.dp)
-            .testTag("chat_purpose_chip"),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        Icon(
-            imageVector = if (isHelp) Icons.Default.Forum else Icons.Default.Edit,
-            contentDescription = null,
-            tint = if (isHelp) EmeraldDark else ChatMuted,
-            modifier = Modifier.size(11.dp)
-        )
-        Spacer(Modifier.width(4.dp))
-        Text(
-            text = chatPurposeLabel(purpose, subject),
-            fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
-            fontWeight = FontWeight.SemiBold,
-            color = if (isHelp) EmeraldDark else ChatMuted,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis
-        )
-        Spacer(Modifier.width(2.dp))
-        Icon(
-            Icons.Default.KeyboardArrowDown,
-            contentDescription = null,
-            tint = if (isHelp) EmeraldDark else ChatFaint,
-            modifier = Modifier.size(12.dp)
-        )
     }
 }
 
@@ -2504,31 +2541,23 @@ private fun ChatConversationScreen(
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Text(
-                                text = peer.presenceLabel,
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Medium,
-                                color = when {
-                                    peer.isTyping -> EmeraldPrimary
-                                    peer.isOnline -> ChatOnline
-                                    else -> ChatMuted
-                                },
-                                maxLines = 1,
-                                // Shrink the presence text before the purpose chip:
-                                // the label is the thing that must stay readable.
-                                modifier = Modifier.weight(1f, fill = false)
-                            )
-                            Spacer(Modifier.width(6.dp))
-                            // The purpose lives here, one tap away, for the whole
-                            // life of the conversation — no gate before typing.
-                            ChatPurposeChip(
-                                purpose = state.chatPurpose,
-                                subject = state.chatPurposeSubject,
-                                onClick = onOpenIntent
-                            )
-                        }
+                        // Presence only. The purpose label used to sit beside it
+                        // and pushed the row into two lines, hiding "last seen"
+                        // behind the name block. It now lives in the ⋯ menu and
+                        // on the floating bubble, where there is room for it.
+                        Text(
+                            text = peer.presenceLabel,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = when {
+                                peer.isTyping -> EmeraldPrimary
+                                peer.isOnline -> ChatOnline
+                                else -> ChatMuted
+                            },
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
 
                     Surface(
@@ -2584,6 +2613,28 @@ private fun ChatConversationScreen(
                                         Icons.Default.Forum,
                                         contentDescription = null,
                                         tint = EmeraldDark
+                                    )
+                                },
+                                onClick = {
+                                    showMenu = false
+                                    // Straight to a request: no sheet, no subject
+                                    // field. "Ask for help" and "what's this chat
+                                    // about" are different questions.
+                                    onAskAgain()
+                                }
+                            )
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        "What's this chat about?",
+                                        fontFamily = MaisonNeueFontFamily
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        Icons.Default.Edit,
+                                        contentDescription = null,
+                                        tint = ChatMuted
                                     )
                                 },
                                 onClick = {
@@ -2869,6 +2920,7 @@ private fun ChatConversationScreen(
                             onOpenPurpose = onOpenIntent,
                             onAskForHelp = onTrackQuestion,
                             onAskAgain = onAskAgain,
+                            onAcceptHelp = onAcceptHelp,
                             onCompleteHelp = onCompleteHelp,
                             onCancelHelp = onCancelHelp,
                             modifier = Modifier.fillMaxSize()

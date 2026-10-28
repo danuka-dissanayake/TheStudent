@@ -1304,12 +1304,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /** Either side withdraws the request. */
     fun cancelHelpRequest() {
         val request = _chatState.value.helpRequest ?: return
-        updateHelp("help_cancel", request.id)
+        if (_chatState.value.isHelpBusy) return
+        // Optimistic: the student tapped cancel, so the card must go NOW. The
+        // old version waited for the round trip, and when that request failed
+        // quietly the button looked like it did nothing at all.
+        _chatState.update { it.copy(helpRequest = null) }
+        updateHelp("help_cancel", request.id, restoreOnFailure = request)
     }
 
-    private fun updateHelp(action: String, requestId: Long) {
+    private fun updateHelp(
+        action: String,
+        requestId: Long,
+        restoreOnFailure: ChatHelpRequest? = null
+    ) {
         if (_chatState.value.isHelpBusy) return
-        val session = chatSession() ?: return
+        val session = chatSession() ?: run {
+            if (restoreOnFailure != null) {
+                _chatState.update { it.copy(helpRequest = restoreOnFailure) }
+            }
+            return
+        }
         viewModelScope.launch {
             val (baseUrl, token) = session
             _chatState.update { it.copy(isHelpBusy = true) }
@@ -1319,8 +1333,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     _chatState.update {
                         it.copy(
                             isHelpBusy = false,
-                            helpRequest = result.data ?: it.helpRequest
+                            // A cancelled request leaves the screen instead of
+                            // turning into a grey card nobody can act on.
+                            helpRequest = if (action == "help_cancel") null
+                            else result.data ?: it.helpRequest
                         )
+                    }
+                    if (action == "help_cancel") {
+                        _uiState.update { it.copy(snackbarMessage = "Request cancelled") }
                     }
                     if (action == "help_close") {
                         _uiState.update {
@@ -1329,9 +1349,22 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     }
                 }
                 is ChatResult.Failure -> {
-                    _chatState.update { it.copy(isHelpBusy = false) }
-                    if (!result.isNetworkFailure) {
-                        _uiState.update { it.copy(snackbarMessage = chatFailureMessage(result.message)) }
+                    _chatState.update {
+                        it.copy(
+                            isHelpBusy = false,
+                            // Put the card back: the cancel never reached the
+                            // server, so pretending it vanished would be a lie.
+                            helpRequest = restoreOnFailure ?: it.helpRequest
+                        )
+                    }
+                    _uiState.update {
+                        it.copy(
+                            snackbarMessage = if (result.isNetworkFailure) {
+                                "You're offline — the request is still active."
+                            } else {
+                                chatFailureMessage(result.message)
+                            }
+                        )
                     }
                 }
             }
