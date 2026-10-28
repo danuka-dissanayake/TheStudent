@@ -225,7 +225,6 @@ object CourseCatalog {
                 "project. The widest single foundation in computing you can get for nothing.",
             skills = listOf("C", "Python", "SQL", "Algorithms"),
             videoId = "rfscVS0vtbw",
-            featured = true
         ),
         CatalogCourse(
             id = "cs50p",
@@ -275,7 +274,6 @@ object CourseCatalog {
                 "front-end libraries, data analysis and machine learning.",
             skills = listOf("HTML", "CSS", "Accessibility", "Projects"),
             videoId = "bMknfKXIFA8",
-            featured = true
         ),
         CatalogCourse(
             id = "fcc-js",
@@ -343,7 +341,6 @@ object CourseCatalog {
                 "and 35 lectures, all free.",
             skills = listOf("Linear algebra", "Eigenvalues", "SVD"),
             videoId = "ZK3O402wf1c",
-            featured = true
         ),
         CatalogCourse(
             id = "essence-calculus",
@@ -462,7 +459,6 @@ object CourseCatalog {
                 "still the best advice given on the subject.",
             skills = listOf("Presenting", "Structure", "Q&A"),
             videoId = "Unzc731iCUY",
-            featured = true
         ),
 
         // ── Business, careers & industry certificates ───────────────────────
@@ -607,6 +603,231 @@ object CourseCatalog {
             summary = "Guided paths for Azure, Power BI, security and data engineering, with " +
                 "free sandboxes. The exams cost money, but everything up to them does not.",
             skills = listOf("Azure", "Power BI", "Security")
+        ),
+
+        // ── More from Moratuwa ──────────────────────────────────────────────
+        CatalogCourse(
+            id = "uom-python-programmer",
+            title = "Python Programmer — career path",
+            provider = "University of Moratuwa",
+            url = "https://open.uom.lk/python-programmer.html",
+            subject = "Programming",
+            stages = listOf("A/L", "Undergraduate"),
+            level = "Beginner",
+            hours = 120,
+            certificate = CatalogCertificate.FREE,
+            priceNote = "Free, with certificates from the University of Moratuwa.",
+            summary = "The structured route from the Python for Beginners module to " +
+                "scripting, data handling and a first portfolio — laid out as a career path " +
+                "rather than a pile of videos.",
+            skills = listOf("Python", "Scripting", "Data handling"),
+            local = true
+        ),
+        CatalogCourse(
+            id = "uom-data-scientist",
+            title = "Data Scientist — career path",
+            provider = "University of Moratuwa",
+            url = "https://open.uom.lk/data-scientist.html",
+            subject = "Data Science",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Intermediate",
+            hours = 200,
+            certificate = CatalogCertificate.FREE,
+            priceNote = "Free, with certificates from the University of Moratuwa.",
+            summary = "Statistics, Python, SQL and machine learning in one sequence, built by " +
+                "UoM academics with industry input. The most complete free data path aimed at " +
+                "Sri Lankan students.",
+            skills = listOf("Statistics", "Pandas", "SQL", "ML"),
+            local = true
+        ),
+        CatalogCourse(
+            id = "uom-mobile-developer",
+            title = "Mobile Developer — career path",
+            provider = "University of Moratuwa",
+            url = "https://open.uom.lk/mobile-developer.html",
+            subject = "Mobile Development",
+            stages = listOf("Undergraduate"),
+            level = "Beginner",
+            hours = 120,
+            certificate = CatalogCertificate.FREE,
+            priceNote = "Free, with certificates from the University of Moratuwa.",
+            summary = "Android and cross-platform fundamentals: layouts, state, HTTP and " +
+                "publishing — the skills a first app on the Play Store actually needs.",
+            skills = listOf("Android", "Kotlin", "APIs"),
+            local = true
+        ),
+
+        // ── Computer science, continued ─────────────────────────────────────
+        CatalogCourse(
+            id = "cs50w",
+            title = "CS50W — Web Programming with Python and JavaScript",
+            provider = "edX",
+            url = "https://cs50.harvard.edu/web/",
+            subject = "Web Development",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Intermediate",
+            hours = 80,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "Free to follow on cs50.harvard.edu; the edX certificate is paid.",
+            summary = "Django, SQL models, JavaScript and Git — then a final project of your " +
+                "own. Assumes CS50x or a year of programming.",
+            skills = listOf("Django", "SQL", "JavaScript", "Git"),
+            featured = true
+        ),
+        CatalogCourse(
+            id = "cs50sql",
+            title = "CS50SQL — Introduction to Databases with SQL",
+            provider = "edX",
+            url = "https://cs50.harvard.edu/sql/",
+            subject = "Databases",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 50,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "Free to follow on cs50.harvard.edu; the edX certificate is paid.",
+            summary = "Relational modelling, queries, indexes, transactions and NoSQL, with " +
+                "problem sets against real SQLite and PostgreSQL databases.",
+            skills = listOf("SQL", "Modelling", "PostgreSQL")
+        ),
+        CatalogCourse(
+            id = "mit-6006",
+            title = "6.006 Introduction to Algorithms (full lectures)",
+            provider = "MIT OpenCourseWare",
+            url = "https://ocw.mit.edu/courses/6-006-introduction-to-algorithms-spring-2020/",
+            subject = "Computer Science",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Advanced",
+            hours = 40,
+            certificate = CatalogCertificate.NONE,
+            priceNote = "Free and open; MIT OCW issues no certificates.",
+            summary = "Data structures and algorithm analysis taught properly: hashing, trees, " +
+                "graphs, shortest paths and dynamic programming, with problem sets and exams.",
+            skills = listOf("Algorithms", "Data structures", "Complexity"),
+            featured = true
+        ),
+        CatalogCourse(
+            id = "fcc-data-analysis",
+            title = "freeCodeCamp — Data Analysis with Python certification",
+            provider = "freeCodeCamp",
+            url = "https://www.freecodecamp.org/learn/data-analysis-with-python/",
+            subject = "Data Science",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Intermediate",
+            hours = 60,
+            certificate = CatalogCertificate.FREE,
+            priceNote = "Free, including the certification.",
+            summary = "NumPy, Pandas, Matplotlib and Seaborn, ending in five projects and a " +
+                "verifiable certificate. The practical half of a data analysis module.",
+            skills = listOf("NumPy", "Pandas", "Visualisation")
+        ),
+
+        // ── Careers, industry certificates, statistics ──────────────────────
+        CatalogCourse(
+            id = "google-data-analytics",
+            title = "Google Data Analytics Professional Certificate",
+            provider = "Coursera",
+            url = "https://www.coursera.org/professional-certificates/google-data-analytics",
+            subject = "Data Science",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 180,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "Monthly subscription, or free through Coursera financial aid.",
+            summary = "Eight courses from spreadsheets to R and SQL, with a portfolio case " +
+                "study at the end. The programme most often named in data job adverts.",
+            skills = listOf("Spreadsheets", "SQL", "R", "Tableau"),
+            featured = true
+        ),
+        CatalogCourse(
+            id = "google-project-management",
+            title = "Google Project Management Professional Certificate",
+            provider = "Coursera",
+            url = "https://www.coursera.org/professional-certificates/google-project-management",
+            subject = "Management",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 150,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "Monthly subscription, or free through Coursera financial aid.",
+            summary = "Agile and waterfall from the inside: charters, schedules, risk registers " +
+                "and stakeholder updates, taught on the tools teams actually use.",
+            skills = listOf("Agile", "Scheduling", "Risk")
+        ),
+        CatalogCourse(
+            id = "ibm-data-science",
+            title = "IBM Data Science Professional Certificate",
+            provider = "Coursera",
+            url = "https://www.coursera.org/professional-certificates/ibm-data-science",
+            subject = "Data Science",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 160,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "Monthly subscription, or free through Coursera financial aid.",
+            summary = "Python, SQL, Jupyter and machine learning, finished with a capstone " +
+                "project on a real dataset and an IBM badge.",
+            skills = listOf("Python", "Jupyter", "Machine learning")
+        ),
+        CatalogCourse(
+            id = "kaggle-ml",
+            title = "Kaggle Learn — Intro to Machine Learning",
+            provider = "Kaggle",
+            url = "https://www.kaggle.com/learn/intro-to-machine-learning",
+            subject = "Artificial Intelligence",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 6,
+            certificate = CatalogCertificate.NONE,
+            priceNote = "Free; Kaggle awards skill badges, not certificates.",
+            summary = "Three hours of video and hands-on exercises that get you from a CSV to " +
+                "a submitted model on a live leaderboard. The fastest way to demystify ML.",
+            skills = listOf("scikit-learn", "Validation", "Features")
+        ),
+        CatalogCourse(
+            id = "cisco-cybersecurity",
+            title = "Cisco — Introduction to Cybersecurity",
+            provider = "Cisco Networking Academy",
+            url = "https://www.netacad.com/courses/cybersecurity/introduction-cybersecurity",
+            subject = "Cybersecurity",
+            stages = listOf("A/L", "Undergraduate"),
+            level = "Beginner",
+            hours = 15,
+            certificate = CatalogCertificate.FREE,
+            priceNote = "Free, with a free digital badge from Cisco Networking Academy.",
+            summary = "Threats, vulnerabilities, cryptography and the roles that defend them — " +
+                "an honest picture of the field before you commit a degree to it.",
+            skills = listOf("Threats", "Cryptography", "Security roles")
+        ),
+        CatalogCourse(
+            id = "khan-statistics",
+            title = "Statistics and probability",
+            provider = "Khan Academy",
+            url = "https://www.khanacademy.org/math/statistics-probability",
+            subject = "Statistics",
+            stages = listOf("A/L", "Undergraduate"),
+            level = "Beginner",
+            hours = 25,
+            certificate = CatalogCertificate.NONE,
+            priceNote = "Free forever; no certificates.",
+            summary = "Distributions, sampling, confidence intervals and hypothesis testing, " +
+                "with unlimited practice. The foundation every research methods module assumes " +
+                "you already have.",
+            skills = listOf("Distributions", "Hypothesis testing", "Regression")
+        ),
+        CatalogCourse(
+            id = "ms-azure-fundamentals",
+            title = "Microsoft Learn — Azure fundamentals path",
+            provider = "Microsoft Learn",
+            url = "https://learn.microsoft.com/training/azure/",
+            subject = "Cloud Computing",
+            stages = listOf("Undergraduate", "Postgraduate"),
+            level = "Beginner",
+            hours = 20,
+            certificate = CatalogCertificate.PAID,
+            priceNote = "All training is free; the AZ-900 exam is paid.",
+            summary = "Cloud concepts, core Azure services, pricing and governance — the " +
+                "vocabulary half of any cloud interview, free up to the exam.",
+            skills = listOf("Azure", "Governance", "Pricing")
         )
     )
 

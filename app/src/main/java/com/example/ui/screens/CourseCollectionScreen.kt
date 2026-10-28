@@ -71,8 +71,10 @@ import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -80,6 +82,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -132,6 +135,8 @@ private object CT {
     val bodyHeight: TextUnit = 19.sp
     val metaHeight: TextUnit = 17.sp
 }
+
+private const val PAGE_SIZE = 15
 
 private val STAGES = listOf("A/L", "Undergraduate", "Postgraduate")
 private val LEVELS = listOf("Beginner", "Intermediate", "Advanced")
@@ -218,6 +223,7 @@ private fun CourseCatalogBrowse(
     var sheetOpen by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
+    val scope = rememberCoroutineScope()
     val featured = remember { CourseCatalog.courses.filter { it.featured } }
     val activeFilters = listOfNotNull(
         certificate?.short,
@@ -271,13 +277,32 @@ private fun CourseCatalogBrowse(
         }
     }
 
+    // ── pagination ──────────────────────────────────────────────────────────
+    // 15 at a time. A single list of 40 cards made the screen very tall for no
+    // benefit; the first page now ends just past the second screenful.
+    var page by remember { mutableIntStateOf(0) }
+    val pageCount = ((visible.size + PAGE_SIZE - 1) / PAGE_SIZE).coerceAtLeast(1)
+    val safePage = page.coerceIn(0, pageCount - 1)
+    val pageStart = safePage * PAGE_SIZE
+    val pageItems = remember(visible, safePage) {
+        visible.drop(pageStart).take(PAGE_SIZE)
+    }
+
     // A filter changes what is above the list, so the old scroll offset can land
-    // the student at the bottom of a much shorter page: go back to the top.
+    // the student at the bottom of a much shorter page: go back to the top, and
+    // back to the first page of results.
     LaunchedEffect(filterKey) {
+        page = 0
         if (listState.firstVisibleItemIndex > 0) {
             listState.animateScrollToItem(0)
         }
     }
+
+    // Mirrors the item order below: search, filter row, then (when nothing is
+    // filtered) the three rails, then the results heading.
+    val resultsHeadingIndex = 2 +
+        (if (!filtering && featured.isNotEmpty()) 1 else 0) +
+        (if (!filtering) 2 else 0)
 
     val clearAll: () -> Unit = {
         query = ""
@@ -437,9 +462,27 @@ private fun CourseCatalogBrowse(
                         NoCoursesState(onClear = clearAll)
                     }
                 } else {
-                    items(visible, key = { it.id }) { course ->
+                    items(pageItems, key = { it.id }) { course ->
                         CourseRow(course = course, onClick = { onOpenCourse(course) })
                         Spacer(Modifier.height(8.dp))
+                    }
+
+                    item(key = "pager") {
+                        CoursePager(
+                            page = safePage,
+                            pageCount = pageCount,
+                            shown = pageItems.size,
+                            total = visible.size,
+                            firstIndex = pageStart + 1,
+                            onPage = { target ->
+                                page = target
+                            },
+                            onJumpToResults = {
+                                scope.launch {
+                                    listState.animateScrollToItem(resultsHeadingIndex)
+                                }
+                            }
+                        )
                     }
                 }
 
@@ -1528,6 +1571,126 @@ private fun CertificateBadge(certificate: CatalogCertificate) {
     }
 }
 
+/**
+ * Page controls under the results.
+ *
+ * Numbered rather than infinite scroll on purpose: the count is small, a student
+ * wants to know how much is left, and "15 at a time" keeps the page short. The
+ * row also says exactly which slice is on screen ("16–30 of 41").
+ */
+@Composable
+private fun CoursePager(
+    page: Int,
+    pageCount: Int,
+    shown: Int,
+    total: Int,
+    firstIndex: Int,
+    onPage: (Int) -> Unit,
+    onJumpToResults: () -> Unit
+) {
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(top = 6.dp)
+            .testTag("courses_pager")
+    ) {
+        Text(
+            text = "Showing $firstIndex–${firstIndex + shown - 1} of $total",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = CT.micro,
+            color = CcMuted,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 10.dp),
+            textAlign = androidx.compose.ui.text.style.TextAlign.Center
+        )
+
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.Center,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            PagerArrow(
+                label = "Prev",
+                enabled = page > 0,
+                tag = "courses_page_prev",
+                onClick = {
+                    onPage(page - 1)
+                    onJumpToResults()
+                }
+            )
+            Spacer(Modifier.width(8.dp))
+            (0 until pageCount).forEach { index ->
+                val selected = index == page
+                Surface(
+                    onClick = {
+                        if (!selected) {
+                            onPage(index)
+                            onJumpToResults()
+                        }
+                    },
+                    shape = CircleShape,
+                    color = if (selected) CcInk else Color.White,
+                    border = BorderStroke(1.dp, if (selected) CcInk else CcHairline),
+                    modifier = Modifier
+                        .padding(horizontal = 3.dp)
+                        .size(34.dp)
+                        .testTag("courses_page_${index + 1}")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = "${index + 1}",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = CT.meta,
+                            fontWeight = FontWeight.Bold,
+                            color = if (selected) Color.White else CcMuted
+                        )
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            PagerArrow(
+                label = "Next",
+                enabled = page < pageCount - 1,
+                tag = "courses_page_next",
+                onClick = {
+                    onPage(page + 1)
+                    onJumpToResults()
+                }
+            )
+        }
+    }
+}
+
+@Composable
+private fun PagerArrow(
+    label: String,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        onClick = { if (enabled) onClick() },
+        shape = RoundedCornerShape(50),
+        color = Color.White,
+        border = BorderStroke(1.dp, CcHairline),
+        modifier = Modifier
+            .height(34.dp)
+            .testTag(tag)
+    ) {
+        Box(contentAlignment = Alignment.Center) {
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = CT.micro,
+                fontWeight = FontWeight.Bold,
+                color = if (enabled) CcInk else CcFaint,
+                modifier = Modifier.padding(horizontal = 13.dp)
+            )
+        }
+    }
+}
+
 @Composable
 private fun NoCoursesState(onClear: () -> Unit) {
     Column(
@@ -2196,6 +2359,17 @@ private fun YouTubePlayerOverlay(
         modifier = Modifier
             .fillMaxSize()
             .background(Color(0xF20B1220))
+            // Swallow everything that is not meant for the card. Compose hit-tests
+            // siblings from the top down and stops at the first one that takes the
+            // gesture, so with this the catalogue behind cannot scroll, cannot
+            // fling, and cannot open another course while a video is playing.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        awaitPointerEvent().changes.forEach { it.consume() }
+                    }
+                }
+            }
             .testTag("course_video_overlay"),
         contentAlignment = Alignment.Center
     ) {

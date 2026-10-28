@@ -64,7 +64,7 @@ still credits the name, so a typo can never silently drop the credit.
 
 ## 3. What is in it now
 
-28 courses across 16 providers, chosen for three audiences:
+42 courses across 16 providers, chosen for three audiences:
 
 - **Sri Lanka** — University of Moratuwa Open Learning (Python for Beginners,
   Web Design for Beginners, Project Management, the six-module Trainee Full
@@ -77,6 +77,13 @@ still credits the name, so a typo can never silently drop the credit.
 
 Plus business/career: IBM SkillsBuild, Google Skillshop, HP LIFE, Alison, and
 the OpenLearn business-writing course.
+
+Second wave (2026-10-29): Moratuwa's Python Programmer, Data Scientist and Mobile
+Developer career paths; CS50W and CS50SQL; MIT 6.006 algorithms; freeCodeCamp's
+Data Analysis with Python certification; Google Data Analytics and Google Project
+Management; IBM Data Science; Kaggle's Intro to Machine Learning; Cisco's
+Introduction to Cybersecurity; Khan Academy statistics; Microsoft's Azure
+fundamentals path.
 
 Ten videos, all **verified against YouTube's oEmbed endpoint** before shipping,
 so an embed cannot 404: three MIT lectures, two 3Blue1Brown explainers, five
@@ -107,8 +114,10 @@ Sections, top to bottom:
 5. **Watch first** — YouTube rail: real thumbnails, runtime badge, channel name;
 6. **Where these come from** — provider tiles with their own logo, name, kind
    and course count; tapping one filters the list;
-7. the list — course cards with subject, title, "Provided by …", certificate
-   pill, level and hours;
+7. the results — **15 courses per page**, with a numbered pager underneath
+   ("Showing 16–30 of 42", Prev / 1 2 3 / Next). The pager scrolls back to the
+   results heading when it changes page, and any filter resets to page 1. Tags:
+   `courses_pager`, `courses_page_1…n`, `courses_page_prev`, `courses_page_next`;
 8. the credit block.
 
 ### Filters, pulled up from the bottom
@@ -204,6 +213,10 @@ things cause exactly that, and all three are now handled:
 | something **clips** the `WebView`, forcing it into an offscreen layer | no `clip()` above it; the card's corners are a rounded *background*, not a clip |
 | the app has no **hardware acceleration** (sound plays, picture is blank) | `android:hardwareAccelerated="true"` on `<application>`, plus `setLayerType(LAYER_TYPE_HARDWARE)` on the WebView |
 
+The overlay **swallows every gesture** through a `pointerInput` consumer, so the
+catalogue behind it cannot scroll, fling or open another course while a video is
+playing — Compose hit-tests siblings top-down and stops at the first taker.
+
 The player shows a spinner until `onPageFinished` and, if the *main frame* fails
 to load, swaps to the thumbnail with an **Open in YouTube** button — never an
 empty black rectangle. `onRelease` stops the load, blanks the page and destroys
@@ -279,3 +292,5 @@ mark is for; it is never used as TheStudent's own branding.
 | Video *still* white, with sound and controls | **the web core's video view was never attached** — Chromium hands it back through `WebChromeClient.onShowCustomView`, and if nobody adds it to the hierarchy the page keeps rendering over a blank rectangle | the WebView lives in a `FrameLayout` host that attaches the custom view on `onShowCustomView` and removes it on `onHideCustomView` (also gives fullscreen for free) |
 | — | `android:hardwareAccelerated="true"` on `<application>` kept, so the window can composite video at all | an explicit `WebView.setLayerType(LAYER_TYPE_HARDWARE)` was removed again: on some Samsung builds it decouples the compositing layer and produces a solid black screen |
 | Detail skeleton vanished twice | both player rewrites replaced the *end* of the file, where it lived | moved above the player section, with a note saying why |
+| Background scrolled under the video card | the overlay drew on top but took no gestures | the overlay consumes pointer events, so nothing behind receives them |
+| List of 40+ cards made the page very tall | every course rendered at once | 15 per page with a numbered pager, and filters reset to page 1 |
