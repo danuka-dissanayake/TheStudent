@@ -142,6 +142,12 @@ plus a local Room table that owns the actual history.
   transaction; the app owns the catalog (`AcademicCatalog`), the server owns
   the shape (exactly 3 distinct subjects, one per O/L bucket, sane year).
   Matching must JOIN `user_subjects`, never `LIKE` on the free text.
+* **Help requests are the only path to a rating.** `chat_help_requests`:
+  pending → accepted → completed (or cancelled / expired). The helper accepts,
+  **only the seeker can close** (they are the only person who knows whether the
+  question was answered), both may cancel, and closing is refused inside 10
+  minutes of acceptance so two friends cannot farm it. One open request per
+  pair, 5 per seeker per day, pending expires after 72 h.
 * `action=profile` returns an allow-list only (name, photo, target exam, stream,
   institution, presence, joined month). Nothing account-identifying is in the
   SELECT at all, so the chat profile screen cannot leak contact details.

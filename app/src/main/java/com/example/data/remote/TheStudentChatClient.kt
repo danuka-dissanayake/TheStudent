@@ -5,6 +5,7 @@ import android.util.Log
 import com.example.data.local.ChatCrypto
 import com.example.data.model.ChatDirectory
 import com.example.data.model.ChatEnvelope
+import com.example.data.model.ChatHelpRequest
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
@@ -133,6 +134,95 @@ object TheStudentChatClient {
         if (allowReplace) payload.put("allow_replace", 1)
 
         post(backendBaseUrl, token, "set_key", payload) { identity.publicKeyBase64 }
+    }
+
+    // -----------------------------------------------------------------------
+    // Help requests
+    // -----------------------------------------------------------------------
+
+    /** Open a help request with [peerId]. The server de-duplicates an open one. */
+    suspend fun createHelpRequest(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int,
+        subjectCode: String,
+        subjectLabel: String,
+        purposes: List<String>
+    ): ChatResult<ChatHelpRequest?> = withContext(Dispatchers.IO) {
+        val purposeArray = JSONArray()
+        purposes.forEach { purposeArray.put(it) }
+
+        val payload = JSONObject()
+            .put("peer_id", peerId)
+            .put("subject_code", subjectCode)
+            .put("subject_label", subjectLabel)
+            .put("purposes", purposeArray)
+
+        post(backendBaseUrl, token, "help_request", payload) { json ->
+            parseHelpRequest(json.optJSONObject("request"))
+        }
+    }
+
+    /** Latest request between me and [peerId], or null when there is none. */
+    suspend fun fetchHelpState(
+        backendBaseUrl: String,
+        token: String,
+        peerId: Int
+    ): ChatResult<ChatHelpRequest?> = withContext(Dispatchers.IO) {
+        get(backendBaseUrl, token, "help_state", query = "peer_id=$peerId") { json ->
+            parseHelpRequest(json.optJSONObject("request"))
+        }
+    }
+
+    /** accept / close / cancel — the server decides who is allowed to. */
+    suspend fun updateHelpRequest(
+        backendBaseUrl: String,
+        token: String,
+        action: String,
+        requestId: Long
+    ): ChatResult<ChatHelpRequest?> = withContext(Dispatchers.IO) {
+        post(
+            backendBaseUrl,
+            token,
+            action,
+            JSONObject().put("request_id", requestId)
+        ) { json ->
+            parseHelpRequest(json.optJSONObject("request"))
+        }
+    }
+
+    /**
+     * Null-safe parser: a request payload the app cannot understand must not
+     * crash a poll — it simply means "no request on screen".
+     */
+    private fun parseHelpRequest(obj: JSONObject?): ChatHelpRequest? {
+        if (obj == null) return null
+        val id = obj.optLong("id", 0L)
+        if (id <= 0L) return null
+
+        val purposes = ArrayList<String>()
+        val purposeArray = obj.optJSONArray("purposes")
+        if (purposeArray != null) {
+            for (index in 0 until purposeArray.length()) {
+                val value = purposeArray.optString(index).trim()
+                if (value.isNotEmpty()) purposes.add(value)
+            }
+        }
+
+        return ChatHelpRequest(
+            id = id,
+            peerId = obj.optInt("peer_id", 0),
+            subjectCode = obj.optString("subject_code"),
+            subjectLabel = obj.optString("subject_label"),
+            purposes = purposes,
+            status = obj.optString("status", "pending"),
+            isSeeker = obj.optBoolean("is_seeker", true),
+            canAccept = obj.optBoolean("can_accept", false),
+            canClose = obj.optBoolean("can_close", false),
+            canCancel = obj.optBoolean("can_cancel", false),
+            acceptedEpoch = obj.optLong("accepted_epoch", 0L).takeIf { it > 0L },
+            completedEpoch = obj.optLong("completed_epoch", 0L).takeIf { it > 0L }
+        )
     }
 
     // -----------------------------------------------------------------------

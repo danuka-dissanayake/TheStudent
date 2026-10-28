@@ -65,7 +65,10 @@ require_once __DIR__ . '/_avatar.php';   // ts_avatar_public_url()
 // ---------------------------------------------------------------------------
 // Tunables
 // ---------------------------------------------------------------------------
-const TS_CHAT_API_VERSION          = '2.5.0';
+const TS_CHAT_API_VERSION          = '2.6.0';
+const TS_CHAT_HELP_TTL_HOURS       = 72;   // a pending request nobody answers fades away
+const TS_CHAT_HELP_MIN_CLOSE_SEC   = 600;  // accept -> complete cannot happen instantly
+const TS_CHAT_HELP_MAX_PER_DAY     = 5;    // new requests per seeker per day
 const TS_CHAT_ONLINE_WINDOW_SEC    = 10;    // online = seen in the last N s (2 s pings)
 const TS_CHAT_TYPING_WINDOW_SEC    = 6;     // typing indicator lifetime
 const TS_CHAT_MAX_BODY_CHARS       = 6000;  // ciphertext is base64 (~1.4x plain text)
@@ -246,6 +249,68 @@ function ts_chat_public_peer(array $row, int $now): array
         'public_key'        => $row['chat_public_key'] ?? null,
         'key_ready'         => !empty($row['chat_public_key']),
     ];
+}
+
+/**
+ * The shape the app sees for a help request.
+ *
+ * `can_*` flags are computed here rather than in the app: only the helper may
+ * accept, only the seeker may close (the seeker is the only person who knows
+ * whether the question was answered), and either side may cancel.
+ */
+function ts_chat_help_public(array $row, int $meId): array
+{
+    $seeker = (int) $row['seeker_id'];
+    $helper = (int) $row['helper_id'];
+    $status = (string) $row['status'];
+    $isSeeker = $seeker === $meId;
+
+    return [
+        'id'            => (int) $row['id'],
+        'seeker_id'     => $seeker,
+        'helper_id'     => $helper,
+        'peer_id'       => $isSeeker ? $helper : $seeker,
+        'subject_code'  => (string) ($row['subject_code'] ?? ''),
+        'subject_label' => (string) ($row['subject_label'] ?? ''),
+        'purposes'      => array_values(array_filter(array_map(
+            'trim',
+            explode(',', (string) ($row['purposes'] ?? ''))
+        ), static function ($p) { return $p !== ''; })),
+        'status'        => $status,
+        'is_seeker'     => $isSeeker,
+        'created_epoch' => isset($row['created_epoch']) ? (int) $row['created_epoch'] : 0,
+        'accepted_epoch' => isset($row['accepted_epoch']) && $row['accepted_epoch'] !== null
+            ? (int) $row['accepted_epoch'] : null,
+        'completed_epoch' => isset($row['completed_epoch']) && $row['completed_epoch'] !== null
+            ? (int) $row['completed_epoch'] : null,
+        'can_accept'    => $status === 'pending' && !$isSeeker,
+        'can_close'     => $status === 'accepted' && $isSeeker,
+        'can_cancel'    => $status === 'pending' || $status === 'accepted',
+    ];
+}
+
+/** Columns + epochs for every help-request read. */
+function ts_chat_help_select(): string
+{
+    return 'SELECT id, seeker_id, helper_id, subject_code, subject_label, purposes, status,
+                   UNIX_TIMESTAMP(created_at) AS created_epoch,
+                   UNIX_TIMESTAMP(accepted_at) AS accepted_epoch,
+                   UNIX_TIMESTAMP(completed_at) AS completed_epoch
+            FROM chat_help_requests';
+}
+
+/** Flip stale pending rows to expired so the UI never waits forever. */
+function ts_chat_help_expire(PDO $pdo): void
+{
+    try {
+        $pdo->prepare(
+            "UPDATE chat_help_requests SET status = 'expired'
+             WHERE status = 'pending'
+               AND created_at < (NOW() - INTERVAL " . TS_CHAT_HELP_TTL_HOURS . ' HOUR)'
+        )->execute();
+    } catch (Throwable $e) {
+        // Never fail a read because housekeeping failed.
+    }
 }
 
 /**
@@ -601,6 +666,30 @@ function ts_chat_ensure_schema(PDO $pdo): void
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
         );
 
+        // Help requests: the transaction that makes a rating meaningful.
+        // A seeker opens one, the helper accepts, the seeker closes it when the
+        // question is actually answered. Ratings (next step) hang off a
+        // completed row, so a star can never be given to someone you never
+        // talked to.
+        $pdo->exec(
+            "CREATE TABLE IF NOT EXISTS `chat_help_requests` (
+                `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `seeker_id` INT UNSIGNED NOT NULL,
+                `helper_id` INT UNSIGNED NOT NULL,
+                `subject_code` VARCHAR(64) NOT NULL DEFAULT '',
+                `subject_label` VARCHAR(120) NOT NULL DEFAULT '',
+                `purposes` VARCHAR(120) NOT NULL DEFAULT '',
+                `status` ENUM('pending','accepted','completed','cancelled','expired')
+                    NOT NULL DEFAULT 'pending',
+                `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                `accepted_at` DATETIME NULL DEFAULT NULL,
+                `completed_at` DATETIME NULL DEFAULT NULL,
+                INDEX `idx_help_seeker` (`seeker_id`, `status`),
+                INDEX `idx_help_helper` (`helper_id`, `status`),
+                INDEX `idx_help_pair` (`seeker_id`, `helper_id`, `id`)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+        );
+
         $pdo->exec(
             "CREATE TABLE IF NOT EXISTS `chat_typing` (
                 `user_id` INT UNSIGNED NOT NULL,
@@ -861,6 +950,199 @@ switch ($action) {
             ts_chat_json('error', 'Could not load that profile right now.', [], 500);
         }
         break;
+    }
+
+    // -----------------------------------------------------------------------
+    // Help requests: seeker opens -> helper accepts -> seeker closes
+    // -----------------------------------------------------------------------
+    case 'help_request': {
+        ts_chat_require_post('help_request');
+        $body   = ts_chat_read_body();
+        $peerId = ts_chat_peer_id($body);
+
+        if ($peerId === $meId) {
+            ts_chat_json('error', 'You cannot ask yourself for help.', [], 422);
+        }
+
+        $peerStmt = $pdo->prepare(
+            'SELECT id FROM users WHERE id = :id AND is_active = 1 AND is_email_verified = 1 LIMIT 1'
+        );
+        $peerStmt->execute(['id' => $peerId]);
+        if (!$peerStmt->fetch()) {
+            ts_chat_json('error', 'That student is no longer available.', [], 404);
+        }
+
+        ts_chat_help_expire($pdo);
+
+        // One open request per pair: asking twice is noise, not signal.
+        $openStmt = $pdo->prepare(
+            ts_chat_help_select() . "
+             WHERE ((seeker_id = :me AND helper_id = :peer)
+                 OR (seeker_id = :peer AND helper_id = :me))
+               AND status IN ('pending','accepted')
+             ORDER BY id DESC LIMIT 1"
+        );
+        $openStmt->execute(['me' => $meId, 'peer' => $peerId]);
+        $open = $openStmt->fetch();
+        if ($open) {
+            ts_chat_json(
+                'success',
+                'You already have an open request with this student.',
+                ['request' => ts_chat_help_public($open, $meId), 'existing' => true]
+            );
+        }
+
+        // Throttle: a student who asks everyone every day is spamming.
+        $countStmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM chat_help_requests
+             WHERE seeker_id = :me AND created_at > (NOW() - INTERVAL 1 DAY)'
+        );
+        $countStmt->execute(['me' => $meId]);
+        if ((int) $countStmt->fetchColumn() >= TS_CHAT_HELP_MAX_PER_DAY) {
+            ts_chat_json(
+                'error',
+                'That is a lot of requests for one day. Try again tomorrow.',
+                [],
+                429
+            );
+        }
+
+        $subjectLabel = substr(trim((string) ($body['subject_label'] ?? '')), 0, 120);
+        $subjectCode = substr(trim((string) ($body['subject_code'] ?? '')), 0, 64);
+        if ($subjectCode === '' && $subjectLabel !== '') {
+            $subjectCode = substr(strtolower((string) preg_replace('/[^A-Za-z0-9]+/', '_', $subjectLabel)), 0, 64);
+        }
+
+        $rawPurposes = $body['purposes'] ?? [];
+        if (is_array($rawPurposes)) {
+            $purposes = [];
+            foreach ($rawPurposes as $purpose) {
+                $clean = substr(trim((string) $purpose), 0, 40);
+                if ($clean !== '' && !in_array($clean, $purposes, true)) {
+                    $purposes[] = $clean;
+                }
+            }
+            $purposesCsv = substr(implode(',', $purposes), 0, 120);
+        } else {
+            $purposesCsv = substr(trim((string) $rawPurposes), 0, 120);
+        }
+
+        $insert = $pdo->prepare(
+            'INSERT INTO chat_help_requests
+                (seeker_id, helper_id, subject_code, subject_label, purposes, status)
+             VALUES (:seeker, :helper, :code, :label, :purposes, \'pending\')'
+        );
+        $insert->execute([
+            'seeker'   => $meId,
+            'helper'   => $peerId,
+            'code'     => $subjectCode,
+            'label'    => $subjectLabel,
+            'purposes' => $purposesCsv,
+        ]);
+        $requestId = (int) $pdo->lastInsertId();
+
+        $rowStmt = $pdo->prepare(ts_chat_help_select() . ' WHERE id = :id LIMIT 1');
+        $rowStmt->execute(['id' => $requestId]);
+        $row = $rowStmt->fetch();
+
+        ts_chat_json('success', 'Request sent.', [
+            'request' => $row ? ts_chat_help_public($row, $meId) : null,
+            'existing' => false,
+        ]);
+    }
+
+    case 'help_state': {
+        $peerId = ts_chat_peer_id($_GET);
+        ts_chat_help_expire($pdo);
+
+        $stmt = $pdo->prepare(
+            ts_chat_help_select() . "
+             WHERE ((seeker_id = :me AND helper_id = :peer)
+                 OR (seeker_id = :peer AND helper_id = :me))
+               AND (status IN ('pending','accepted')
+                    OR (status = 'completed' AND completed_at > (NOW() - INTERVAL 7 DAY)))
+             ORDER BY id DESC LIMIT 1"
+        );
+        $stmt->execute(['me' => $meId, 'peer' => $peerId]);
+        $row = $stmt->fetch();
+
+        ts_chat_json('success', 'Help state.', [
+            'request' => $row ? ts_chat_help_public($row, $meId) : null,
+        ]);
+    }
+
+    case 'help_accept':
+    case 'help_close':
+    case 'help_cancel': {
+        ts_chat_require_post($action);
+        $body = ts_chat_read_body();
+        $requestId = (int) ($body['request_id'] ?? 0);
+        if ($requestId <= 0) {
+            ts_chat_json('error', 'That request no longer exists.', [], 422);
+        }
+
+        ts_chat_help_expire($pdo);
+
+        $stmt = $pdo->prepare(ts_chat_help_select() . ' WHERE id = :id LIMIT 1');
+        $stmt->execute(['id' => $requestId]);
+        $row = $stmt->fetch();
+        if (!$row) {
+            ts_chat_json('error', 'That request no longer exists.', [], 404);
+        }
+
+        $seeker = (int) $row['seeker_id'];
+        $helper = (int) $row['helper_id'];
+        $status = (string) $row['status'];
+
+        if ($action === 'help_accept') {
+            if ($meId !== $helper) {
+                ts_chat_json('error', 'Only the student who was asked can accept.', [], 403);
+            }
+            if ($status !== 'pending') {
+                ts_chat_json('error', 'This request is no longer open.', [], 409);
+            }
+            $pdo->prepare(
+                "UPDATE chat_help_requests SET status = 'accepted', accepted_at = NOW() WHERE id = :id"
+            )->execute(['id' => $requestId]);
+        } elseif ($action === 'help_close') {
+            if ($meId !== $seeker) {
+                ts_chat_json('error', 'Only the student who asked can close the request.', [], 403);
+            }
+            if ($status !== 'accepted') {
+                ts_chat_json('error', 'Accept the help before closing the request.', [], 409);
+            }
+            $acceptedEpoch = $row['accepted_epoch'] !== null ? (int) $row['accepted_epoch'] : 0;
+            if ($acceptedEpoch > 0 && ($now - $acceptedEpoch) < TS_CHAT_HELP_MIN_CLOSE_SEC) {
+                header('Retry-After: 60');
+                ts_chat_json(
+                    'error',
+                    'Give it a few minutes of real conversation first.',
+                    [],
+                    429
+                );
+            }
+            $pdo->prepare(
+                "UPDATE chat_help_requests SET status = 'completed', completed_at = NOW() WHERE id = :id"
+            )->execute(['id' => $requestId]);
+        } else {
+            if ($meId !== $seeker && $meId !== $helper) {
+                ts_chat_json('error', 'That request is not yours.', [], 403);
+            }
+            if ($status !== 'pending' && $status !== 'accepted') {
+                ts_chat_json('error', 'This request is already closed.', [], 409);
+            }
+            $pdo->prepare(
+                "UPDATE chat_help_requests SET status = 'cancelled' WHERE id = :id"
+            )->execute(['id' => $requestId]);
+        }
+
+        $freshStmt = $pdo->prepare(ts_chat_help_select() . ' WHERE id = :id LIMIT 1');
+        $freshStmt->execute(['id' => $requestId]);
+        $fresh = $freshStmt->fetch();
+
+        ts_chat_json('success', 'Request updated.', [
+            'request' => $fresh ? ts_chat_help_public($fresh, $meId) : null,
+        ]);
     }
 
     // -----------------------------------------------------------------------

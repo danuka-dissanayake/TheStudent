@@ -86,6 +86,7 @@ import androidx.core.content.FileProvider
 import com.example.data.local.ChatAttachmentStore
 import com.example.data.model.ChatAttachment
 import com.example.data.model.ChatAttachmentDraft
+import com.example.data.model.ChatHelpRequest
 import com.example.data.model.ChatMessage
 import com.example.data.model.ChatPeer
 import com.example.data.model.ChatPeerProfile
@@ -219,8 +220,27 @@ fun ChatScreen(
             onCancelVoiceNote = { viewModel.cancelVoiceNote() },
             onStopTyping = { viewModel.stopChatTyping() },
             onOpenProfile = { viewModel.openChatProfile(it) },
+            onAcceptHelp = { viewModel.acceptHelpRequest() },
+            onCompleteHelp = { viewModel.completeHelpRequest() },
+            onCancelHelp = { viewModel.cancelHelpRequest() },
             modifier = modifier
         )
+
+        // "What's this chat about?" — shown once, for a conversation with no
+        // history. It sits above the thread so the composer stays visible.
+        val intentPeer = chatState.chatIntentPeer
+        if (intentPeer != null) {
+            BackHandler { viewModel.dismissChatIntent() }
+            ChatIntentSheet(
+                peer = intentPeer,
+                suggestedSubject = chatState.mySubjects.firstOrNull().orEmpty(),
+                isBusy = chatState.isHelpBusy,
+                onStart = { purposes, wantsHelp, subject ->
+                    viewModel.startChatWithIntents(intentPeer, purposes, wantsHelp, subject)
+                },
+                onDismiss = { viewModel.dismissChatIntent() }
+            )
+        }
         return
     }
 
@@ -233,6 +253,387 @@ fun ChatScreen(
         onAcknowledgeSafety = { viewModel.acknowledgeChatSafetyNotice() },
         modifier = modifier
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Help requests (intent sheet + the card in the thread)
+// ─────────────────────────────────────────────────────────────────────────────
+
+private const val INTENT_HELP = "I have a question and need help from this student"
+private const val INTENT_TALK = "I just want to talk"
+private const val INTENT_NOTES = "I want to share notes / past papers"
+private const val INTENT_PARTNER = "I'm looking for a study partner"
+
+private val ChatIntentOptions = listOf(INTENT_HELP, INTENT_TALK, INTENT_NOTES, INTENT_PARTNER)
+
+/**
+ * The sheet shown when a conversation has no history yet.
+ *
+ * Multi-select on purpose: "I need help" and "I just want to talk" are not
+ * exclusive, and a chat can be both. Only the help option creates a request —
+ * the rest are context the matcher will learn from later.
+ */
+@Composable
+private fun ChatIntentSheet(
+    peer: ChatPeer,
+    suggestedSubject: String,
+    isBusy: Boolean,
+    onStart: (purposes: List<String>, wantsHelp: Boolean, subject: String) -> Unit,
+    onDismiss: () -> Unit
+) {
+    var selected by remember { mutableStateOf(emptySet<Int>()) }
+    var subject by remember(suggestedSubject) { mutableStateOf(suggestedSubject) }
+
+    val wantsHelp = selected.contains(0)
+    val canStart = selected.isNotEmpty()
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        // Scrim: tapping outside is "not now", never a hidden help request.
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(Color(0xFF0B1220).copy(alpha = 0.34f))
+                .clickable(onClick = onDismiss)
+        )
+
+        Surface(
+            shape = RoundedCornerShape(topStart = 28.dp, topEnd = 28.dp),
+            color = Color.White,
+            shadowElevation = 18.dp,
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .testTag("chat_intent_sheet")
+        ) {
+            Column(
+                modifier = Modifier
+                    .navigationBarsPadding()
+                    .imePadding()
+                    .padding(horizontal = 20.dp, vertical = 14.dp)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .width(38.dp)
+                        .height(4.dp)
+                        .background(ChatHairline, RoundedCornerShape(2.dp))
+                )
+                Spacer(Modifier.height(14.dp))
+
+                Text(
+                    text = "What's this chat about?",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 19.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = ChatInk
+                )
+                Text(
+                    text = "Choose any that apply · ${peer.name}",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    color = ChatMuted
+                )
+                Spacer(Modifier.height(14.dp))
+
+                ChatIntentOptions.forEachIndexed { index, label ->
+                    val isSelected = selected.contains(index)
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 3.dp)
+                            .clip(RoundedCornerShape(16.dp))
+                            .background(
+                                if (isSelected) Color(0xFFE9F8F0) else Color(0xFFF6F8FA)
+                            )
+                            .clickable {
+                                selected = if (isSelected) selected - index else selected + index
+                            }
+                            .padding(horizontal = 12.dp, vertical = 11.dp)
+                            .testTag("chat_intent_$index"),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(20.dp)
+                                .clip(RoundedCornerShape(6.dp))
+                                .background(if (isSelected) EmeraldPrimary else Color.White),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            if (isSelected) {
+                                Icon(
+                                    Icons.Default.Done,
+                                    contentDescription = null,
+                                    tint = Color.White,
+                                    modifier = Modifier.size(14.dp)
+                                )
+                            }
+                        }
+                        Spacer(Modifier.width(10.dp))
+                        Text(
+                            text = label,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = if (isSelected) FontWeight.SemiBold else FontWeight.Normal,
+                            color = ChatInk
+                        )
+                    }
+                }
+
+                if (wantsHelp) {
+                    Spacer(Modifier.height(10.dp))
+                    OutlinedTextField(
+                        value = subject,
+                        onValueChange = { subject = it.take(80) },
+                        label = { Text("Subject") },
+                        singleLine = true,
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("chat_intent_subject")
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                Surface(
+                    onClick = {
+                        if (canStart && !isBusy) {
+                            val purposes = selected.sorted().map { ChatIntentOptions[it] }
+                            onStart(purposes, wantsHelp, if (wantsHelp) subject.trim() else "")
+                        }
+                    },
+                    enabled = canStart && !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = if (canStart && !isBusy) EmeraldPrimary else Color(0xFFCBD5E1),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(48.dp)
+                        .testTag("chat_intent_start")
+                ) {
+                    Box(contentAlignment = Alignment.Center) {
+                        Text(
+                            text = if (isBusy) "Starting…" else "Start chat",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+                TextButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .align(Alignment.CenterHorizontally)
+                        .testTag("chat_intent_skip")
+                ) {
+                    Text(
+                        text = "Just say hi",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold,
+                        color = EmeraldDark
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * The request card at the top of a conversation.
+ *
+ * Everything it offers is decided by the server flags (`canAccept`,
+ * `canClose`, `canCancel`) — the app never invites an action the API refuses.
+ */
+@Composable
+private fun HelpRequestCard(
+    request: ChatHelpRequest,
+    peerName: String,
+    isBusy: Boolean,
+    onAccept: () -> Unit,
+    onComplete: () -> Unit,
+    onCancel: () -> Unit
+) {
+    val firstName = peerName.trim().split(" ").firstOrNull().orEmpty().ifBlank { "They" }
+    val title: String
+    val subtitle: String
+    when {
+        request.isCompleted -> {
+            title = "Help completed"
+            subtitle = "You were helped with ${request.subjectLine}."
+        }
+        request.status == "accepted" -> {
+            title = if (request.isSeeker) "Help accepted" else "You're helping with ${request.subjectLine}"
+            subtitle = if (request.isSeeker) {
+                "Ask your question — close the request when it's answered."
+            } else {
+                "Answer when you can. $firstName will close it once it's solved."
+            }
+        }
+        request.isSeeker -> {
+            title = "Waiting for $firstName"
+            subtitle = "Asked for help with ${request.subjectLine}."
+        }
+        else -> {
+            title = "$firstName needs help"
+            subtitle = "Asking about ${request.subjectLine}."
+        }
+    }
+
+    val isPending = request.status == "pending"
+    val isAccepted = request.status == "accepted"
+
+    Surface(
+        shape = RoundedCornerShape(20.dp),
+        color = if (request.isCompleted) Color(0xFFE9F8F0) else Color(0xFFF0FBF5),
+        border = BorderStroke(
+            1.dp,
+            if (request.isCompleted) Color(0xFFA7F3D0) else Color(0xFFBFE9D3)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(bottom = 6.dp)
+            .testTag("chat_help_card")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .size(32.dp)
+                        .clip(RoundedCornerShape(10.dp))
+                        .background(if (request.isCompleted) EmeraldPrimary else Color(0xFFD1FAE5)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = if (request.isCompleted) Icons.Default.DoneAll else Icons.Default.Forum,
+                        contentDescription = null,
+                        tint = if (request.isCompleted) Color.White else EmeraldDark,
+                        modifier = Modifier.size(17.dp)
+                    )
+                }
+                Spacer(Modifier.width(10.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = title,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = ChatInk
+                    )
+                    Text(
+                        text = subtitle,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 11.5.sp,
+                        lineHeight = 16.sp,
+                        color = ChatMuted
+                    )
+                }
+            }
+
+            if (isPending && request.canAccept) {
+                Spacer(Modifier.height(12.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Surface(
+                        onClick = { if (!isBusy) onAccept() },
+                        enabled = !isBusy,
+                        shape = RoundedCornerShape(50),
+                        color = EmeraldPrimary,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .testTag("chat_help_accept")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "I can help",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = { if (!isBusy) onCancel() },
+                        enabled = !isBusy,
+                        shape = RoundedCornerShape(50),
+                        color = Color.White,
+                        border = BorderStroke(1.dp, ChatHairline),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(40.dp)
+                            .testTag("chat_help_decline")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Not now",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = ChatMuted
+                            )
+                        }
+                    }
+                }
+            } else if (isPending && request.isSeeker && request.canCancel) {
+                Spacer(Modifier.height(10.dp))
+                Surface(
+                    onClick = { if (!isBusy) onCancel() },
+                    enabled = !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, ChatHairline),
+                    modifier = Modifier
+                        .height(36.dp)
+                        .testTag("chat_help_cancel")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 14.dp)
+                    ) {
+                        Text(
+                            text = "Cancel request",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = ChatMuted
+                        )
+                    }
+                }
+            } else if (isAccepted && request.canClose) {
+                Spacer(Modifier.height(12.dp))
+                Surface(
+                    onClick = { if (!isBusy) onComplete() },
+                    enabled = !isBusy,
+                    shape = RoundedCornerShape(50),
+                    color = EmeraldPrimary,
+                    modifier = Modifier
+                        .height(40.dp)
+                        .testTag("chat_help_complete")
+                ) {
+                    Box(
+                        contentAlignment = Alignment.Center,
+                        modifier = Modifier.padding(horizontal = 18.dp)
+                    ) {
+                        Text(
+                            text = "This helped — close",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White
+                        )
+                    }
+                }
+            } else if (isAccepted && !request.isSeeker) {
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Waiting for them to close the request.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    color = ChatFaint
+                )
+            }
+        }
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1172,6 +1573,9 @@ private fun ChatConversationScreen(
     onCancelVoiceNote: () -> Unit,
     onStopTyping: () -> Unit,
     onOpenProfile: (ChatPeer) -> Unit,
+    onAcceptHelp: () -> Unit = {},
+    onCompleteHelp: () -> Unit = {},
+    onCancelHelp: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val peer = state.activePeer ?: return
@@ -1681,6 +2085,24 @@ private fun ChatConversationScreen(
                                 contentPadding = PaddingValues(vertical = 12.dp),
                                 verticalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
+                                // The help request lives above the messages:
+                                // it is context for the whole conversation, not
+                                // a message in it.
+                                state.helpRequest?.let { help ->
+                                    if (help.isOpen || help.isCompleted) {
+                                        item(key = "help-request") {
+                                            HelpRequestCard(
+                                                request = help,
+                                                peerName = peer.name,
+                                                isBusy = state.isHelpBusy,
+                                                onAccept = onAcceptHelp,
+                                                onComplete = onCompleteHelp,
+                                                onCancel = onCancelHelp
+                                            )
+                                        }
+                                    }
+                                }
+
                                 itemsIndexed(
                                     items = rows,
                                     key = { _, row ->

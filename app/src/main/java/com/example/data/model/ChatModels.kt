@@ -111,6 +111,38 @@ data class ChatDirectory(
  * fill in, presence and the month they joined. E-mail, phone, role and every
  * login detail stay on the server — see `action=profile` in chat.php.
  */
+/**
+ * A help request: the transaction behind a rating.
+ *
+ * The seeker opens it (optionally naming the subject), the helper accepts, and
+ * the seeker closes it when the question is genuinely answered. Only then can a
+ * rating be given — which is what stops two friends swapping five stars in ten
+ * seconds. [canAccept] / [canClose] / [canCancel] are decided by the server, so
+ * the UI can never offer an action the API will refuse.
+ */
+data class ChatHelpRequest(
+    val id: Long,
+    val peerId: Int,
+    val subjectCode: String = "",
+    val subjectLabel: String = "",
+    val purposes: List<String> = emptyList(),
+    /** pending | accepted | completed | cancelled | expired */
+    val status: String = "pending",
+    val isSeeker: Boolean = true,
+    val canAccept: Boolean = false,
+    val canClose: Boolean = false,
+    val canCancel: Boolean = false,
+    val acceptedEpoch: Long? = null,
+    val completedEpoch: Long? = null
+) {
+    val isOpen: Boolean get() = status == "pending" || status == "accepted"
+    val isCompleted: Boolean get() = status == "completed"
+
+    /** Short line for the card header. */
+    val subjectLine: String
+        get() = subjectLabel.ifBlank { "a question" }
+}
+
 data class ChatPeerProfile(
     val peer: ChatPeer,
     val targetExam: String = "",

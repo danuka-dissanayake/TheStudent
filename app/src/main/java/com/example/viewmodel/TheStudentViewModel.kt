@@ -187,6 +187,17 @@ data class ChatUiState(
     val viewedProfile: ChatPeerProfile? = null,
     /** True while that profile is being fetched. */
     val isLoadingProfile: Boolean = false,
+    /**
+     * The newest help request between me and [activePeer] (null when the pair
+     * never asked each other for help). Drives the card at the top of the thread.
+     */
+    val helpRequest: ChatHelpRequest? = null,
+    /** Non-null while the "What's this chat about?" sheet is showing. */
+    val chatIntentPeer: ChatPeer? = null,
+    /** My own subjects, offered as the default subject on a help request. */
+    val mySubjects: List<String> = emptyList(),
+    /** True while accept / close / cancel is in flight. */
+    val isHelpBusy: Boolean = false,
     /** True once this device's encryption key is what the server published. */
     val isEncryptionReady: Boolean = false,
     /** Image or document picked in the composer, not sent yet. */
@@ -559,6 +570,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         chatInboxJob = viewModelScope.launch {
             while (true) {
                 fetchChatInbox()
+                // The help card must react to the other side accepting while
+                // the conversation is on screen, so it polls with the inbox.
+                val openPeerId = chatActivePeerId
+                if (openPeerId != null) refreshHelpState(openPeerId)
                 delay(CHAT_INBOX_POLL_MS)
             }
         }
@@ -887,6 +902,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val openedAt = System.currentTimeMillis()
             var firstEmission = true
             chatDao.observeConversation(peer.id).collect { rows ->
+                // Read the flag before clearing it: the intent sheet decision
+                // below depends on "is this the very first emission".
+                val isFirstEmission = firstEmission
                 if (firstEmission) {
                     firstEmission = false
                     val elapsed = System.currentTimeMillis() - openedAt
@@ -895,11 +913,25 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 _chatState.update {
                     it.copy(
                         isLoadingMessages = false,
-                        messages = rows.map { row -> row.toChatMessage() }
+                        messages = rows.map { row -> row.toChatMessage() },
+                        // Only a conversation with no history gets the
+                        // "what's this chat about?" sheet, and only once.
+                        chatIntentPeer = if (isFirstEmission && rows.isEmpty()) peer else it.chatIntentPeer
                     )
                 }
             }
         }
+
+        // My own subjects pre-fill the help-request subject; the intent sheet
+        // only appears for a brand-new conversation.
+        viewModelScope.launch {
+            runCatching {
+                repository.userProfileFlow.first().academic.subjectLabels()
+            }.onSuccess { subjects ->
+                _chatState.update { it.copy(mySubjects = subjects) }
+            }
+        }
+        refreshHelpState(peer.id)
 
         viewModelScope.launch {
             chatSession()?.let { (baseUrl, token) -> downloadPendingAttachments(baseUrl, token) }
@@ -946,6 +978,123 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     )
 
+    // ── Help requests ────────────────────────────────────────────────────────
+    /**
+     * Refresh the newest help request with [peerId].
+     *
+     * Cheap enough to run on every inbox poll (2 s) and inside the conversation:
+     * the row is indexed on the pair and at most one is returned.
+     */
+    private fun refreshHelpState(peerId: Int) {
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            val request = TheStudentChatClient.fetchHelpState(baseUrl, token, peerId)
+                .dataOrNull()
+            // Ignore a response that lands after the student closed the chat.
+            if (chatActivePeerId != peerId) return@launch
+            _chatState.update { it.copy(helpRequest = request) }
+        }
+    }
+
+    /** Dismiss the intent sheet without opening a help request. */
+    fun dismissChatIntent() {
+        _chatState.update { it.copy(chatIntentPeer = null) }
+    }
+
+    /**
+     * Called by the intent sheet when the chat starts.
+     *
+     * A help request is only created when the student ticked "I have a question
+     * and need help" — the other purposes are just context, and creating a
+     * request nobody asked for would pollute the helper's screen.
+     */
+    fun startChatWithIntents(
+        peer: ChatPeer,
+        purposes: List<String>,
+        wantsHelp: Boolean,
+        subjectLabel: String
+    ) {
+        _chatState.update { it.copy(chatIntentPeer = null) }
+        if (!wantsHelp) return
+
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            _chatState.update { it.copy(isHelpBusy = true) }
+            val result = TheStudentChatClient.createHelpRequest(
+                backendBaseUrl = baseUrl,
+                token = token,
+                peerId = peer.id,
+                subjectCode = subjectLabel.trim().lowercase(Locale.US)
+                    .replace(Regex("[^a-z0-9]+"), "_")
+                    .trim('_'),
+                subjectLabel = subjectLabel.trim(),
+                purposes = purposes
+            )
+            when (result) {
+                is ChatResult.Success -> {
+                    _chatState.update { it.copy(isHelpBusy = false, helpRequest = result.data) }
+                }
+                is ChatResult.Failure -> {
+                    _chatState.update { it.copy(isHelpBusy = false) }
+                    if (!result.isNetworkFailure) {
+                        _uiState.update { it.copy(snackbarMessage = result.message) }
+                    }
+                }
+            }
+        }
+    }
+
+    /** Helper accepts the request. */
+    fun acceptHelpRequest() {
+        val request = _chatState.value.helpRequest ?: return
+        updateHelp("help_accept", request.id)
+    }
+
+    /** Seeker confirms the question was answered — this unlocks the rating. */
+    fun completeHelpRequest() {
+        val request = _chatState.value.helpRequest ?: return
+        updateHelp("help_close", request.id)
+    }
+
+    /** Either side withdraws the request. */
+    fun cancelHelpRequest() {
+        val request = _chatState.value.helpRequest ?: return
+        updateHelp("help_cancel", request.id)
+    }
+
+    private fun updateHelp(action: String, requestId: Long) {
+        if (_chatState.value.isHelpBusy) return
+        val session = chatSession() ?: return
+        viewModelScope.launch {
+            val (baseUrl, token) = session
+            _chatState.update { it.copy(isHelpBusy = true) }
+            val result = TheStudentChatClient.updateHelpRequest(baseUrl, token, action, requestId)
+            when (result) {
+                is ChatResult.Success -> {
+                    _chatState.update {
+                        it.copy(
+                            isHelpBusy = false,
+                            helpRequest = result.data ?: it.helpRequest
+                        )
+                    }
+                    if (action == "help_close") {
+                        _uiState.update {
+                            it.copy(snackbarMessage = "Help confirmed — you can rate this student")
+                        }
+                    }
+                }
+                is ChatResult.Failure -> {
+                    _chatState.update { it.copy(isHelpBusy = false) }
+                    if (!result.isNetworkFailure) {
+                        _uiState.update { it.copy(snackbarMessage = result.message) }
+                    }
+                }
+            }
+        }
+    }
+
     fun closeChat() {
         chatMessagesJob?.cancel()
         chatMessagesJob = null
@@ -967,7 +1116,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 attachmentUploadProgress = 0f,
                 pendingReply = null,
                 isRecordingVoiceNote = false,
-                voiceNoteElapsedMs = 0L
+                voiceNoteElapsedMs = 0L,
+                helpRequest = null,
+                chatIntentPeer = null,
+                isHelpBusy = false
             )
         }
         _uiState.update { it.copy(isChatConversationOpen = false) }
