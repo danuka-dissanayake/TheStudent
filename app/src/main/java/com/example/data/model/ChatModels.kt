@@ -353,6 +353,11 @@ data class ChatPeerProfile(
     val examYear: Int? = null,
     /** Sinhala / Tamil / English; "" when unset. */
     val medium: String = "",
+    /** School grade for Grades 6–9 / O/L / A/L, or year of study at university. */
+    val studyYear: Int? = null,
+    /** Undergraduate only: the university and the field of study. */
+    val university: String = "",
+    val degreeProgramme: String = "",
     /** The three subjects the student actually sits for. */
     val subjects: List<String> = emptyList(),
     /** Unix seconds, when the account was created; null if unknown. */
@@ -373,7 +378,8 @@ data class ChatPeerProfile(
     /** True when there is at least one education row worth rendering. */
     val hasEducation: Boolean
         get() = targetExam.isNotBlank() || streamOrDegree.isNotBlank() ||
-            institution.isNotBlank() || subjects.isNotEmpty() || medium.isNotBlank()
+            institution.isNotBlank() || subjects.isNotEmpty() || medium.isNotBlank() ||
+            stageLabel.isNotBlank() || university.isNotBlank() || studyYear != null
 
     /** "Technology · 2026" — stream and exam year, when we have them. */
     val streamLine: String
@@ -382,6 +388,28 @@ data class ChatPeerProfile(
             if (stream.isNotBlank()) add(stream)
             examYear?.let { add(it.toString()) }
         }.joinToString(" · ")
+
+    /** "A/L", "O/L", "Grades 6–9" or "University" — the stage they are at. */
+    val stageLabel: String
+        get() = when (examLevel.uppercase(Locale.US)) {
+            "AL" -> "A/L"
+            "OL" -> "O/L"
+            "JUNIOR" -> "Grades 6–9"
+            "UNI" -> "University"
+            else -> ""
+        }
+
+    /** Grade for school stages, year of study for university. */
+    val gradeLine: String
+        get() = studyYear?.let {
+            if (examLevel.uppercase(Locale.US) == "UNI") "Year $it" else "Grade $it"
+        }.orEmpty()
+
+    /** "University of Moratuwa · Engineering" for undergraduates. */
+    val universityLine: String
+        get() = listOf(university, degreeProgramme)
+            .filter { it.isNotBlank() }
+            .joinToString(" · ")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

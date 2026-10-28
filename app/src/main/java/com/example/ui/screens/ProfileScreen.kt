@@ -944,8 +944,9 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
 
             if (!academic.isComplete && subjects.isEmpty()) {
                 Text(
-                    text = "Level, stream, exam year, medium and three subjects — four taps, " +
-                        "and the chat can introduce you to someone who already sits those papers.",
+                    text = "Pick your stage — Grades 6–9, O/L, A/L or university — and the " +
+                        "details that go with it, so the chat can introduce you to someone " +
+                        "who already sits the same papers.",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 11.5.sp,
                     lineHeight = 16.sp,
@@ -953,19 +954,55 @@ private fun AcademicCard(profile: UserProfile, onEdit: () -> Unit) {
                 )
             } else {
                 InfoLine(
-                    label = "Level",
-                    value = when {
-                        academic.isAl -> "A/L"
-                        academic.isOl -> "O/L"
-                        else -> "—"
+                    label = "Stage",
+                    value = academic.stageLabel.ifBlank { "—" }
+                )
+                when {
+                    academic.isUni -> {
+                        InfoLine(
+                            label = "University",
+                            value = academic.university.ifBlank { "—" }
+                        )
+                        InfoLine(
+                            label = "Field",
+                            value = academic.programme.ifBlank { "—" }
+                        )
+                        InfoLine(
+                            label = "Year",
+                            value = academic.studyYear?.let { "Year $it" } ?: "—"
+                        )
                     }
-                )
-                InfoLine(label = "Stream", value = academic.streamCode.ifBlank { "—" })
-                InfoLine(
-                    label = "Exam year",
-                    value = academic.examYear?.toString() ?: "—"
-                )
-                InfoLine(label = "Medium", value = academic.medium.ifBlank { "—" })
+                    academic.isAl -> {
+                        InfoLine(label = "Stream", value = academic.streamCode.ifBlank { "—" })
+                        InfoLine(
+                            label = "Grade",
+                            value = academic.studyYear?.let { "Grade $it" } ?: "—"
+                        )
+                        InfoLine(
+                            label = "Exam year",
+                            value = academic.examYear?.toString() ?: "—"
+                        )
+                        InfoLine(label = "Medium", value = academic.medium.ifBlank { "—" })
+                    }
+                    academic.isOl -> {
+                        InfoLine(
+                            label = "Grade",
+                            value = academic.studyYear?.let { "Grade $it" } ?: "—"
+                        )
+                        InfoLine(
+                            label = "Exam year",
+                            value = academic.examYear?.toString() ?: "—"
+                        )
+                        InfoLine(label = "Medium", value = academic.medium.ifBlank { "—" })
+                    }
+                    else -> {
+                        InfoLine(
+                            label = "Grade",
+                            value = academic.studyYear?.let { "Grade $it" } ?: "—"
+                        )
+                        InfoLine(label = "Medium", value = academic.medium.ifBlank { "—" })
+                    }
+                }
 
                 if (subjects.isNotEmpty()) {
                     Spacer(Modifier.height(10.dp))

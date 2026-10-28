@@ -461,6 +461,11 @@ object TheStudentAuthClient {
             .put("exam_year", profile.examYear ?: 0)
             .put("medium", profile.medium)
             .put("subjects", subjects)
+            // Grades 6–9 and university carry the grade / year instead of an
+            // exam year, plus the university and the field of study.
+            .put("study_year", profile.studyYear ?: 0)
+            .put("university", profile.university)
+            .put("degree_programme", profile.programme)
 
         postAuth(
             endpointUrl = endpoint(backendBaseUrl, "academic_profile"),
@@ -684,7 +689,14 @@ object TheStudentAuthClient {
                     null
                 },
                 medium = userObj.textOrEmpty("medium"),
-                subjects = parseSubjects(userObj.optJSONArray("subjects"))
+                subjects = parseSubjects(userObj.optJSONArray("subjects")),
+                studyYear = if (userObj.has("study_year") && !userObj.isNull("study_year")) {
+                    userObj.optInt("study_year", 0)
+                } else {
+                    null
+                },
+                university = userObj.textOrEmpty("university"),
+                programme = userObj.textOrEmpty("degree_programme")
             )
         )
     }

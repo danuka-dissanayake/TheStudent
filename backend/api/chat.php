@@ -1141,11 +1141,20 @@ switch ($action) {
             // the three subjects). Read in its own guarded query so a relay
             // deployed before the auth schema migration still returns a profile
             // instead of a 500.
-            $academic = ['stream_code' => '', 'exam_level' => '', 'exam_year' => 0, 'medium' => ''];
+            $academic = [
+                'stream_code' => '',
+                'exam_level' => '',
+                'exam_year' => 0,
+                'medium' => '',
+                'study_year' => 0,
+                'university' => '',
+                'degree_programme' => '',
+            ];
             $subjects = [];
             try {
                 $acStmt = $pdo->prepare(
-                    'SELECT stream_code, exam_level, exam_year, medium
+                    'SELECT stream_code, exam_level, exam_year, medium,
+                            study_year, university, degree_programme
                      FROM users WHERE id = :id LIMIT 1'
                 );
                 $acStmt->execute(['id' => $peerId]);
@@ -1156,6 +1165,11 @@ switch ($action) {
                         'exam_level'  => (string) ($acRow['exam_level'] ?? ''),
                         'exam_year'   => (int) ($acRow['exam_year'] ?? 0),
                         'medium'      => (string) ($acRow['medium'] ?? ''),
+                        // The wider stages: grade / year of study, university and
+                        // field. Absent on a schema predating them.
+                        'study_year'  => (int) ($acRow['study_year'] ?? 0),
+                        'university'  => (string) ($acRow['university'] ?? ''),
+                        'degree_programme' => (string) ($acRow['degree_programme'] ?? ''),
                     ];
                 }
             } catch (Throwable $e) {
@@ -1192,6 +1206,9 @@ switch ($action) {
                     'exam_level'       => $academic['exam_level'],
                     'exam_year'        => $academic['exam_year'],
                     'medium'           => $academic['medium'],
+                    'study_year'       => $academic['study_year'],
+                    'university'       => $academic['university'],
+                    'degree_programme' => $academic['degree_programme'],
                     'subjects'         => $subjects,
                 ],
                 'joined_epoch' => $joinedEpoch > 0 ? $joinedEpoch : null,

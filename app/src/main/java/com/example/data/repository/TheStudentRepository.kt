@@ -173,7 +173,10 @@ class TheStudentRepository(private val dao: TheStudentDao) {
                 streamCode = profile.academic.streamCode,
                 examYear = profile.academic.examYear ?: 0,
                 medium = profile.academic.medium,
-                academicSubjects = AcademicProfile.encodeSubjects(profile.academic.subjects)
+                academicSubjects = AcademicProfile.encodeSubjects(profile.academic.subjects),
+                studyYear = profile.academic.studyYear ?: 0,
+                university = profile.academic.university,
+                degreeProgramme = profile.academic.programme
             )
         )
     }

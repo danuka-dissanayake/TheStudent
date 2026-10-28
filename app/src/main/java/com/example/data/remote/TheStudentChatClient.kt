@@ -775,6 +775,9 @@ object TheStudentChatClient {
                 examLevel = education.optString("exam_level"),
                 examYear = education.optInt("exam_year", 0).takeIf { it > 0 },
                 medium = education.optString("medium"),
+                studyYear = education.optInt("study_year", 0).takeIf { it > 0 },
+                university = education.optString("university"),
+                degreeProgramme = education.optString("degree_programme"),
                 subjects = subjects,
                 joinedEpoch = if (json.isNull("joined_epoch")) {
                     null

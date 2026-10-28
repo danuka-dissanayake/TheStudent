@@ -2002,7 +2002,17 @@ private fun ChatPeerProfileScreen(
                     // ── education ────────────────────────────────────────────────
                     if (profile.hasEducation) {
                         ProfileCard(title = "Education") {
-                            if (profile.targetExam.isNotBlank()) {
+                            // The stage they are at, in the app's own vocabulary:
+                            // Grades 6–9 / O/L / A/L / University.
+                            if (profile.stageLabel.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.MenuBook,
+                                    tint = EmeraldPrimary,
+                                    tintSoft = Color(0xFFE3F8EC),
+                                    label = "Stage",
+                                    value = profile.stageLabel
+                                )
+                            } else if (profile.targetExam.isNotBlank()) {
                                 ProfileInfoRow(
                                     icon = Icons.Default.MenuBook,
                                     tint = EmeraldPrimary,
@@ -2011,7 +2021,25 @@ private fun ChatPeerProfileScreen(
                                     value = profile.targetExam
                                 )
                             }
-                            if (profile.streamLine.isNotBlank()) {
+                            if (profile.gradeLine.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.CalendarMonth,
+                                    tint = Color(0xFF8B5CF6),
+                                    tintSoft = Color(0xFFF1EAFE),
+                                    label = if (profile.stageLabel == "University") "Year of study" else "Grade",
+                                    value = profile.gradeLine
+                                )
+                            }
+                            if (profile.universityLine.isNotBlank()) {
+                                ProfileInfoRow(
+                                    icon = Icons.Default.AccountBalance,
+                                    tint = Color(0xFFF0A22E),
+                                    tintSoft = Color(0xFFFFF1DC),
+                                    label = "University",
+                                    value = profile.universityLine
+                                )
+                            }
+                            if (profile.streamLine.isNotBlank() && profile.stageLabel != "University") {
                                 ProfileInfoRow(
                                     icon = Icons.Default.School,
                                     tint = Color(0xFF0EA5E9),

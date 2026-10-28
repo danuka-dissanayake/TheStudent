@@ -19,6 +19,9 @@
  *                                institution, stream_or_degree, password?, avatar?}
  *   POST update_profile          multipart or JSON {full_name?, phone?, institution?,
  *                                avatar?}                                [Bearer]
+ *   POST academic_profile        JSON {exam_level: JUNIOR|OL|AL|UNI, medium,
+ *                                study_year, exam_year, stream_code, university,
+ *                                degree_programme, subjects[]}           [Bearer]
  *   GET  me                      [Bearer]  (alias: profile)
  *   POST delete_account          {password?}                        [Bearer]
  *   POST logout                  [Bearer]
@@ -89,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.4.0';
+const TS_API_VERSION                = '3.5.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -282,7 +285,7 @@ function ensureAuthSchema(PDO $pdo): void
             `user_id` INT UNSIGNED NOT NULL,
             `subject_code` VARCHAR(64) NOT NULL,
             `subject_label` VARCHAR(120) NOT NULL,
-            `exam_level` VARCHAR(16) NOT NULL DEFAULT 'AL',
+            `exam_level` VARCHAR(16) NOT NULL DEFAULT '',
             `bucket_no` TINYINT UNSIGNED NULL DEFAULT NULL,
             `position` TINYINT UNSIGNED NOT NULL DEFAULT 0,
             `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -328,6 +331,11 @@ function ensureAuthSchema(PDO $pdo): void
     // Structured academic profile: stream / level / exam year / medium.
     ts_ensure_column($pdo, 'users', 'stream_code', 'VARCHAR(64) NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'exam_level', 'VARCHAR(16) NULL DEFAULT NULL');
+    // Grades 6–9 and university need a grade / year of study, a university and a
+    // field of study; A/L and O/L never use them.
+    ts_ensure_column($pdo, 'users', 'study_year', 'TINYINT NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'university', 'VARCHAR(120) NULL DEFAULT NULL');
+    ts_ensure_column($pdo, 'users', 'degree_programme', 'VARCHAR(120) NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'exam_year', 'SMALLINT UNSIGNED NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'medium', 'VARCHAR(16) NULL DEFAULT NULL');
     ts_ensure_column($pdo, 'users', 'academic_updated_at', 'DATETIME NULL DEFAULT NULL');
@@ -902,10 +910,29 @@ function ts_user_subjects(PDO $pdo, int $userId): array
 /** True once level + year + medium + all three subjects are on file. */
 function ts_academic_complete(array $user, array $subjects): bool
 {
-    return trim((string) ($user['exam_level'] ?? '')) !== ''
-        && trim((string) ($user['medium'] ?? '')) !== ''
-        && (int) ($user['exam_year'] ?? 0) > 0
-        && count($subjects) === 3;
+    $level = strtoupper(trim((string) ($user['exam_level'] ?? '')));
+    $medium = trim((string) ($user['medium'] ?? ''));
+    $year = (int) ($user['exam_year'] ?? 0);
+    $studyYear = (int) ($user['study_year'] ?? 0);
+
+    switch ($level) {
+        case 'JUNIOR':
+            // Grades 6–9: no national exam, so the grade and the focus subjects
+            // are what the matcher can use.
+            return $medium !== '' && $studyYear >= 6 && $studyYear <= 9 && count($subjects) >= 1;
+        case 'OL':
+            return $medium !== '' && $year > 0 && count($subjects) === 3;
+        case 'AL':
+            return $medium !== '' && $year > 0
+                && trim((string) ($user['stream_code'] ?? '')) !== ''
+                && count($subjects) === 3;
+        case 'UNI':
+            return trim((string) ($user['university'] ?? '')) !== ''
+                && trim((string) ($user['degree_programme'] ?? '')) !== ''
+                && $studyYear >= 1;
+        default:
+            return false;
+    }
 }
 
 /**
@@ -948,6 +975,11 @@ function publicUser(array $user, array $subjects = []): array
         'stream_code'     => $user['stream_code'] ?? null,
         'exam_year'       => isset($user['exam_year']) ? (int) $user['exam_year'] : null,
         'medium'          => $user['medium'] ?? null,
+        // Grades 6–9 use study_year as the school grade; university uses it as
+        // the year of study, and adds the university and the field.
+        'study_year'      => isset($user['study_year']) ? (int) $user['study_year'] : null,
+        'university'      => $user['university'] ?? null,
+        'degree_programme' => $user['degree_programme'] ?? null,
         'subjects'        => $subjects,
         'academic_complete' => ts_academic_complete($user, $subjects),
         'role'            => $user['role'] ?? 'student',
@@ -1498,8 +1530,13 @@ if ($action === 'academic_profile') {
     $academicUserId = (int) $academicUser['id'];
 
     $level = strtoupper(trim((string) ($body['exam_level'] ?? '')));
-    if ($level !== 'AL' && $level !== 'OL') {
-        sendJsonResponse('error', 'Choose A/L or O/L first.', ['field' => 'exam_level'], 400);
+    if (!in_array($level, ['JUNIOR', 'OL', 'AL', 'UNI'], true)) {
+        sendJsonResponse(
+            'error',
+            'Choose your stage first — Grades 6–9, O/L, A/L or university.',
+            ['field' => 'exam_level'],
+            400
+        );
     }
 
     $medium = trim((string) ($body['medium'] ?? ''));
@@ -1509,21 +1546,74 @@ if ($action === 'academic_profile') {
 
     // Two years back (repeating a paper) to six years ahead (Grade 12).
     $examYear = (int) ($body['exam_year'] ?? 0);
+    $studyYear = (int) ($body['study_year'] ?? 0);
     $thisYear = (int) date('Y');
-    if ($examYear < $thisYear - 2 || $examYear > $thisYear + 6) {
-        sendJsonResponse('error', 'Choose a valid exam year.', ['field' => 'exam_year'], 400);
-    }
 
     $streamCode = '';
-    if ($level === 'AL') {
-        $streamCode = validateProfileText($body['stream_code'] ?? '', 'Stream', 2, 64);
+    $university = '';
+    $degreeProgramme = '';
+    $expectedSubjects = 3;
+
+    switch ($level) {
+        case 'JUNIOR':
+            // Grades 6–9: no national exam at all.
+            if ($studyYear < 6 || $studyYear > 9) {
+                sendJsonResponse('error', 'Choose your grade (6–9).', ['field' => 'study_year'], 400);
+            }
+            $examYear = 0;
+            $expectedSubjects = 3; // 1–3, checked below
+            break;
+
+        case 'OL':
+            if ($studyYear !== 0 && ($studyYear < 10 || $studyYear > 11)) {
+                sendJsonResponse('error', 'O/L is sat in Grade 10 or 11.', ['field' => 'study_year'], 400);
+            }
+            if ($examYear < $thisYear - 2 || $examYear > $thisYear + 6) {
+                sendJsonResponse('error', 'Choose a valid O/L exam year.', ['field' => 'exam_year'], 400);
+            }
+            break;
+
+        case 'AL':
+            $streamCode = validateProfileText($body['stream_code'] ?? '', 'Stream', 2, 64);
+            if ($studyYear !== 0 && ($studyYear < 12 || $studyYear > 13)) {
+                sendJsonResponse('error', 'A/L is a two-year programme in Grades 12 and 13.', ['field' => 'study_year'], 400);
+            }
+            if ($examYear < $thisYear - 2 || $examYear > $thisYear + 6) {
+                sendJsonResponse('error', 'Choose a valid A/L exam year.', ['field' => 'exam_year'], 400);
+            }
+            break;
+
+        case 'UNI':
+            $university = validateProfileText($body['university'] ?? '', 'University', 2, 120);
+            $degreeProgramme = validateProfileText($body['degree_programme'] ?? '', 'Field of study', 2, 120);
+            if ($studyYear < 1 || $studyYear > 6) {
+                sendJsonResponse('error', 'Choose your year of study.', ['field' => 'study_year'], 400);
+            }
+            // Undergraduates do not sit a school exam, and the matcher uses the
+            // university and the field instead of subject rows.
+            $examYear = 0;
+            $expectedSubjects = 0;
+            break;
     }
 
     $rawSubjects = $body['subjects'] ?? [];
     if (!is_array($rawSubjects)) {
         $rawSubjects = [];
     }
-    if (count($rawSubjects) !== 3) {
+    if ($level === 'UNI') {
+        $rawSubjects = [];
+    } elseif ($level === 'JUNIOR') {
+        // Junior secondary has a common curriculum: the record keeps up to three
+        // subjects the student wants help with, but one is enough to be useful.
+        if (count($rawSubjects) < 1 || count($rawSubjects) > 3) {
+            sendJsonResponse(
+                'error',
+                'Choose at least one subject you want help with.',
+                ['field' => 'subjects'],
+                400
+            );
+        }
+    } elseif (count($rawSubjects) !== $expectedSubjects) {
         sendJsonResponse('error', 'Choose exactly 3 subjects.', ['field' => 'subjects'], 400);
     }
 
@@ -1599,17 +1689,23 @@ if ($action === 'academic_profile') {
                 exam_level = :level,
                 stream_code = :stream,
                 exam_year = :year,
+                study_year = :study_year,
+                university = :university,
+                degree_programme = :programme,
                 medium = :medium,
                 academic_updated_at = NOW(),
                 updated_at = NOW()
              WHERE id = :id'
         );
         $update->execute([
-            'level'  => $level,
-            'stream' => $streamCode,
-            'year'   => $examYear,
-            'medium' => $medium,
-            'id'     => $academicUserId,
+            'level'       => $level,
+            'stream'      => $streamCode,
+            'year'        => $examYear,
+            'study_year'  => $studyYear > 0 ? $studyYear : null,
+            'university'  => $university !== '' ? $university : null,
+            'programme'   => $degreeProgramme !== '' ? $degreeProgramme : null,
+            'medium'      => $medium,
+            'id'          => $academicUserId,
         ]);
 
         $pdo->prepare('DELETE FROM user_subjects WHERE user_id = :id')

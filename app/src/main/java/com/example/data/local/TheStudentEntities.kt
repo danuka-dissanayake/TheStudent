@@ -70,7 +70,13 @@ data class UserProfileEntity(
     val examYear: Int = 0,
     val medium: String = "",
     /** Subjects encoded by `AcademicProfile.encodeSubjects`. */
-    val academicSubjects: String = ""
+    val academicSubjects: String = "",
+    // Added in schema v7 with the wider academic stages: Grades 6–9, O/L, A/L
+    // and undergraduate. `studyYear` is the school grade, or the year of study
+    // at university; 0 means "not chosen".
+    val studyYear: Int = 0,
+    val university: String = "",
+    val degreeProgramme: String = ""
 )
 
 /**

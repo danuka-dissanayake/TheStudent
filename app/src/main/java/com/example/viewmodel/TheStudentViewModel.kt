@@ -461,7 +461,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         streamCode = entity.streamCode,
                         examYear = entity.examYear.takeIf { it > 0 },
                         medium = entity.medium,
-                        subjects = AcademicProfile.decodeSubjects(entity.academicSubjects)
+                        subjects = AcademicProfile.decodeSubjects(entity.academicSubjects),
+                        studyYear = entity.studyYear.takeIf { it > 0 },
+                        university = entity.university,
+                        programme = entity.degreeProgramme
                     )
                 )
             } else {
@@ -2712,7 +2715,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     // the student with "Invalid API action".
                     val message = if (result.message.contains("Invalid API action", true)) {
                         "Your server is running an older API. Upload backend/api/auth.php " +
-                            "(needs version 3.3.0 or newer), then try again."
+                            "(needs version 3.5.0 or newer), then try again."
                     } else {
                         result.message
                     }

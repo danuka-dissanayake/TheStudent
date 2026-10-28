@@ -15,7 +15,7 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         UserProfileEntity::class,
         ChatMessageEntity::class
     ],
-    version = 6,
+    version = 7,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -119,6 +119,21 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+        /**
+         * v6 -> v7: the wider academic stages (Grades 6–9 and university) need a
+         * grade / year-of-study, the university and the degree field.
+         *
+         * Additive with defaults: an existing A/L or O/L profile stays exactly
+         * as it is and simply has no university attached.
+         */
+        private val MIGRATION_6_7 = object : Migration(6, 7) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN studyYear INTEGER NOT NULL DEFAULT 0")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN university TEXT NOT NULL DEFAULT ''")
+                db.execSQL("ALTER TABLE user_profile ADD COLUMN degreeProgramme TEXT NOT NULL DEFAULT ''")
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -128,7 +143,7 @@ abstract class TheStudentDatabase : RoomDatabase() {
                 )
                     // v2 adds the profile-setup columns; v3 the chat history;
                     // v4 attachments; v5 replies and voice notes; v6 the
-                    // structured academic profile.
+                    // structured academic profile; v7 Grades 6–9 and university.
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
                     .addMigrations(
@@ -136,7 +151,8 @@ abstract class TheStudentDatabase : RoomDatabase() {
                         MIGRATION_2_3,
                         MIGRATION_3_4,
                         MIGRATION_4_5,
-                        MIGRATION_5_6
+                        MIGRATION_5_6,
+                        MIGRATION_6_7
                     )
                     // Last resort only: if the file on the device cannot be
                     // migrated for any reason (interrupted update, a build from
