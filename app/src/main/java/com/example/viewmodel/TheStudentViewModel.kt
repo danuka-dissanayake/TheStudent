@@ -1097,8 +1097,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * this count can only come from the phone. It is what unlocks a rating for
      * a pair that never closed a help request: real conversation, not a tap.
      */
-    private fun ChatPeer.firstNameOrStudent(): String =
-        name.trim().split(" ").firstOrNull().orEmpty().ifBlank { "this student" }
+    /** "Nimal" — the name the student actually goes by, or a neutral fallback. */
+    private fun String.firstNameOrStudent(): String =
+        trim().split(" ").firstOrNull().orEmpty().ifBlank { "this student" }
 
     private fun messagesEachWay(): Int {
         val messages = _chatState.value.messages

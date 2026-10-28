@@ -71,6 +71,7 @@ import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
@@ -842,6 +843,15 @@ private fun RatingCardOverlay(
                 Spacer(Modifier.height(16.dp))
 
                 // ── stars ────────────────────────────────────────────────────
+                // Warm yellow, a soft disc behind each chosen star and a small
+                // pop as it fills — a rating should feel like a treat, not a
+                // form field.
+                val starYellow = Color(0xFFFBBF24)
+                val starEmpty = Color(0xFFE4E9F0)
+                val starWords = listOf(
+                    "", "Not great", "Okay", "Good", "Very good", "Excellent"
+                )
+
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
@@ -850,23 +860,51 @@ private fun RatingCardOverlay(
                 ) {
                     (1..5).forEach { index ->
                         val filled = index <= stars
+                        val pop by animateFloatAsState(
+                            targetValue = if (filled) 1f else 0.88f,
+                            animationSpec = tween(140),
+                            label = "rating_star_$index"
+                        )
                         Box(
                             modifier = Modifier
-                                .size(46.dp)
+                                .padding(horizontal = 1.dp)
+                                .size(48.dp)
                                 .clip(CircleShape)
+                                .background(
+                                    if (filled) starYellow.copy(alpha = 0.16f)
+                                    else Color.Transparent
+                                )
                                 .clickable(enabled = !isBusy) { stars = index }
                                 .testTag("chat_rating_star_$index"),
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Star,
-                                contentDescription = "$index star" + if (index == 1) "" else "s",
-                                tint = if (filled) Color(0xFFF59E0B) else Color(0xFFE2E8F0),
-                                modifier = Modifier.size(34.dp)
+                                contentDescription = if (index == 1) "1 star" else "$index stars",
+                                tint = if (filled) starYellow else starEmpty,
+                                modifier = Modifier
+                                    .size(37.dp)
+                                    .graphicsLayer {
+                                        scaleX = pop
+                                        scaleY = pop
+                                    }
                             )
                         }
                     }
                 }
+
+                Text(
+                    text = starWords.getOrElse(stars) { "" }
+                        .ifBlank { "Tap a star" },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (stars == 0) ChatMuted else Color(0xFFB45309),
+                    textAlign = androidx.compose.ui.text.style.TextAlign.Center,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = 2.dp)
+                )
 
                 Spacer(Modifier.height(14.dp))
 
