@@ -84,8 +84,10 @@ class MainActivity : ComponentActivity() {
 
             // "Your EXP" is a page, so back leaves the page — not the tab.
             BackHandler(enabled = uiState.isExpOpen) { viewModel.closeExp() }
+            // Same for the account page: back must not drop the session or the tab.
+            BackHandler(enabled = uiState.isAccountOpen) { viewModel.closeAccount() }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -391,8 +393,15 @@ class MainActivity : ComponentActivity() {
                                              // "Your EXP" brings its own header and its
                                              // own back button: the app bar and the tab
                                              // bar would only box it in.
+                                             // Each of these screens draws its own header, so
+                                             // the app bar would stack a second one on top:
+                                             // chat has its conversation bar, Profile has the
+                                             // "Profile / Your studies" header, and EXP and
+                                             // Account are pages with their own back button.
                                              if (uiState.currentTab != TheStudentNavTab.CHAT &&
-                                                 !uiState.isExpOpen
+                                                 uiState.currentTab != TheStudentNavTab.PROFILE &&
+                                                 !uiState.isExpOpen &&
+                                                 !uiState.isAccountOpen
                                              ) {
                                                  TheStudentTopAppBar(
                                                      currentTab = uiState.currentTab,
@@ -525,7 +534,15 @@ class MainActivity : ComponentActivity() {
                                                         // The academic step is a full-screen page rather
                                                         // than a dialog: it can be long on O/L, and it is
                                                         // the data the matching algorithm depends on.
-                                                        if (uiState.isAcademicSetupOpen) {
+                                                        if (uiState.isAccountOpen) {
+                                                            AccountScreen(
+                                                                userProfile = userProfile,
+                                                                onBack = { viewModel.closeAccount() },
+                                                                onOpenSecurity = { viewModel.openSecurityPanel() },
+                                                                onEditAcademic = { viewModel.openAcademicSetup() },
+                                                                onSignOut = { viewModel.logout() }
+                                                            )
+                                                        } else if (uiState.isAcademicSetupOpen) {
                                                             AcademicSetupScreen(
                                                                 initial = userProfile.academic,
                                                                 isSaving = uiState.isSavingAcademic,
@@ -562,7 +579,7 @@ class MainActivity : ComponentActivity() {
                                                                 isDarkTheme = uiState.isDarkTheme,
                                                                 isAdmin = isAdmin,
                                                                 onToggleTheme = { viewModel.toggleTheme() },
-                                                                onOpenAuthDialog = { viewModel.openAuthScreen(false) },
+                                                                onOpenAccount = { viewModel.openAccount() },
                                                                 onPaperClick = { paperId ->
                                                                     viewModel.allPapers.find { it.id == paperId }?.let {
                                                                         viewModel.openPaperDetail(it)
@@ -578,10 +595,6 @@ class MainActivity : ComponentActivity() {
                                                                 onOpenSecurity = { viewModel.openSecurityPanel() },
                                                                 onOpenAdmin = { viewModel.openAdminPanel() },
                                                                 onSignOut = { viewModel.logout() },
-                                                                onRefresh = {
-                                                                    viewModel.refreshExp()
-                                                                    viewModel.refreshMyRatings()
-                                                                },
                                                                 accountEmail = userProfile.email
                                                             )
                                                         }

@@ -93,6 +93,8 @@ data class TheStudentUiState(
     val isLanguageLabOpen: Boolean = false,
     /** The "Your EXP" page: what was earned, today's allowance and the tier. */
     val isExpOpen: Boolean = false,
+    /** The account details page, opened from Profile — never the sign-in flow. */
+    val isAccountOpen: Boolean = false,
     val activeLanguageSubTab: Int = 0, // 0: Voice Conv, 1: Vocabulary, 2: Grammar, 3: Pronunciation
     val isSpeakingActive: Boolean = false,
     val activeGrammarQuestionIndex: Int = 0,
@@ -2888,7 +2890,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             _chatState.value = ChatUiState()
             repository.clearUserProfile()
             _isAdmin.value = false
-            _uiState.update { it.copy(isAdminPanelOpen = false, isSecurityPanelOpen = false) }
+            _uiState.update {
+                it.copy(
+                    isAdminPanelOpen = false,
+                    isSecurityPanelOpen = false,
+                    isAccountOpen = false,
+                    isExpOpen = false
+                )
+            }
             if (revokeOnServer && !token.isNullOrBlank()) {
                 // Revoke server-side AFTER clearing local state so the UI reacts
                 // instantly even if the network call is slow or fails.
@@ -2917,7 +2926,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     // Navigation and tabs
     fun setTab(tab: TheStudentNavTab) {
         val wasDifferent = _uiState.value.currentTab != tab
-        _uiState.update { it.copy(currentTab = tab, isLanguageLabOpen = false, isExpOpen = false) }
+        _uiState.update {
+            it.copy(
+                currentTab = tab,
+                isLanguageLabOpen = false,
+                isExpOpen = false,
+                isAccountOpen = false
+            )
+        }
         if (wasDifferent && (tab == TheStudentNavTab.HOME || tab == TheStudentNavTab.CHAT || tab == TheStudentNavTab.PAPERS)) {
             simulateSkeletonRefresh()
         }
@@ -2972,6 +2988,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun closeExp() {
         _uiState.update { it.copy(isExpOpen = false) }
+    }
+
+    /**
+     * Account details.
+     *
+     * Deliberately separate from `openAuthScreen()`: the old profile screen sent
+     * "Account" to the sign-in flow, which looks exactly like being logged out.
+     * Looking at your own details must never touch the session.
+     */
+    fun openAccount() {
+        _uiState.update { it.copy(isAccountOpen = true) }
+    }
+
+    fun closeAccount() {
+        _uiState.update { it.copy(isAccountOpen = false) }
     }
 
     /**

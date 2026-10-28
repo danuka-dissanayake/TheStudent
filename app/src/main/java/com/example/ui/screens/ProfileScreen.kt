@@ -91,7 +91,7 @@ fun ProfileScreen(
     isDarkTheme: Boolean,
     isAdmin: Boolean,
     onToggleTheme: () -> Unit,
-    onOpenAuthDialog: () -> Unit,
+    onOpenAccount: () -> Unit,
     onPaperClick: (String) -> Unit,
     onCourseClick: (String) -> Unit = {},
     onEditAcademic: () -> Unit,
@@ -99,7 +99,6 @@ fun ProfileScreen(
     onOpenSecurity: () -> Unit = {},
     onOpenAdmin: () -> Unit = {},
     onSignOut: () -> Unit = {},
-    onRefresh: () -> Unit = {},
     accountEmail: String = "",
     modifier: Modifier = Modifier
 ) {
@@ -120,7 +119,7 @@ fun ProfileScreen(
             item(key = "header") {
                 ProfileHeader(
                     onOpenSecurity = onOpenSecurity,
-                    onOpenAuthDialog = onOpenAuthDialog
+                    onOpenAccount = onOpenAccount
                 )
             }
 
@@ -130,7 +129,7 @@ fun ProfileScreen(
                     exp = exp,
                     isAdmin = isAdmin,
                     onOpenExp = onOpenExp,
-                    onOpenAccount = onOpenAuthDialog
+                    onOpenAccount = onOpenAccount
                 )
             }
 
@@ -240,31 +239,11 @@ fun ProfileScreen(
                     onToggleTheme = onToggleTheme,
                     onOpenSecurity = onOpenSecurity,
                     onOpenAdmin = onOpenAdmin,
-                    onOpenAccount = onOpenAuthDialog,
+                    onOpenAccount = onOpenAccount,
                     onSignOut = { confirmSignOut = true }
                 )
             }
 
-            item(key = "refresh") {
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.Center
-                ) {
-                    Text(
-                        text = "Tap to refresh",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = EmeraldDark,
-                        modifier = Modifier
-                            .clip(RoundedCornerShape(50))
-                            .background(ProfMint)
-                            .clickable(onClick = onRefresh)
-                            .padding(horizontal = 14.dp, vertical = 7.dp)
-                            .testTag("profile_refresh")
-                    )
-                }
-            }
         }
     }
 
@@ -289,7 +268,7 @@ fun ProfileScreen(
 @Composable
 private fun ProfileHeader(
     onOpenSecurity: () -> Unit,
-    onOpenAuthDialog: () -> Unit
+    onOpenAccount: () -> Unit
 ) {
     Row(
         modifier = Modifier
@@ -324,7 +303,7 @@ private fun ProfileHeader(
         CircleGhostButton(
             icon = Icons.Default.ManageAccounts,
             description = "Account settings",
-            onClick = onOpenAuthDialog,
+            onClick = onOpenAccount,
             tag = "profile_account"
         )
     }
