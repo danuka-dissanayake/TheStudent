@@ -1274,6 +1274,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         return true
     }
 
+    /**
+     * Turn a bare server refusal into something actionable.
+     *
+     * "Unknown action" / "Invalid API action" mean the uploaded PHP predates
+     * this build — a file to upload, not a mistake the student made. Anything
+     * else is passed through untouched.
+     */
+    private fun chatFailureMessage(raw: String): String =
+        if (raw.contains("Unknown action", true) || raw.contains("Invalid API action", true)) {
+            "This server is running an older chat API. Upload backend/api/chat.php " +
+                "(needs version 2.7.0 or newer)."
+        } else {
+            raw
+        }
+
     /** Helper accepts the request. */
     fun acceptHelpRequest() {
         val request = _chatState.value.helpRequest ?: return
