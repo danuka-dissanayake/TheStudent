@@ -380,7 +380,8 @@ class MainActivity : ComponentActivity() {
                                 )
                             } else if (uiState.isCourseCollectionOpen) {
                                 CourseCollectionScreen(
-                                    onBack = { viewModel.closeCourseCollection() }
+                                    onBack = { viewModel.closeCourseCollection() },
+                                    initialFilter = uiState.courseCollectionFilter
                                 )
                             } else if (uiState.isProgressOpen) {
                                 val progress by viewModel.quizProgress.collectAsStateWithLifecycle()
@@ -549,6 +550,7 @@ class MainActivity : ComponentActivity() {
                                                 when (tab) {
                                                     TheStudentNavTab.HOME -> {
                                                         val homeQuizzes by viewModel.quizzes.collectAsStateWithLifecycle()
+                                                        val homeExp by viewModel.expState.collectAsStateWithLifecycle()
                                                         HomeScreen(
                                                             userProfile = userProfile,
                                                             popularCourses = viewModel.allCourses,
@@ -566,6 +568,10 @@ class MainActivity : ComponentActivity() {
                                                             onContinueLearning = { viewModel.practiseSuggested() },
                                                             onOpenCourseCollection = { viewModel.openCourseCollection() },
                                                             onNavigateTab = { viewModel.setTab(it) },
+                                                            exp = homeExp,
+                                                            onOpenCourseCollectionFor = { filter ->
+                                                                viewModel.openCourseCollection(filter)
+                                                            },
                                                             quizzes = homeQuizzes.filter { it.isPublished },
                                                             onQuizClick = { viewModel.openQuiz(it) },
                                                             onOpenQuizzes = {
@@ -576,6 +582,7 @@ class MainActivity : ComponentActivity() {
                                                         LaunchedEffect(Unit) {
                                                             viewModel.loadProgress()
                                                             viewModel.loadQuizzes()
+                                                            viewModel.refreshExp()
                                                         }
                                                     }
                                                     TheStudentNavTab.CHAT -> {

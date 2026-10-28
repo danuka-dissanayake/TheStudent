@@ -46,6 +46,7 @@ import com.example.data.model.ChatMyRatings
 import com.example.data.model.ExpTier
 import com.example.data.model.UserExp
 import com.example.data.model.UserProfile
+import com.example.ui.components.ExpMedalsCard
 import com.example.ui.components.TierMedallion
 import com.example.ui.components.formatExp
 import com.example.ui.theme.EmeraldDark
@@ -148,7 +149,7 @@ fun ProfileScreen(
             }
 
             item(key = "level") {
-                LevelCard(exp = exp, onOpenExp = onOpenExp)
+                ExpMedalsCard(exp = exp, onOpenExp = onOpenExp)
             }
 
             item(key = "reputation") {
@@ -596,108 +597,6 @@ private fun StatDivider() {
 // ─────────────────────────────────────────────────────────────────────────────
 //  Level + badges
 // ─────────────────────────────────────────────────────────────────────────────
-
-@Composable
-private fun LevelCard(exp: UserExp, onOpenExp: () -> Unit) {
-    val progress by animateFloatAsState(
-        targetValue = exp.tier.progress.coerceIn(0f, 1f),
-        animationSpec = tween(800),
-        label = "profile_level_progress"
-    )
-
-    Surface(
-        shape = RoundedCornerShape(22.dp),
-        color = Color.White,
-        modifier = Modifier
-            .fillMaxWidth()
-            .padding(horizontal = 16.dp)
-            .clickable(onClick = onOpenExp)
-            .testTag("profile_level_card")
-    ) {
-        Column(modifier = Modifier.padding(16.dp)) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                TierMedallion(code = exp.tier.code, size = 40.dp, glow = true)
-                Spacer(Modifier.width(12.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = "Level ${exp.tier.level} · ${exp.tier.name}",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.5.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = ProfInk
-                    )
-                    Text(
-                        text = if (exp.tier.nextName != null) {
-                            "${formatExp(exp.tier.toNext)} EXP to ${exp.tier.nextName}"
-                        } else {
-                            "Top level reached"
-                        },
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
-                        color = ProfMuted
-                    )
-                }
-                Icon(
-                    Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = "Open EXP",
-                    tint = ProfFaint,
-                    modifier = Modifier.size(20.dp)
-                )
-            }
-
-            Spacer(Modifier.height(12.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(7.dp)
-                    .clip(RoundedCornerShape(50))
-                    .background(Color(0xFFEAF0F5))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress)
-                        .fillMaxHeight()
-                        .clip(RoundedCornerShape(50))
-                        .background(
-                            Brush.horizontalGradient(
-                                listOf(Color(0xFF34D399), EmeraldPrimary)
-                            )
-                        )
-                )
-            }
-
-            Spacer(Modifier.height(14.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                ExpTier.LADDER.forEach { step ->
-                    val earned = exp.total >= step.min
-                    Column(
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        modifier = Modifier.weight(1f)
-                    ) {
-                        TierMedallion(
-                            code = step.code,
-                            size = 30.dp,
-                            glow = false,
-                            earned = earned
-                        )
-                        Spacer(Modifier.height(4.dp))
-                        Text(
-                            text = step.name,
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 10.5.sp,
-                            fontWeight = if (earned) FontWeight.Bold else FontWeight.Medium,
-                            color = if (earned) ProfInk else ProfFaint,
-                            maxLines = 1
-                        )
-                    }
-                }
-            }
-        }
-    }
-}
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Reputation

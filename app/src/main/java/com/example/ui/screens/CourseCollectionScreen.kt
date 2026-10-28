@@ -159,7 +159,8 @@ private val LEVELS = listOf("Beginner", "Intermediate", "Advanced")
 @Composable
 fun CourseCollectionScreen(
     onBack: () -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    initialFilter: String? = null
 ) {
     var selectedCourse by remember { mutableStateOf<CatalogCourse?>(null) }
     var playingVideo by remember { mutableStateOf<CatalogVideo?>(null) }
@@ -182,6 +183,7 @@ fun CourseCollectionScreen(
             } else {
                 CourseCatalogBrowse(
                     onBack = onBack,
+                    initialFilter = initialFilter,
                     onOpenCourse = { selectedCourse = it },
                     onPlayVideo = { playingVideo = it }
                 )
@@ -213,14 +215,22 @@ fun CourseCollectionScreen(
 @Composable
 private fun CourseCatalogBrowse(
     onBack: () -> Unit,
+    initialFilter: String?,
     onOpenCourse: (CatalogCourse) -> Unit,
     onPlayVideo: (CatalogVideo) -> Unit
 ) {
-    var query by remember { mutableStateOf("") }
+    // Opening from a dashboard course card seeds the browse state with that
+    // card's category. A category only becomes a filter when the catalogue can
+    // actually honour it — otherwise the student would land on an empty list,
+    // which is worse than no filter at all.
+    val seed = remember(initialFilter) { resolveSeed(initialFilter) }
+    var query by remember { mutableStateOf(if (seed is CatalogSeed.Text) seed.value else "") }
     var certificate by remember { mutableStateOf<CatalogCertificate?>(null) }
     var stage by remember { mutableStateOf<String?>(null) }
     var level by remember { mutableStateOf<String?>(null) }
-    var subject by remember { mutableStateOf<String?>(null) }
+    var subject by remember {
+        mutableStateOf((seed as? CatalogSeed.Subject)?.value)
+    }
     var provider by remember { mutableStateOf<String?>(null) }
     var sheetOpen by remember { mutableStateOf(false) }
 
@@ -2692,4 +2702,58 @@ private class VideoChromeClient(
         callback?.onCustomViewHidden()
         callback = null
     }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  Opening the collection from a course card
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** What a card's category turns into once the catalogue has had its say. */
+private sealed interface CatalogSeed {
+    /** No filter: the catalogue simply opens. */
+    data object None : CatalogSeed
+
+    /** A real subject facet, applied as a chip. */
+    data class Subject(val value: String) : CatalogSeed
+
+    /** Not a facet, but it matches courses: applied as a search term. */
+    data class Text(val value: String) : CatalogSeed
+}
+
+/**
+ * The dashboard's course categories ("Physical Science", "Business & Finance")
+ * are not the catalogue's subjects ("Mathematics", "Business"), so a raw match
+ * would find nothing. These aliases bridge the two; anything still unmatched
+ * opens the collection unfiltered rather than showing an empty page.
+ */
+private val CATEGORY_ALIASES: Map<String, String> = mapOf(
+    "business & finance" to "Business",
+    "business and finance" to "Business",
+    "academic & research" to "Academic Writing",
+    "academic and research" to "Academic Writing",
+    "general english" to "Communication",
+    "speaking & presentation" to "Communication",
+    "computer science" to "Computer Science",
+    "information technology" to "Computer Science"
+)
+
+private fun resolveSeed(raw: String?): CatalogSeed {
+    val text = raw?.trim().orEmpty()
+    if (text.isBlank()) return CatalogSeed.None
+
+    val subject = CourseCatalog.courses
+        .firstOrNull { it.subject.equals(text, ignoreCase = true) }
+        ?.subject
+    if (subject != null) return CatalogSeed.Subject(subject)
+
+    val alias = CATEGORY_ALIASES[text.lowercase()]
+    if (alias != null) return CatalogSeed.Subject(alias)
+
+    val matches = CourseCatalog.courses.any { course ->
+        course.title.contains(text, true) ||
+            course.subject.contains(text, true) ||
+            course.provider.contains(text, true) ||
+            course.skills.any { it.contains(text, true) }
+    }
+    return if (matches) CatalogSeed.Text(text) else CatalogSeed.None
 }

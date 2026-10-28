@@ -100,6 +100,8 @@ data class TheStudentUiState(
     val isProgressOpen: Boolean = false,
     /** The curated index of free courses owned by other universities and platforms. */
     val isCourseCollectionOpen: Boolean = false,
+    /** Pre-filter applied when the collection is opened from a course card. */
+    val courseCollectionFilter: String? = null,
     val activeLanguageSubTab: Int = 0, // 0: Voice Conv, 1: Vocabulary, 2: Grammar, 3: Pronunciation
     val isSpeakingActive: Boolean = false,
     val activeGrammarQuestionIndex: Int = 0,
@@ -628,12 +630,25 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     // opening the page cannot fail, which matters for a screen students reach
     // before the relay is configured.
 
-    fun openCourseCollection() {
-        _uiState.update { it.copy(isCourseCollectionOpen = true) }
+    /**
+     * Open the free-course index, optionally pre-filtered.
+     *
+     * The dashboard's course cards pass their category (or a subject), so tapping
+     * a card lands on the matching slice of the catalogue instead of the whole
+     * list. A blank filter just opens the collection as usual.
+     */
+    fun openCourseCollection(filter: String? = null) {
+        val clean = filter?.trim().orEmpty()
+        _uiState.update {
+            it.copy(
+                isCourseCollectionOpen = true,
+                courseCollectionFilter = clean.ifBlank { null }
+            )
+        }
     }
 
     fun closeCourseCollection() {
-        _uiState.update { it.copy(isCourseCollectionOpen = false) }
+        _uiState.update { it.copy(isCourseCollectionOpen = false, courseCollectionFilter = null) }
     }
 
     fun loadProgress() {

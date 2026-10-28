@@ -194,9 +194,8 @@ fun HomeSkeletonLoading(modifier: Modifier = Modifier) {
             verticalAlignment = Alignment.CenterVertically
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
-                ShimmerBox(modifier = Modifier.size(width = 112.dp, height = 13.dp))
-                ShimmerBox(modifier = Modifier.size(width = 176.dp, height = 30.dp))
-                ShimmerBox(modifier = Modifier.size(width = 148.dp, height = 11.dp))
+                ShimmerBox(modifier = Modifier.size(width = 118.dp, height = 14.dp))
+                ShimmerBox(modifier = Modifier.size(width = 196.dp, height = 32.dp))
             }
         }
 

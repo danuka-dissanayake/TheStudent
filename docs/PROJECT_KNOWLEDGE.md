@@ -71,12 +71,13 @@ a **solid emerald pill** with white icon, white bold label and a white check.
 
 ### Type
 
-One typeface, one scale. `ui/theme/Type.kt` binds `UbuntuFontFamily` (Light 300 / Regular 400 / Medium 500 /
-Bold 700, shipped in `res/font/ubuntu_*.ttf`) as **`MaisonNeueFontFamily`** — the alias every screen already
-uses — so the whole app renders in Ubuntu without touching call sites. The `Typography` object is the
-standard Material 3 ramp (57/45/36 display · 32/28/24 headline · 22/16/14 title · 16/14/12 body · 14/12/11
-label). Hand-set sizes across the UI were raised to that ramp's floor: nothing below 11sp, body copy at
-12–14sp, and headings 18sp and up.
+One typeface, one scale. `ui/theme/Type.kt` binds **Roboto** (400/500/700/900, shipped in
+`res/font/roboto_*.ttf`) as `RobotoFontFamily`, and **`MaisonNeueFontFamily`** is its alias — the name every
+screen already uses — so the whole app renders in Roboto without touching call sites. (The `ubuntu_*.ttf`
+files stay in `res/font` but are unused; the family can be switched back in this one file.) The `Typography`
+object is the standard Material 3 ramp (57/45/36 display · 32/28/24 headline · 22/16/14 title · 16/14/12
+body · 14/12/11 label). Hand-set sizes across the UI were raised to that ramp's floor: nothing below 11sp,
+body copy at 12–14sp, and headings 18sp and up.
 
 ## 3. Screens (`com.example.ui.screens`)
 

@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.School
@@ -74,9 +73,11 @@ import com.example.data.model.QuizProgress
 import com.example.data.model.QuizSummary
 import com.example.data.model.StudyMetrics
 import com.example.data.model.StudyNote
+import com.example.data.model.UserExp
 import com.example.data.model.SubjectCodes
 import com.example.data.model.SubjectProgress
 import com.example.data.model.UserProfile
+import com.example.ui.components.ExpMedalsCard
 import com.example.ui.components.HomeSkeletonLoading
 import com.example.ui.components.PaperCover
 import com.example.ui.components.TheStudentNavTab
@@ -146,6 +147,8 @@ fun HomeScreen(
     onOpenCourseCollection: () -> Unit = {},
     onNavigateTab: (TheStudentNavTab) -> Unit,
     modifier: Modifier = Modifier,
+    exp: UserExp = UserExp(),
+    onOpenCourseCollectionFor: (String) -> Unit = {},
     quizzes: List<QuizSummary> = emptyList(),
     onQuizClick: (QuizSummary) -> Unit = {},
     onOpenQuizzes: () -> Unit = {}
@@ -158,13 +161,6 @@ fun HomeScreen(
     val summary = quizProgress.summary
     val practice = quizProgress.practice
     val fullName = userProfile.name.trim()
-    val streak = maxOf(summary.streakDays, userProfile.streakDays)
-    val stage = listOf(userProfile.academicLevel, userProfile.streamOrDegree)
-        .filter { it.isNotBlank() }
-        .joinToString(" · ")
-    val subtitle = listOf(StudyMetrics.today(), stage)
-        .filter { it.isNotBlank() }
-        .joinToString(" · ")
 
     LazyColumn(
         modifier = modifier
@@ -176,12 +172,19 @@ fun HomeScreen(
         item(key = "greeting") {
             GreetingHeader(
                 fullName = fullName,
-                subtitle = subtitle,
-                streakDays = streak,
                 modifier = Modifier
                     .padding(horizontal = 18.dp)
-                    .padding(top = 16.dp, bottom = 16.dp)
+                    .padding(top = 16.dp, bottom = 14.dp)
                     .testTag("welcome_card")
+            )
+        }
+
+        // ── EXP medals: the same card the profile shows ─────────────────────
+        item(key = "exp_medals") {
+            ExpMedalsCard(
+                exp = exp,
+                onOpenExp = onOpenExp,
+                modifier = Modifier.padding(horizontal = 18.dp)
             )
         }
 
@@ -284,7 +287,7 @@ fun HomeScreen(
             item(key = "courses_rail") {
                 AutoCourseRail(
                     courses = popularCourses.take(6),
-                    onCourseClick = onCourseClick
+                    onCourseClick = { course -> onOpenCourseCollectionFor(course.category) }
                 )
             }
         }
@@ -418,8 +421,6 @@ private fun greetingForNow(): String {
 @Composable
 private fun GreetingHeader(
     fullName: String,
-    subtitle: String,
-    streakDays: Int,
     modifier: Modifier = Modifier
 ) {
     Column(modifier = modifier.fillMaxWidth()) {
@@ -438,7 +439,7 @@ private fun GreetingHeader(
             text = fullName.ifBlank { "there" },
             fontFamily = MaisonNeueFontFamily,
             fontSize = 36.sp,
-            lineHeight = 42.5.sp,
+            lineHeight = 42.sp,
             fontWeight = FontWeight.Bold,
             color = HInk,
             letterSpacing = (-0.9).sp,
@@ -446,51 +447,6 @@ private fun GreetingHeader(
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.testTag("welcome_name")
         )
-        Spacer(Modifier.height(6.dp))
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            if (streakDays > 0) {
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .background(HAmberSoft)
-                        .padding(horizontal = 10.dp, vertical = 5.dp)
-                        .testTag("home_streak_pill")
-                ) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.LocalFireDepartment,
-                            contentDescription = null,
-                            tint = HAmber,
-                            modifier = Modifier.size(15.dp)
-                        )
-                        Text(
-                            text = "$streakDays day streak",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = HAmber,
-                            maxLines = 1
-                        )
-                    }
-                }
-                Spacer(Modifier.width(8.dp))
-            }
-            if (subtitle.isNotBlank()) {
-                Text(
-                    text = subtitle,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.Normal,
-                    color = HMuted,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.weight(1f, fill = false)
-                )
-            }
-        }
     }
 }
 
@@ -1616,7 +1572,7 @@ private fun levelLabel(level: EducationLevel): String = when (level) {
 private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
     Column(
         modifier = Modifier
-            .width(112.dp)
+            .width(140.dp)
             .clip(RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .testTag("home_paper_${paper.id}")
@@ -1624,10 +1580,10 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
         Box {
             PaperCover(
                 paper = paper,
-                corner = 12.dp,
+                corner = 14.dp,
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(0.78f)
+                    .aspectRatio(0.82f)
             )
             Box(
                 modifier = Modifier
@@ -1640,7 +1596,7 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
                 Text(
                     text = paper.year.toString(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = HInk,
                     maxLines = 1
@@ -1651,19 +1607,19 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
         Text(
             text = paper.title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
-            lineHeight = 15.sp,
+            fontSize = 14.5.sp,
+            lineHeight = 18.sp,
             fontWeight = FontWeight.Bold,
             color = HInk,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(1.dp))
+        Spacer(Modifier.height(2.dp))
         Text(
             text = "${SubjectCodes.of(paper.subject)} · ${paper.examination}",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
-            lineHeight = 13.5.sp,
+            fontSize = 12.5.sp,
+            lineHeight = 16.sp,
             color = HMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis

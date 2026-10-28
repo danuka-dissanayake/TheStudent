@@ -92,8 +92,8 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
             Text(
                 text = paper.subject,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
-                lineHeight = 12.5.sp,
+                fontSize = 11.5.sp,
+                lineHeight = 14.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Color.White,
                 textAlign = TextAlign.Center,
@@ -112,7 +112,7 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
             Text(
                 text = SubjectCodes.of(paper.subject),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-0.2).sp,
                 color = tint,
