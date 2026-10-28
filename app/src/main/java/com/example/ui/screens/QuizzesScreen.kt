@@ -26,6 +26,7 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
+import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -85,12 +86,14 @@ fun QuizzesSegment(
     var chip by remember { mutableStateOf("All") }
     var onlyPassed by remember { mutableStateOf(false) }
     var onlyNew by remember { mutableStateOf(false) }
+    var onlyEnrolled by remember { mutableStateOf(false) }
 
-    val visible = remember(quizzes, query, chip, onlyPassed, onlyNew) {
+    val visible = remember(quizzes, query, chip, onlyPassed, onlyNew, onlyEnrolled) {
         quizzes
             .filter { quiz -> matchesChip(quiz, chip) }
             .filter { quiz -> !onlyPassed || quiz.passed }
             .filter { quiz -> !onlyNew || quiz.attempts == 0 }
+            .filter { quiz -> !onlyEnrolled || quiz.isEnrolled }
             .filter { quiz ->
                 query.isBlank() ||
                     quiz.title.contains(query, true) ||
@@ -98,13 +101,16 @@ fun QuizzesSegment(
                     quiz.grade.contains(query, true) ||
                     quiz.medium.contains(query, true)
             }
+            // Live quizzes first; quizzes whose attempts are used up sink to the
+            // bottom, where the Enrolled chip collects them.
             .sortedWith(
-                compareBy<QuizSummary> { if (it.attempts == 0) 1 else 0 }
+                compareBy<QuizSummary> { if (it.isEnrolled) 2 else if (it.attempts == 0) 1 else 0 }
                     .thenByDescending { it.bestPercent ?: 0 }
             )
     }
 
-    val filtering = query.isNotBlank() || chip != "All" || onlyPassed || onlyNew
+    val enrolledCount = remember(quizzes) { quizzes.count { it.isEnrolled } }
+    val filtering = query.isNotBlank() || chip != "All" || onlyPassed || onlyNew || onlyEnrolled
 
     Column(modifier = modifier.fillMaxSize()) {
         OutlinedTextField(
@@ -169,23 +175,37 @@ fun QuizzesSegment(
                 )
             }
             QuizPill(
-                label = "Passed",
-                selected = onlyPassed,
-                tag = "quizzes_chip_passed",
-                onClick = {
-                    onlyNew = false
-                    onlyPassed = !onlyPassed
-                }
-            )
-            QuizPill(
                 label = "New",
                 selected = onlyNew,
                 tag = "quizzes_chip_new",
                 onClick = {
                     onlyPassed = false
+                    onlyEnrolled = false
                     onlyNew = !onlyNew
                 }
             )
+            QuizPill(
+                label = "Passed",
+                selected = onlyPassed,
+                tag = "quizzes_chip_passed",
+                onClick = {
+                    onlyNew = false
+                    onlyEnrolled = false
+                    onlyPassed = !onlyPassed
+                }
+            )
+            if (enrolledCount > 0) {
+                QuizPill(
+                    label = "Enrolled ($enrolledCount)",
+                    selected = onlyEnrolled,
+                    tag = "quizzes_chip_enrolled",
+                    onClick = {
+                        onlyNew = false
+                        onlyPassed = false
+                        onlyEnrolled = !onlyEnrolled
+                    }
+                )
+            }
         }
 
         Row(
@@ -219,6 +239,7 @@ fun QuizzesSegment(
                             chip = "All"
                             onlyPassed = false
                             onlyNew = false
+                            onlyEnrolled = false
                         }
                         .padding(horizontal = 6.dp, vertical = 4.dp)
                 )
@@ -295,6 +316,7 @@ fun QuizzesSegment(
                         chip = "All"
                         onlyPassed = false
                         onlyNew = false
+                        onlyEnrolled = false
                     },
                     shape = RoundedCornerShape(50),
                     color = Color.White,
@@ -348,7 +370,14 @@ fun QuizzesSegment(
                     }
                 }
                 items(visible, key = { it.id }) { quiz ->
-                    QuizCard(quiz = quiz, onClick = { onOpenQuiz(quiz) })
+                    QuizCard(
+                        quiz = quiz,
+                        onClick = {
+                            // Enrolled cards are not tappable; this is the guard in
+                            // case a stale list is on screen.
+                            if (!quiz.isEnrolled) onOpenQuiz(quiz)
+                        }
+                    )
                 }
             }
         }
@@ -359,16 +388,25 @@ fun QuizzesSegment(
 
 @Composable
 private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
+    val enrolled = quiz.isEnrolled
+
     Surface(
         onClick = onClick,
+        enabled = !enrolled,
         shape = RoundedCornerShape(18.dp),
-        color = Color.White,
+        color = if (enrolled) Color(0xFFF4F6FA) else Color.White,
         modifier = Modifier
             .fillMaxWidth()
-            .testTag("quiz_card_${quiz.id}")
+            .testTag(
+                if (enrolled) "quiz_card_enrolled_${quiz.id}" else "quiz_card_${quiz.id}"
+            )
     ) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-            QuizCover(quiz = quiz, modifier = Modifier.size(width = 40.dp, height = 50.dp))
+            QuizCover(
+                quiz = quiz,
+                modifier = Modifier.size(width = 40.dp, height = 50.dp),
+                dimmed = enrolled
+            )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
@@ -376,7 +414,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.Bold,
-                    color = QuizInk,
+                    color = if (enrolled) QuizMuted else QuizInk,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -393,18 +431,56 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                 )
                 Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                    QuizBadge("${quiz.questionCount} questions", QuizMuted, Color(0xFFF1F5F9))
-                    if (quiz.isTimed) {
-                        QuizBadge("${quiz.minutes} min", QuizMuted, Color(0xFFF1F5F9))
-                    }
-                    if (quiz.expReward > 0) {
-                        QuizBadge("+${quiz.expReward} EXP", QuizGreen, QuizGreenSoft)
+                    if (enrolled) {
+                        QuizBadge("Enrolled", QuizMuted, Color(0xFFE8EDF3))
+                        QuizBadge(quiz.attemptsLabel, QuizMuted, Color(0xFFF1F5F9))
+                    } else {
+                        QuizBadge("${quiz.questionCount} questions", QuizMuted, Color(0xFFF1F5F9))
+                        if (quiz.isTimed) {
+                            QuizBadge("${quiz.minutes} min", QuizMuted, Color(0xFFF1F5F9))
+                        }
+                        if (quiz.expReward > 0) {
+                            QuizBadge("+${quiz.expReward} EXP", QuizGreen, QuizGreenSoft)
+                        }
                     }
                 }
             }
             Spacer(Modifier.width(8.dp))
-            ScoreChip(quiz)
+            if (enrolled) {
+                EnrolledChip()
+            } else {
+                ScoreChip(quiz)
+            }
         }
+    }
+}
+
+/** The locked state: the quiz is finished, its attempts are used up. */
+@Composable
+private fun EnrolledChip() {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Box(
+            modifier = Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(Color(0xFFE8EDF3)),
+            contentAlignment = Alignment.Center
+        ) {
+            Icon(
+                Icons.Default.Lock,
+                contentDescription = "Enrolled — no attempts left",
+                tint = QuizMuted,
+                modifier = Modifier.size(16.dp)
+            )
+        }
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = "Enrolled",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 9.sp,
+            fontWeight = FontWeight.Bold,
+            color = QuizMuted
+        )
     }
 }
 
@@ -470,8 +546,8 @@ private fun ScoreChip(quiz: QuizSummary) {
 
 /** A miniature quiz sheet: coloured header band, ruled lines, subject initial. */
 @Composable
-private fun QuizCover(quiz: QuizSummary, modifier: Modifier = Modifier) {
-    val tint = paperCoverTint(quiz.subject)
+private fun QuizCover(quiz: QuizSummary, modifier: Modifier = Modifier, dimmed: Boolean = false) {
+    val tint = if (dimmed) QuizFaint else paperCoverTint(quiz.subject)
     Surface(
         shape = RoundedCornerShape(10.dp),
         color = Color.White,

@@ -25,7 +25,7 @@ require_once __DIR__ . '/../config.php';
 require_once __DIR__ . '/_admin_guard.php';   // bearer token, json error, admin guard
 require_once __DIR__ . '/_exp.php';           // the EXP ledger
 
-const TS_QUIZ_API_VERSION = '1.0.0';
+const TS_QUIZ_API_VERSION = '1.1.0';
 const TS_QUIZ_EXP_MAX_REWARD = 40;
 const TS_QUIZ_MAX_QUESTIONS = 200;
 
@@ -121,9 +121,22 @@ function ts_quiz_require_ready(PDO $pdo): void
     );
 }
 
+/**
+ * How many attempts a quiz allows. Clamped, and defaulted for databases created
+ * before the column existed, so an old install keeps working without a migration
+ * error (it simply behaves as three attempts).
+ */
+function ts_quiz_max_attempts(array $row): int
+{
+    return max(1, min(10, (int) ($row['max_attempts'] ?? 3)));
+}
+
 function ts_quiz_public(array $row, int $best = -1, bool $passed = false, int $attempts = 0): array
 {
     $minutes = (int) round(((int) $row['time_limit_seconds']) / 60);
+    $maxAttempts = ts_quiz_max_attempts($row);
+    $used = max(0, $attempts);
+    $left = max(0, $maxAttempts - $used);
     return [
         'id' => (int) $row['id'],
         'code' => (string) $row['code'],
@@ -144,8 +157,41 @@ function ts_quiz_public(array $row, int $best = -1, bool $passed = false, int $a
         'question_count' => (int) ($row['question_count'] ?? 0),
         'best_percent' => $best >= 0 ? $best : null,
         'passed' => $passed,
-        'attempts' => $attempts,
+        'attempts' => $used,
+        // A quiz is "enrolled" (and disabled in the app) once every attempt has
+        // been used. The server owns this: the card can never disagree with what
+        // `start` will allow.
+        'max_attempts' => $maxAttempts,
+        'attempts_used' => $used,
+        'attempts_left' => $left,
+        'enrolled' => $left <= 0,
     ];
+}
+
+/**
+ * Does this database have `quizzes.max_attempts` yet? Cached per request.
+ *
+ * The API still behaves correctly without it (three attempts by default), but a
+ * write must not name a column that is not there — otherwise a server that has
+ * not run `database_quizzes_v2.sql` could not save a quiz at all.
+ */
+function ts_quiz_has_max_attempts(PDO $pdo): bool
+{
+    static $has = null;
+    if ($has !== null) {
+        return $has;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl AND COLUMN_NAME = :col'
+        );
+        $stmt->execute(['tbl' => 'quizzes', 'col' => 'max_attempts']);
+        $has = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        $has = false;
+    }
+    return $has;
 }
 
 /** A stable, URL-safe id for a new quiz ("physics-magnetism-a1b2c"). */
@@ -236,6 +282,22 @@ function ts_quiz_questions(PDO $pdo, int $quizId, bool $withAnswers): array
         $out[] = $entry;
     }
     return $out;
+}
+
+/** Attempts left on a quiz after the given number of submitted attempts. */
+function ts_quiz_attempts_left(PDO $pdo, int $quizId, int $userId, array $quiz): int
+{
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM quiz_attempts
+             WHERE quiz_id = :qid AND user_id = :uid AND submitted_at IS NOT NULL'
+        );
+        $stmt->execute(['qid' => $quizId, 'uid' => $userId]);
+        $used = (int) $stmt->fetchColumn();
+    } catch (Throwable $e) {
+        $used = 0;
+    }
+    return max(0, ts_quiz_max_attempts($quiz) - $used);
 }
 
 /** Grade a set of answers against the stored questions. */
@@ -448,6 +510,13 @@ try {
                 ts_quiz_json('error', 'This quiz has no questions yet.', [], 409);
             }
 
+            $usedStmt = $pdo->prepare(
+                'SELECT COUNT(*) FROM quiz_attempts
+                 WHERE quiz_id = :qid AND user_id = :uid AND submitted_at IS NOT NULL'
+            );
+            $usedStmt->execute(['qid' => $quizId, 'uid' => $uid]);
+            $used = (int) $usedStmt->fetchColumn();
+
             // Resume an attempt started in the last three hours instead of
             // piling up abandoned rows every time the screen is reopened.
             $open = $pdo->prepare(
@@ -460,6 +529,25 @@ try {
             $attempt = $open->fetch();
 
             if (!$attempt) {
+                // Only a *new* attempt is refused once the allowance is gone; an
+                // attempt that is already open (started before the last submit
+                // landed) can still be resumed and finished.
+                $allowed = ts_quiz_max_attempts($quiz);
+
+                if ($used >= $allowed) {
+                    ts_quiz_json(
+                        'error',
+                        'You have used all ' . $allowed . ' attempts for this quiz.',
+                        [
+                            'max_attempts' => $allowed,
+                            'attempts_used' => $used,
+                            'attempts_left' => 0,
+                            'enrolled' => true,
+                        ],
+                        409
+                    );
+                }
+
                 $insert = $pdo->prepare('INSERT INTO quiz_attempts (quiz_id, user_id) VALUES (:qid, :uid)');
                 $insert->execute(['qid' => $quizId, 'uid' => $uid]);
                 $attemptId = (int) $pdo->lastInsertId();
@@ -482,7 +570,7 @@ try {
             $limit = (int) $quiz['time_limit_seconds'];
             ts_quiz_json('success', 'Attempt started.', [
                 'attempt_id' => $attemptId,
-                'quiz' => ts_quiz_public($quiz),
+                'quiz' => ts_quiz_public($quiz, -1, false, $used),
                 'questions' => $questions,
                 'started_at' => $startedAt,
                 'deadline_at' => $limit > 0 ? $startedAt + $limit : 0,
@@ -542,6 +630,8 @@ try {
                         'duration_seconds' => (int) $attempt['duration_seconds'],
                         'exp_awarded' => 0,
                         'answered' => $graded['answered'],
+                        'max_attempts' => ts_quiz_max_attempts($quiz),
+                        'attempts_left' => ts_quiz_attempts_left($pdo, (int) $quiz['id'], $uid, $quiz),
                         'review' => $graded['review'],
                     ],
                     'exp' => ts_quiz_exp_block($pdo, $uid),
@@ -629,6 +719,8 @@ try {
                     'duration_seconds' => $duration,
                     'exp_awarded' => $awarded,
                     'answered' => (int) $graded['answered'],
+                    'max_attempts' => ts_quiz_max_attempts($quiz),
+                    'attempts_left' => ts_quiz_attempts_left($pdo, (int) $quiz['id'], $uid, $quiz),
                     'review' => $graded['review'],
                 ],
                 'exp' => ts_quiz_exp_block($pdo, $uid),
@@ -813,6 +905,10 @@ try {
                 'status' => $status,
             ];
 
+            if (ts_quiz_has_max_attempts($pdo)) {
+                $payload['max_attempts'] = max(1, min(10, (int) ($body['max_attempts'] ?? 3)));
+            }
+
             $pdo->beginTransaction();
             try {
                 if ($id > 0) {
@@ -909,6 +1005,21 @@ try {
             $pdo->prepare('UPDATE quizzes SET status = :status WHERE id = :id')
                 ->execute(['status' => $status, 'id' => $id]);
             ts_quiz_json('success', 'Quiz updated.', ['quiz_id' => $id, 'status' => $status]);
+
+        case 'admin_reset_attempts':
+            ts_quiz_require_ready($pdo);
+            if ($method !== 'POST') {
+                ts_quiz_json('error', 'Only POST requests are allowed.', [], 405);
+            }
+            ts_require_admin_api($pdo);
+            $id = (int) ($body['id'] ?? 0);
+            if ($id <= 0) {
+                ts_quiz_json('error', 'Which quiz?', [], 400);
+            }
+            $pdo->prepare('DELETE FROM quiz_attempts WHERE quiz_id = :id')->execute(['id' => $id]);
+            ts_quiz_json('success', 'Attempts cleared. Every student can take this quiz again.', [
+                'quiz_id' => $id,
+            ]);
 
         case 'admin_delete':
             ts_quiz_require_ready($pdo);

@@ -339,6 +339,7 @@ class MainActivity : ComponentActivity() {
                                     onEditQuiz = { viewModel.openQuizEditor(it.id) },
                                     onQuizStatus = { id, status -> viewModel.setQuizStatus(id, status) },
                                     onDeleteQuiz = { viewModel.deleteQuiz(it) },
+                                    onResetQuizAttempts = { viewModel.resetQuizAttempts(it) },
                                     onBack = { viewModel.closeAdminPanel() }
                                 )
                             } else if (uiState.isAiAssistantOpen) {

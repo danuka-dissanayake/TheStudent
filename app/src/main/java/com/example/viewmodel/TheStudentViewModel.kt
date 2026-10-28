@@ -600,6 +600,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Open the runner and start (or resume) an attempt. */
     fun openQuiz(quiz: QuizSummary) {
+        // The server refuses the fourth attempt anyway; stopping here means the
+        // student sees an explanation instead of a failure.
+        if (quiz.isEnrolled) {
+            showSnackbar("You've used all ${quiz.maxAttempts} attempts for this quiz.")
+            return
+        }
         _activeQuiz.value = quiz
         _quizAttempt.value = null
         _quizAnswers.value = emptyMap()
@@ -639,8 +645,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _quizResult.value = null
     }
 
-    /** Try the same quiz again from the result page. */
+    /** Try the same quiz again from the result page, if attempts are left. */
     fun retakeQuiz() {
+        if (_quizResult.value?.canRetake == false) {
+            showSnackbar("No attempts left. This quiz is now in your enrolled quizzes.")
+            return
+        }
         val quiz = _activeQuiz.value
             ?: _quizzes.value.firstOrNull { it.id == _quizResult.value?.quizId }
             ?: return
@@ -736,6 +746,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 loadQuizzes()
             } else {
                 showSnackbar(outcome.errorOrNull ?: "The quiz could not be updated.")
+            }
+        }
+    }
+
+    /** Clear every student's attempts on a quiz so it opens again. */
+    fun resetQuizAttempts(quizId: Int) {
+        viewModelScope.launch {
+            val outcome = quizzesRepository.resetAttempts(quizId)
+            if (outcome is QuizOutcome.Ok) {
+                showSnackbar("Attempts cleared. Students can take this quiz again.")
+                loadAdminQuizzes()
+                loadQuizzes()
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "The attempts could not be cleared.")
             }
         }
     }

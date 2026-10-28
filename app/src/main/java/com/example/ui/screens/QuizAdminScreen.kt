@@ -129,6 +129,7 @@ fun quizDraftOf(quiz: QuizSummary?, questions: List<QuizQuestion>): QuizDraft {
         timeLimitSeconds = quiz?.timeLimitSeconds ?: 0,
         passPercent = quiz?.passPercent ?: 60,
         expReward = quiz?.expReward ?: 20,
+        maxAttempts = quiz?.maxAttempts ?: 3,
         shuffleQuestions = true,
         shuffleOptions = true,
         questions = questions.map { question ->
@@ -172,10 +173,12 @@ fun QuizAdminList(
     onEdit: (QuizSummary) -> Unit,
     onStatus: (Int, String) -> Unit,
     onDelete: (Int) -> Unit,
+    onResetAttempts: (Int) -> Unit = {},
     onRefresh: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var confirmDelete by remember { mutableStateOf<QuizSummary?>(null) }
+    var confirmReset by remember { mutableStateOf<QuizSummary?>(null) }
 
     Column(modifier = modifier.fillMaxSize()) {
         Row(
@@ -291,11 +294,25 @@ fun QuizAdminList(
                         quiz = quiz,
                         onEdit = { onEdit(quiz) },
                         onStatus = { status -> onStatus(quiz.id, status) },
-                        onDelete = { confirmDelete = quiz }
+                        onDelete = { confirmDelete = quiz },
+                        onResetAttempts = if (quiz.attemptCount > 0) {
+                            { confirmReset = quiz }
+                        } else null
                     )
                 }
             }
         }
+    }
+
+    confirmReset?.let { quiz ->
+        ConfirmResetAttempts(
+            quiz = quiz,
+            onCancel = { confirmReset = null },
+            onConfirm = {
+                confirmReset = null
+                onResetAttempts(quiz.id)
+            }
+        )
     }
 
     confirmDelete?.let { quiz ->
@@ -316,7 +333,8 @@ private fun QuizAdminRow(
     quiz: QuizSummary,
     onEdit: () -> Unit,
     onStatus: (String) -> Unit,
-    onDelete: () -> Unit
+    onDelete: () -> Unit,
+    onResetAttempts: (() -> Unit)? = null
 ) {
     Surface(
         onClick = onEdit,
@@ -348,7 +366,8 @@ private fun QuizAdminRow(
                     quiz.subject,
                     quiz.grade,
                     "${quiz.questionCount} questions",
-                    if (quiz.attemptCount > 0) "${quiz.attemptCount} attempts · avg ${quiz.averagePercent}%" else "no attempts yet"
+                    "${quiz.maxAttempts} attempts each",
+                    if (quiz.attemptCount > 0) "${quiz.attemptCount} submitted · avg ${quiz.averagePercent}%" else "no attempts yet"
                 ).filter { it.isNotBlank() }.joinToString(" · "),
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 10.5.sp,
@@ -366,6 +385,9 @@ private fun QuizAdminRow(
                     onClick = { onStatus(if (quiz.isPublished) "draft" else "published") }
                 )
                 AdminAction(label = "Edit", tint = AdmInk, onClick = onEdit)
+                if (onResetAttempts != null) {
+                    AdminAction(label = "Reset attempts", tint = AdmAmber, onClick = onResetAttempts)
+                }
                 if (quiz.status != "archived") {
                     AdminAction(label = "Archive", tint = AdmMuted, onClick = { onStatus("archived") })
                 }
@@ -417,6 +439,72 @@ private fun StatusBadge(quiz: QuizSummary) {
             fontWeight = FontWeight.Bold,
             color = fg
         )
+    }
+}
+
+@Composable
+private fun ConfirmResetAttempts(quiz: QuizSummary, onCancel: () -> Unit, onConfirm: () -> Unit) {
+    androidx.compose.ui.window.Dialog(onDismissRequest = onCancel) {
+        Surface(shape = RoundedCornerShape(20.dp), color = Color.White) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                Text(
+                    text = "Give every attempt back?",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 15.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = AdmInk
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "All ${quiz.attemptCount} submitted attempts on \"${quiz.title}\" will be " +
+                        "deleted, so every student can take it again from scratch. Best scores and " +
+                        "quiz badges go with them.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    lineHeight = 16.sp,
+                    color = AdmMuted
+                )
+                Spacer(Modifier.height(16.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Surface(
+                        onClick = onCancel,
+                        shape = RoundedCornerShape(50),
+                        color = Color(0xFFF1F5F9),
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Cancel",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = AdmInk
+                            )
+                        }
+                    }
+                    Surface(
+                        onClick = onConfirm,
+                        shape = RoundedCornerShape(50),
+                        color = AdmAmber,
+                        modifier = Modifier
+                            .weight(1f)
+                            .height(42.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "Reset",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Color.White
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -673,6 +761,20 @@ fun QuizEditorScreen(
                         listOf(0, 10, 20, 30, 40).map { it.toString() },
                         current.expReward.toString()
                     ) { draft = current.copy(expReward = it.toIntOrNull() ?: 20) }
+                    EditorChips(
+                        "Attempts per student",
+                        listOf(1, 2, 3, 4, 5).map { it.toString() },
+                        current.maxAttempts.toString()
+                    ) { draft = current.copy(maxAttempts = it.toIntOrNull() ?: 3) }
+                    Text(
+                        text = "When every attempt is used the quiz moves to the student's " +
+                            "Enrolled quizzes and closes.",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.sp,
+                        lineHeight = 14.sp,
+                        color = AdmMuted,
+                        modifier = Modifier.padding(bottom = 6.dp)
+                    )
                     ToggleRow("Shuffle questions", current.shuffleQuestions) {
                         draft = current.copy(shuffleQuestions = it)
                     }

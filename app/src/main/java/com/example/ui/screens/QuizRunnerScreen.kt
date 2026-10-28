@@ -136,7 +136,18 @@ fun QuizRunnerScreen(
                         overflow = TextOverflow.Ellipsis
                     )
                     Text(
-                        text = listOf(quiz.subject, quiz.grade).filter { it.isNotBlank() }.joinToString(" · "),
+                        text = buildString {
+                            val base = listOf(quiz.subject, quiz.grade)
+                                .filter { it.isNotBlank() }
+                                .joinToString(" · ")
+                            if (base.isNotBlank()) append(base)
+                            if (attempt != null && result == null) {
+                                val number = (attempt.quiz.attempts + 1)
+                                    .coerceAtMost(quiz.maxAttempts.coerceAtLeast(1))
+                                if (isNotEmpty()) append(" · ")
+                                append("Attempt $number of ${quiz.maxAttempts}")
+                            }
+                        },
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 10.5.sp,
                         color = RunMuted,
@@ -644,7 +655,18 @@ private fun QuizResultContent(
                             color = if (result.passed) RunGreen else RunRed
                         )
                     }
-                    Spacer(Modifier.height(16.dp))
+                    Spacer(Modifier.height(8.dp))
+                    Text(
+                        text = if (result.canRetake) {
+                            "${result.attemptsLeft} of ${result.maxAttempts} attempts left"
+                        } else {
+                            "All ${result.maxAttempts} attempts used · added to your enrolled quizzes"
+                        },
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.5.sp,
+                        color = RunMuted
+                    )
+                    Spacer(Modifier.height(14.dp))
                     Row(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -723,20 +745,21 @@ private fun QuizResultContent(
             Surface(
                 onClick = onRetake,
                 shape = RoundedCornerShape(50),
-                color = Color.White,
-                border = BorderStroke(1.dp, RunHairline),
-                enabled = !isSubmitting,
+                color = if (result.canRetake) Color.White else Color(0xFFF1F5F9),
+                border = if (result.canRetake) BorderStroke(1.dp, RunHairline) else null,
+                enabled = !isSubmitting && result.canRetake,
                 modifier = Modifier
                     .weight(1f)
                     .height(50.dp)
+                    .testTag("quiz_retake")
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
-                        text = "Try again",
+                        text = if (result.canRetake) "Try again" else "No attempts left",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = if (result.canRetake) 13.sp else 11.sp,
                         fontWeight = FontWeight.Bold,
-                        color = RunInk
+                        color = if (result.canRetake) RunInk else RunMuted
                     )
                 }
             }

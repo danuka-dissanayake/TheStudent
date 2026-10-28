@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS `quizzes` (
   `shuffle_questions` TINYINT(1) NOT NULL DEFAULT 1,
   `shuffle_options` TINYINT(1) NOT NULL DEFAULT 1,
   `exp_reward` INT NOT NULL DEFAULT 20 COMMENT 'EXP for a first pass; server clamps to 0…40',
+  `max_attempts` TINYINT NOT NULL DEFAULT 3 COMMENT 'attempts a student gets; 1…10',
   `status` VARCHAR(20) NOT NULL DEFAULT 'draft' COMMENT 'draft, published, archived',
   `created_by` INT DEFAULT NULL,
   `created_at` TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

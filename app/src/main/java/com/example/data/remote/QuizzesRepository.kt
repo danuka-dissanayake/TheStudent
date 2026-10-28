@@ -220,6 +220,16 @@ class QuizzesRepository(context: Context) {
         }
     }
 
+    /** Give every student their attempts back on one quiz (admin only). */
+    suspend fun resetAttempts(id: Int): QuizOutcome<Unit> = call { auth ->
+        val envelope = service().adminResetAttempts(auth, QuizDeleteRequest(id = id))
+        if (envelope.status == "success") {
+            QuizOutcome.Ok(Unit)
+        } else {
+            QuizOutcome.Err(envelope.message ?: "The attempts could not be cleared.")
+        }
+    }
+
     suspend fun delete(id: Int): QuizOutcome<Unit> = call { auth ->
         val envelope = service().adminDelete(auth, QuizDeleteRequest(id = id))
         if (envelope.status == "success") {
@@ -249,6 +259,7 @@ internal fun QuizDraft.toSaveRequest(status: String): QuizSaveRequest = QuizSave
     shuffleQuestions = shuffleQuestions,
     shuffleOptions = shuffleOptions,
     expReward = expReward,
+    maxAttempts = maxAttempts,
     status = status,
     questions = questions.map { question ->
         QuizSaveQuestionRequest(

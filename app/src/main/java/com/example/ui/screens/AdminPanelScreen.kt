@@ -68,6 +68,7 @@ fun AdminPanelScreen(
     onEditQuiz: (com.example.data.model.QuizSummary) -> Unit = {},
     onQuizStatus: (Int, String) -> Unit = { _, _ -> },
     onDeleteQuiz: (Int) -> Unit = {},
+    onResetQuizAttempts: (Int) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -856,6 +857,7 @@ fun AdminPanelScreen(
                         onEdit = onEditQuiz,
                         onStatus = onQuizStatus,
                         onDelete = onDeleteQuiz,
+                        onResetAttempts = onResetQuizAttempts,
                         onRefresh = onLoadAdminQuizzes,
                         modifier = Modifier.fillMaxSize()
                     )

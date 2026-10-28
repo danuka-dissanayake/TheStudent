@@ -26,9 +26,26 @@ data class QuizSummary(
     val bestPercent: Int? = null,
     val passed: Boolean = false,
     val attempts: Int = 0,
+    /** Attempts the quiz allows, and how many are left for this student. */
+    val maxAttempts: Int = 3,
+    val attemptsLeft: Int = 3,
     val attemptCount: Int = 0,
     val averagePercent: Int = 0
 ) {
+    /**
+     * True once every attempt is used. The server decides this (it is the one
+     * that will refuse the next `start`), the app only reflects it: an enrolled
+     * quiz is listed under "Enrolled" and cannot be opened again.
+     */
+    val isEnrolled: Boolean get() = attemptsLeft <= 0
+
+    val attemptsLabel: String
+        get() = when {
+            attempts == 0 -> "$maxAttempts attempts"
+            maxAttempts == 1 -> "1 attempt only"
+            else -> "${attempts.coerceAtMost(maxAttempts)} of $maxAttempts attempts used"
+        }
+
     val isTimed: Boolean get() = timeLimitSeconds > 0
     val isPublished: Boolean get() = status == "published"
     val isDraft: Boolean get() = status == "draft"
@@ -88,8 +105,13 @@ data class QuizResult(
     val durationSeconds: Int,
     val expAwarded: Int,
     val answered: Int,
+    /** How many attempts the student has left *after* this one. 0 = enrolled. */
+    val attemptsLeft: Int = 0,
+    val maxAttempts: Int = 3,
     val review: List<QuizReviewItem> = emptyList()
-)
+) {
+    val canRetake: Boolean get() = attemptsLeft > 0
+}
 
 data class QuizHistoryItem(
     val attemptId: Int,
@@ -152,6 +174,7 @@ data class QuizDraft(
     val timeLimitSeconds: Int = 0,
     val passPercent: Int = 60,
     val expReward: Int = 20,
+    val maxAttempts: Int = 3,
     val shuffleQuestions: Boolean = true,
     val shuffleOptions: Boolean = true,
     val questions: List<QuizDraftQuestion> = emptyList()

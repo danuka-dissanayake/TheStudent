@@ -64,6 +64,8 @@ data class QuizDto(
     @Json(name = "best_percent") val bestPercent: Int? = null,
     @Json(name = "passed") val passed: Boolean = false,
     @Json(name = "attempts") val attempts: Int = 0,
+    @Json(name = "max_attempts") val maxAttempts: Int = 3,
+    @Json(name = "attempts_left") val attemptsLeft: Int? = null,
     @Json(name = "attempt_count") val attemptCount: Int = 0,
     @Json(name = "average_percent") val averagePercent: Int = 0
 ) {
@@ -86,6 +88,9 @@ data class QuizDto(
         bestPercent = bestPercent,
         passed = passed,
         attempts = attempts,
+        maxAttempts = maxAttempts,
+        // Servers older than 1.1 omit the field; derive it rather than guess.
+        attemptsLeft = attemptsLeft ?: (maxAttempts - attempts).coerceAtLeast(0),
         attemptCount = attemptCount,
         averagePercent = averagePercent
     )
@@ -161,6 +166,8 @@ data class QuizResultDto(
     @Json(name = "duration_seconds") val durationSeconds: Int = 0,
     @Json(name = "exp_awarded") val expAwarded: Int = 0,
     @Json(name = "answered") val answered: Int = 0,
+    @Json(name = "max_attempts") val maxAttempts: Int = 3,
+    @Json(name = "attempts_left") val attemptsLeft: Int = 0,
     @Json(name = "review") val review: List<QuizReviewDto>? = null
 )
 
@@ -231,6 +238,7 @@ data class QuizSaveRequest(
     @Json(name = "shuffle_questions") val shuffleQuestions: Boolean = true,
     @Json(name = "shuffle_options") val shuffleOptions: Boolean = true,
     @Json(name = "exp_reward") val expReward: Int = 20,
+    @Json(name = "max_attempts") val maxAttempts: Int = 3,
     @Json(name = "status") val status: String = "draft",
     @Json(name = "questions") val questions: List<QuizSaveQuestionRequest>
 )
@@ -305,6 +313,12 @@ interface QuizzesApiService {
         @Body request: QuizStatusRequest
     ): QuizEnvelope
 
+    @POST("api/quizzes.php?action=admin_reset_attempts")
+    suspend fun adminResetAttempts(
+        @Header("Authorization") authorization: String,
+        @Body request: QuizDeleteRequest
+    ): QuizEnvelope
+
     @POST("api/quizzes.php?action=admin_delete")
     suspend fun adminDelete(
         @Header("Authorization") authorization: String,
@@ -345,6 +359,8 @@ internal fun QuizEnvelope.result(): QuizResult? {
         durationSeconds = dto.durationSeconds,
         expAwarded = dto.expAwarded,
         answered = dto.answered,
+        attemptsLeft = dto.attemptsLeft,
+        maxAttempts = dto.maxAttempts,
         review = dto.review.orEmpty().map { it.toDomain() }
     )
 }

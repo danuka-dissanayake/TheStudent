@@ -530,3 +530,47 @@ Import order and notes:
 Because the seed deletes by `code`, re-running it after students have attempted a
 quiz would also remove those attempts (`quiz_attempts` cascades). Run it once on
 a new server, or edit the quizzes in the app after that.
+
+---
+
+## 15. Attempt limits and "enrolled" quizzes
+
+A quiz is not endlessly retakeable. Each quiz carries `max_attempts` (1–10,
+default 3) and the **server** enforces it:
+
+- `start` counts the student's submitted attempts and refuses a *new* one with
+  `409` once the allowance is gone. An attempt that is already open can still be
+  resumed and finished — the limit is on attempts, not on sessions.
+- `list` returns `max_attempts`, `attempts_used`, `attempts_left` and `enrolled`
+  for the signed-in student, computed from `quiz_attempts`, so a card can never
+  disagree with what `start` will allow.
+- `submit` returns `attempts_left` and `max_attempts` with the graded result, so
+  the result page knows whether "Try again" is still meaningful.
+
+In the app, an **enrolled** quiz (`attempts_left == 0`):
+
+- is listed under the `Enrolled (n)` chip and sorts to the bottom of the hub;
+- renders dimmed with a lock and the "Enrolled · N of N attempts used" badges;
+- is not tappable (the `Surface` is disabled, and `openQuiz` refuses it as a
+  second guard);
+- on the result page, "Try again" is disabled and replaced with "No attempts
+  left", with the note "All N attempts used · added to your enrolled quizzes".
+
+EXP is unaffected: a pass pays once per quiz whatever the attempt number, and
+retakes never pay again.
+
+**Giving attempts back.** The admin panel's quiz row has *Reset attempts* (shown
+only when students have submitted), which deletes the attempts for that quiz so
+everyone can take it again. It is confirmation-guarded because best scores and
+quiz badges go with the attempts.
+
+**Deploying this change on an existing server:**
+
+1. import `backend/database_quizzes_v2.sql` — adds the column idempotently
+   (it checks `information_schema` first, so re-running is safe);
+2. re-upload `backend/api/quizzes.php` (now `1.1.0`).
+
+Without the migration the API still behaves as three attempts per quiz: the
+column is read as `3` when absent, and `admin_save` simply omits it (see
+`ts_quiz_has_max_attempts`). Run the migration to make the per-quiz setting
+editable.
