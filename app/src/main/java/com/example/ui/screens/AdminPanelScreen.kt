@@ -9,6 +9,7 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -43,6 +44,7 @@ import com.example.ui.theme.*
 enum class AdminTab {
     UPLOAD,
     CATALOG,
+    QUIZZES,
     DATABASE_SETTINGS
 }
 
@@ -58,6 +60,14 @@ fun AdminPanelScreen(
     isTestingConnection: Boolean = false,
     connectionTestResult: Pair<Boolean, String>? = null,
     onTestAndSaveServerUrl: (String) -> Unit = onUpdateServerUrl,
+    // Quizzes: authored here, on the phone, and published straight to the server.
+    adminQuizzes: List<com.example.data.model.QuizSummary> = emptyList(),
+    isAdminQuizzesLoading: Boolean = false,
+    onLoadAdminQuizzes: () -> Unit = {},
+    onNewQuiz: () -> Unit = {},
+    onEditQuiz: (com.example.data.model.QuizSummary) -> Unit = {},
+    onQuizStatus: (Int, String) -> Unit = { _, _ -> },
+    onDeleteQuiz: (Int) -> Unit = {},
     onBack: () -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -212,49 +222,60 @@ fun AdminPanelScreen(
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState())
                         .padding(horizontal = 12.dp, vertical = 8.dp),
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     FilterChip(
                         selected = activeTab == AdminTab.UPLOAD,
                         onClick = { activeTab = AdminTab.UPLOAD },
-                        label = { Text("Upload Paper", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Upload", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.CloudUpload, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
                             selectedLabelColor = Color.White,
                             selectedLeadingIconColor = Color.White
                         ),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(20.dp)
                     )
 
                     FilterChip(
                         selected = activeTab == AdminTab.CATALOG,
                         onClick = { activeTab = AdminTab.CATALOG },
-                        label = { Text("Manage (${papersList.size})", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Papers (${papersList.size})", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.ListAlt, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
                             selectedLabelColor = Color.White,
                             selectedLeadingIconColor = Color.White
                         ),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(20.dp)
+                    )
+
+                    FilterChip(
+                        selected = activeTab == AdminTab.QUIZZES,
+                        onClick = { activeTab = AdminTab.QUIZZES },
+                        label = { Text("Quizzes", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        leadingIcon = { Icon(Icons.Default.Quiz, contentDescription = null, modifier = Modifier.size(16.dp)) },
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = PureLightGreenButton,
+                            selectedLabelColor = Color.White,
+                            selectedLeadingIconColor = Color.White
+                        ),
+                        shape = RoundedCornerShape(20.dp)
                     )
 
                     FilterChip(
                         selected = activeTab == AdminTab.DATABASE_SETTINGS,
                         onClick = { activeTab = AdminTab.DATABASE_SETTINGS },
-                        label = { Text("Server API", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
+                        label = { Text("Server", fontSize = 13.sp, fontWeight = FontWeight.Medium) },
                         leadingIcon = { Icon(Icons.Default.Dns, contentDescription = null, modifier = Modifier.size(16.dp)) },
                         colors = FilterChipDefaults.filterChipColors(
                             selectedContainerColor = PureLightGreenButton,
                             selectedLabelColor = Color.White,
                             selectedLeadingIconColor = Color.White
                         ),
-                        shape = RoundedCornerShape(20.dp),
-                        modifier = Modifier.weight(1f)
+                        shape = RoundedCornerShape(20.dp)
                     )
                 }
             }
@@ -824,6 +845,20 @@ fun AdminPanelScreen(
                             }
                         }
                     }
+                }
+
+                AdminTab.QUIZZES -> {
+                    LaunchedEffect(activeTab) { onLoadAdminQuizzes() }
+                    QuizAdminList(
+                        quizzes = adminQuizzes,
+                        isLoading = isAdminQuizzesLoading,
+                        onNew = onNewQuiz,
+                        onEdit = onEditQuiz,
+                        onStatus = onQuizStatus,
+                        onDelete = onDeleteQuiz,
+                        onRefresh = onLoadAdminQuizzes,
+                        modifier = Modifier.fillMaxSize()
+                    )
                 }
 
                 AdminTab.CATALOG -> {

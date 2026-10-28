@@ -21,6 +21,16 @@ interface TheStudentDao {
     @Query("SELECT EXISTS(SELECT 1 FROM saved_papers WHERE id = :paperId)")
     fun isPaperSaved(paperId: String): Flow<Boolean>
 
+    // Quiz results (offline mirror of the hub's best scores)
+    @Query("SELECT * FROM quiz_results ORDER BY updatedAt DESC")
+    fun getAllQuizResults(): Flow<List<QuizResultEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    suspend fun insertQuizResults(results: List<QuizResultEntity>)
+
+    @Query("DELETE FROM quiz_results")
+    suspend fun clearQuizResults()
+
     // Saved Courses
     @Query("SELECT * FROM saved_courses ORDER BY savedAt DESC")
     fun getAllSavedCourses(): Flow<List<SavedCourseEntity>>

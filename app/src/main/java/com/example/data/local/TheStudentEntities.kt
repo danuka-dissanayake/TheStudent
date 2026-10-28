@@ -144,3 +144,22 @@ data class ChatSummaryRow(
     val lastAttachmentKind: String? = null,
     val lastAttachmentName: String? = null,
 )
+
+/**
+ * The last known result for a quiz, so the hub can show "Best 82%" with no
+ * network — and so a passed quiz keeps its badge on a bad connection.
+ *
+ * The server stays the source of truth: this row is overwritten by every
+ * successful `list` and by every graded attempt.
+ */
+@Entity(tableName = "quiz_results")
+data class QuizResultEntity(
+    @PrimaryKey val quizId: Int,
+    val title: String,
+    val subject: String,
+    val grade: String,
+    val bestPercent: Int,
+    val passed: Boolean,
+    val attempts: Int,
+    val updatedAt: Long = System.currentTimeMillis()
+)

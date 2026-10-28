@@ -123,6 +123,15 @@ fun PapersScreen(
     onRefreshPapers: () -> Unit = {},
     onUpdateServerUrl: (String) -> Unit = {},
     onNavigateHome: () -> Unit = {},
+    // Quizzes live in the same tab, one segment over.
+    quizzes: List<com.example.data.model.QuizSummary> = emptyList(),
+    isQuizLoading: Boolean = false,
+    isQuizOffline: Boolean = false,
+    quizError: String? = null,
+    segment: Int = 0,
+    onSegmentChange: (Int) -> Unit = {},
+    onOpenQuiz: (com.example.data.model.QuizSummary) -> Unit = {},
+    onRefreshQuizzes: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var query by remember { mutableStateOf("") }
@@ -229,7 +238,7 @@ fun PapersScreen(
                 Spacer(Modifier.width(12.dp))
                 Column(modifier = Modifier.weight(1f)) {
                     Text(
-                        text = "Past papers",
+                        text = if (segment == 0) "Past papers" else "Quizzes",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 21.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -237,25 +246,57 @@ fun PapersScreen(
                         letterSpacing = (-0.4).sp
                     )
                     Text(
-                        text = if (isLoading && papers.isEmpty()) {
-                            "Loading the library…"
+                        text = if (segment == 0) {
+                            if (isLoading && papers.isEmpty()) {
+                                "Loading the library…"
+                            } else {
+                                "${papers.size} papers · every year, every medium"
+                            }
                         } else {
-                            "${papers.size} papers · every year, every medium"
+                            if (isQuizLoading && quizzes.isEmpty()) {
+                                "Loading quizzes…"
+                            } else {
+                                "${quizzes.size} quizzes · pass one to earn EXP"
+                            }
                         },
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 11.sp,
                         color = PaperMuted
                     )
                 }
-                CircleIconButton(
-                    icon = Icons.Default.FilterList,
-                    description = "Filters",
-                    onClick = { showFilters = true },
-                    tag = "papers_filter_button",
-                    badge = filters.count
+                if (segment == 0) {
+                    CircleIconButton(
+                        icon = Icons.Default.FilterList,
+                        description = "Filters",
+                        onClick = { showFilters = true },
+                        tag = "papers_filter_button",
+                        badge = filters.count
+                    )
+                }
+            }
+
+            // ── segment pills: papers | quizzes ────────────────────────────
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                SegmentPill(
+                    label = "Papers",
+                    selected = segment == 0,
+                    tag = "segment_papers",
+                    onClick = { onSegmentChange(0) }
+                )
+                SegmentPill(
+                    label = "Quizzes",
+                    selected = segment == 1,
+                    tag = "segment_quizzes",
+                    onClick = { onSegmentChange(1) }
                 )
             }
 
+            if (segment == 0) {
             // search
             OutlinedTextField(
                 value = query,
@@ -403,9 +444,21 @@ fun PapersScreen(
                     .height(1.dp)
                     .background(PaperHairline)
             )
+            }
         }
 
         // ── body ────────────────────────────────────────────────────────────
+        if (segment == 1) {
+            QuizzesSegment(
+                quizzes = quizzes,
+                isLoading = isQuizLoading,
+                isOffline = isQuizOffline,
+                error = quizError,
+                onOpenQuiz = onOpenQuiz,
+                onRefresh = onRefreshQuizzes,
+                modifier = Modifier.fillMaxSize()
+            )
+        } else {
         when {
             isLoading && papers.isEmpty() -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
@@ -454,6 +507,7 @@ fun PapersScreen(
                     )
                 }
             }
+        }
         }
     }
 
@@ -618,6 +672,31 @@ fun PapersScreen(
                     }
                 }
             }
+        }
+    }
+}
+
+/** One of the two segments under the header: Papers | Quizzes. */
+@Composable
+private fun SegmentPill(label: String, selected: Boolean, tag: String, onClick: () -> Unit) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(50),
+        color = if (selected) PaperInk else Color.White,
+        border = if (selected) null else BorderStroke(1.dp, PaperHairline),
+        modifier = Modifier
+            .heightIn(min = 34.dp)
+            .testTag(tag)
+    ) {
+        Box(contentAlignment = Alignment.Center, modifier = Modifier.padding(horizontal = 16.dp, vertical = 7.dp)) {
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                color = if (selected) Color.White else PaperMuted,
+                maxLines = 1
+            )
         }
     }
 }

@@ -36,6 +36,37 @@ class TheStudentRepository(private val dao: TheStudentDao) {
             .flowOn(Dispatchers.IO)
             .catch { Log.e(TAG, "userProfile unavailable", it); emit(null) }
 
+    /**
+     * The last known quiz results, newest first.
+     *
+     * Same degradation as the other flows: a broken local database yields an
+     * empty list, and the hub simply has no "Best 82%" badge until the next
+     * successful load.
+     */
+    val quizResults: Flow<List<QuizResultEntity>> =
+        dao.getAllQuizResults()
+            .flowOn(Dispatchers.IO)
+            .catch { Log.e(TAG, "quizResults unavailable", it); emit(emptyList()) }
+
+    /** Mirror the best score per quiz so a passed badge survives a bad connection. */
+    suspend fun cacheQuizResults(quizzes: List<QuizSummary>) = withContext(Dispatchers.IO) {
+        val attempted = quizzes.filter { it.attempts > 0 && it.bestPercent != null }
+        if (attempted.isEmpty()) return@withContext
+        dao.insertQuizResults(
+            attempted.map { quiz ->
+                QuizResultEntity(
+                    quizId = quiz.id,
+                    title = quiz.title,
+                    subject = quiz.subject,
+                    grade = quiz.grade,
+                    bestPercent = quiz.bestPercent ?: 0,
+                    passed = quiz.passed,
+                    attempts = quiz.attempts
+                )
+            }
+        )
+    }
+
     // Check if saved
     fun isPaperSaved(paperId: String): Flow<Boolean> = dao.isPaperSaved(paperId).flowOn(Dispatchers.IO)
     fun isCourseSaved(courseId: String): Flow<Boolean> = dao.isCourseSaved(courseId).flowOn(Dispatchers.IO)

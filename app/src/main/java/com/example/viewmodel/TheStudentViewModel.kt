@@ -46,6 +46,8 @@ import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
 import com.example.data.remote.VoiceTutorResponse
 import com.example.data.remote.PastPapersRemoteRepository
+import com.example.data.remote.QuizzesRepository
+import com.example.data.remote.QuizOutcome
 import com.example.ui.components.AssistantVoiceState
 import android.content.Intent
 import android.os.Bundle
@@ -163,6 +165,13 @@ data class TheStudentUiState(
 
     // Admin Panel State
     val isAdminPanelOpen: Boolean = false,
+    /**
+     * Papers tab segment: 0 = the paper library, 1 = quizzes.
+     *
+     * Kept in state (not inside the screen) so the EXP screen can open the
+     * quizzes segment when it links to it.
+     */
+    val librarySegment: Int = 0,
     // Account / security settings (change password, sign out everywhere, delete)
     val isSecurityPanelOpen: Boolean = false,
     /**
@@ -301,6 +310,61 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     private val _connectionTestResult = MutableStateFlow<Pair<Boolean, String>?>(null)
     val connectionTestResult: StateFlow<Pair<Boolean, String>?> = _connectionTestResult.asStateFlow()
+
+    // ── Quizzes ─────────────────────────────────────────────────────────────
+    private val quizzesRepository = QuizzesRepository(application)
+
+    private val _quizzes = MutableStateFlow<List<QuizSummary>>(emptyList())
+    val quizzes: StateFlow<List<QuizSummary>> = _quizzes.asStateFlow()
+
+    private val _quizStats = MutableStateFlow(QuizHubStats())
+    val quizStats: StateFlow<QuizHubStats> = _quizStats.asStateFlow()
+
+    private val _isQuizLoading = MutableStateFlow(false)
+    val isQuizLoading: StateFlow<Boolean> = _isQuizLoading.asStateFlow()
+
+    private val _isQuizOffline = MutableStateFlow(false)
+    val isQuizOffline: StateFlow<Boolean> = _isQuizOffline.asStateFlow()
+
+    private val _quizError = MutableStateFlow<String?>(null)
+    val quizError: StateFlow<String?> = _quizError.asStateFlow()
+
+    /** The quiz being taken; null when the runner is closed. */
+    private val _activeQuiz = MutableStateFlow<QuizSummary?>(null)
+    val activeQuiz: StateFlow<QuizSummary?> = _activeQuiz.asStateFlow()
+
+    private val _quizAttempt = MutableStateFlow<QuizAttempt?>(null)
+    val quizAttempt: StateFlow<QuizAttempt?> = _quizAttempt.asStateFlow()
+
+    /** questionId -> optionId, kept here so a recomposition never loses a pick. */
+    private val _quizAnswers = MutableStateFlow<Map<Int, Int>>(emptyMap())
+    val quizAnswers: StateFlow<Map<Int, Int>> = _quizAnswers.asStateFlow()
+
+    private val _quizResult = MutableStateFlow<QuizResult?>(null)
+    val quizResult: StateFlow<QuizResult?> = _quizResult.asStateFlow()
+
+    private val _isQuizStarting = MutableStateFlow(false)
+    val isQuizStarting: StateFlow<Boolean> = _isQuizStarting.asStateFlow()
+
+    private val _isQuizSubmitting = MutableStateFlow(false)
+    val isQuizSubmitting: StateFlow<Boolean> = _isQuizSubmitting.asStateFlow()
+
+    // Admin authoring
+    private val _adminQuizzes = MutableStateFlow<List<QuizSummary>>(emptyList())
+    val adminQuizzes: StateFlow<List<QuizSummary>> = _adminQuizzes.asStateFlow()
+
+    private val _isAdminQuizzesLoading = MutableStateFlow(false)
+    val isAdminQuizzesLoading: StateFlow<Boolean> = _isAdminQuizzesLoading.asStateFlow()
+
+    private val _isQuizSaving = MutableStateFlow(false)
+    val isQuizSaving: StateFlow<Boolean> = _isQuizSaving.asStateFlow()
+
+    private val _quizSaveError = MutableStateFlow<String?>(null)
+    val quizSaveError: StateFlow<String?> = _quizSaveError.asStateFlow()
+
+    /** Quiz id open in the admin editor; 0 = new quiz, null = editor closed. */
+    private val _editingQuizId = MutableStateFlow<Int?>(null)
+    val editingQuizId: StateFlow<Int?> = _editingQuizId.asStateFlow()
 
     private var sessionVerificationJob: Job? = null
 
@@ -500,6 +564,204 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 _uiState.update { it.copy(isLoadingContent = false) }
             }
         }
+    }
+
+    // ── Quizzes: student side ───────────────────────────────────────────────
+
+    /** Switch the Papers tab between the library (0) and quizzes (1). */
+    fun setLibrarySegment(segment: Int) {
+        val clamped = if (segment == 1) 1 else 0
+        _uiState.update { it.copy(librarySegment = clamped) }
+        if (clamped == 1 && _quizzes.value.isEmpty() && !_isQuizLoading.value) {
+            loadQuizzes()
+        }
+    }
+
+    fun loadQuizzes(forceRefresh: Boolean = false) {
+        if (_isQuizLoading.value) return
+        viewModelScope.launch {
+            _isQuizLoading.value = true
+            _quizError.value = null
+            val outcome = quizzesRepository.loadQuizzes()
+            val loaded = outcome.valueOrNull()
+            if (loaded != null) {
+                _quizzes.value = loaded
+                _isQuizOffline.value = false
+                runCatching { repository.cacheQuizResults(loaded) }
+                quizzesRepository.loadState().valueOrNull()?.let { _quizStats.value = it }
+            } else {
+                _isQuizOffline.value = (outcome as? QuizOutcome.Err)?.offline == true
+                _quizError.value = outcome.errorOrNull ?: "Quizzes could not be loaded."
+                if (forceRefresh) showSnackbar(outcome.errorOrNull ?: "Quizzes could not be loaded.")
+            }
+            _isQuizLoading.value = false
+        }
+    }
+
+    /** Open the runner and start (or resume) an attempt. */
+    fun openQuiz(quiz: QuizSummary) {
+        _activeQuiz.value = quiz
+        _quizAttempt.value = null
+        _quizAnswers.value = emptyMap()
+        _quizResult.value = null
+        _isQuizStarting.value = true
+        viewModelScope.launch {
+            val outcome = quizzesRepository.start(quiz)
+            val attempt = outcome.valueOrNull()
+            if (attempt != null) {
+                _quizAttempt.value = attempt
+            } else {
+                _activeQuiz.value = null
+                showSnackbar(outcome.errorOrNull ?: "This quiz could not be started.")
+            }
+            _isQuizStarting.value = false
+        }
+    }
+
+    fun answerQuizQuestion(questionId: Int, optionId: Int) {
+        _quizAnswers.update { it + (questionId to optionId) }
+    }
+
+    /** Back to the list from the result page (the attempt stays in history). */
+    fun leaveQuizResult() {
+        _quizResult.value = null
+        _quizAttempt.value = null
+        _activeQuiz.value = null
+        _quizAnswers.value = emptyMap()
+        loadQuizzes()
+    }
+
+    /** Close the runner without submitting; the server keeps the open attempt. */
+    fun closeQuizRunner() {
+        _quizAttempt.value = null
+        _activeQuiz.value = null
+        _quizAnswers.value = emptyMap()
+        _quizResult.value = null
+    }
+
+    /** Try the same quiz again from the result page. */
+    fun retakeQuiz() {
+        val quiz = _activeQuiz.value
+            ?: _quizzes.value.firstOrNull { it.id == _quizResult.value?.quizId }
+            ?: return
+        _quizResult.value = null
+        openQuiz(quiz)
+    }
+
+    fun submitQuiz() {
+        if (_isQuizSubmitting.value) return
+        val attempt = _quizAttempt.value ?: return
+        _isQuizSubmitting.value = true
+        viewModelScope.launch {
+            val outcome = quizzesRepository.submit(attempt.attemptId, _quizAnswers.value)
+            val graded = outcome.valueOrNull()
+            if (graded != null) {
+                _quizResult.value = graded
+                // The ledger paid; the pill must say so, from the server.
+                refreshExp()
+                loadQuizzes()
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "Your answers could not be submitted.")
+            }
+            _isQuizSubmitting.value = false
+        }
+    }
+
+    // ── Quizzes: authoring (admin panel) ────────────────────────────────────
+
+    fun loadAdminQuizzes() {
+        viewModelScope.launch {
+            _isAdminQuizzesLoading.value = true
+            val outcome = quizzesRepository.loadAdminQuizzes()
+            val loaded = outcome.valueOrNull()
+            if (loaded != null) {
+                _adminQuizzes.value = loaded
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "Quizzes could not be loaded.")
+            }
+            _isAdminQuizzesLoading.value = false
+        }
+    }
+
+    /** Open the builder: 0 for a new quiz, an id to edit an existing one. */
+    fun openQuizEditor(quizId: Int) {
+        _quizSaveError.value = null
+        _editingQuizId.value = quizId
+    }
+
+    fun closeQuizEditor() {
+        _editingQuizId.value = null
+        _quizSaveError.value = null
+    }
+
+    fun clearQuizSaveError() {
+        _quizSaveError.value = null
+    }
+
+    fun saveQuiz(draft: QuizDraft, publish: Boolean) {
+        if (_isQuizSaving.value) return
+        val ready = if (publish) draft.isReady else draft.title.trim().isNotEmpty() && draft.questions.isNotEmpty()
+        if (!ready) {
+            _quizSaveError.value = draft.problem ?: "The quiz is not ready to publish."
+            return
+        }
+        _isQuizSaving.value = true
+        viewModelScope.launch {
+            val outcome = quizzesRepository.save(draft, publish)
+            if (outcome is QuizOutcome.Ok) {
+                _quizSaveError.value = null
+                _editingQuizId.value = null
+                showSnackbar(if (publish) "Quiz published." else "Quiz saved as a draft.")
+                loadAdminQuizzes()
+                loadQuizzes()
+            } else {
+                _quizSaveError.value = outcome.errorOrNull ?: "The quiz could not be saved."
+            }
+            _isQuizSaving.value = false
+        }
+    }
+
+    fun setQuizStatus(quizId: Int, status: String) {
+        viewModelScope.launch {
+            val outcome = quizzesRepository.setStatus(quizId, status)
+            if (outcome is QuizOutcome.Ok) {
+                showSnackbar(
+                    when (status) {
+                        "published" -> "Quiz published."
+                        "archived" -> "Quiz archived."
+                        else -> "Quiz moved back to draft."
+                    }
+                )
+                loadAdminQuizzes()
+                loadQuizzes()
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "The quiz could not be updated.")
+            }
+        }
+    }
+
+    fun deleteQuiz(quizId: Int) {
+        viewModelScope.launch {
+            val outcome = quizzesRepository.delete(quizId)
+            if (outcome is QuizOutcome.Ok) {
+                showSnackbar("Quiz deleted.")
+                loadAdminQuizzes()
+                loadQuizzes()
+            } else {
+                showSnackbar(outcome.errorOrNull ?: "The quiz could not be deleted.")
+            }
+        }
+    }
+
+    /** Load a quiz for editing; the builder seeds itself from this. */
+    suspend fun quizForEditing(quizId: Int): Pair<QuizSummary?, List<QuizQuestion>>? {
+        if (quizId <= 0) return null
+        val outcome = quizzesRepository.loadForEdit(quizId)
+        val loaded = outcome.valueOrNull()
+        if (loaded == null) {
+            _quizSaveError.value = outcome.errorOrNull ?: "That quiz could not be opened."
+        }
+        return loaded
     }
 
     fun updateBackendUrl(newUrl: String) {

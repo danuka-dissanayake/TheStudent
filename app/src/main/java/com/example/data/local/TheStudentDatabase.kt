@@ -13,9 +13,10 @@ import androidx.sqlite.db.SupportSQLiteDatabase
         SavedCourseEntity::class,
         LearningActivityEntity::class,
         UserProfileEntity::class,
-        ChatMessageEntity::class
+        ChatMessageEntity::class,
+        QuizResultEntity::class
     ],
-    version = 7,
+    version = 8,
     exportSchema = false
 )
 abstract class TheStudentDatabase : RoomDatabase() {
@@ -134,6 +135,30 @@ abstract class TheStudentDatabase : RoomDatabase() {
             }
         }
 
+
+        /**
+         * v7 -> v8: the offline mirror of quiz results ("Best 82%", "Passed").
+         *
+         * A brand new table, so an existing install keeps everything it has and
+         * simply shows no quiz badges until the first successful load.
+         */
+        private val MIGRATION_7_8 = object : Migration(7, 8) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "CREATE TABLE IF NOT EXISTS `quiz_results` (" +
+                        "`quizId` INTEGER NOT NULL, " +
+                        "`title` TEXT NOT NULL, " +
+                        "`subject` TEXT NOT NULL, " +
+                        "`grade` TEXT NOT NULL, " +
+                        "`bestPercent` INTEGER NOT NULL, " +
+                        "`passed` INTEGER NOT NULL, " +
+                        "`attempts` INTEGER NOT NULL, " +
+                        "`updatedAt` INTEGER NOT NULL, " +
+                        "PRIMARY KEY(`quizId`))"
+                )
+            }
+        }
+
         fun getDatabase(context: Context): TheStudentDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -143,7 +168,8 @@ abstract class TheStudentDatabase : RoomDatabase() {
                 )
                     // v2 adds the profile-setup columns; v3 the chat history;
                     // v4 attachments; v5 replies and voice notes; v6 the
-                    // structured academic profile; v7 Grades 6–9 and university.
+                    // structured academic profile; v7 Grades 6–9 and university;
+                    // v8 the offline quiz-result mirror.
                     // The migrations are explicit so an ordinary update keeps every
                     // saved paper, streak and message.
                     .addMigrations(
@@ -152,7 +178,8 @@ abstract class TheStudentDatabase : RoomDatabase() {
                         MIGRATION_3_4,
                         MIGRATION_4_5,
                         MIGRATION_5_6,
-                        MIGRATION_6_7
+                        MIGRATION_6_7,
+                        MIGRATION_7_8
                     )
                     // Last resort only: if the file on the device cannot be
                     // migrated for any reason (interrupted update, a build from

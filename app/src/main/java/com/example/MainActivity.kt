@@ -268,12 +268,58 @@ class MainActivity : ComponentActivity() {
                                         )
                                     }
                                 )
+                            } else if (viewModel.editingQuizId.collectAsStateWithLifecycle().value != null) {
+                                // The quiz builder gets the whole screen: a phone is a
+                                // cramped place to write twelve questions inside a tab.
+                                val editingId by viewModel.editingQuizId.collectAsStateWithLifecycle()
+                                val isQuizSaving by viewModel.isQuizSaving.collectAsStateWithLifecycle()
+                                val quizSaveError by viewModel.quizSaveError.collectAsStateWithLifecycle()
+
+                                QuizEditorScreen(
+                                    quizId = editingId ?: 0,
+                                    isSaving = isQuizSaving,
+                                    saveError = quizSaveError,
+                                    onSave = { draft, publish -> viewModel.saveQuiz(draft, publish) },
+                                    onClose = { viewModel.closeQuizEditor() },
+                                    loadExisting = { id ->
+                                        viewModel.quizForEditing(id)?.let { (quiz, questions) ->
+                                            quizDraftOf(quiz, questions)
+                                        }
+                                    }
+                                )
+                            } else if (viewModel.activeQuiz.collectAsStateWithLifecycle().value != null) {
+                                val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
+                                val attempt by viewModel.quizAttempt.collectAsStateWithLifecycle()
+                                val quizAnswers by viewModel.quizAnswers.collectAsStateWithLifecycle()
+                                val quizResult by viewModel.quizResult.collectAsStateWithLifecycle()
+                                val isQuizStarting by viewModel.isQuizStarting.collectAsStateWithLifecycle()
+                                val isQuizSubmitting by viewModel.isQuizSubmitting.collectAsStateWithLifecycle()
+
+                                activeQuiz?.let { quiz ->
+                                    QuizRunnerScreen(
+                                        quiz = quiz,
+                                        attempt = attempt,
+                                        answers = quizAnswers,
+                                        result = quizResult,
+                                        isStarting = isQuizStarting,
+                                        isSubmitting = isQuizSubmitting,
+                                        onAnswer = { questionId, optionId ->
+                                            viewModel.answerQuizQuestion(questionId, optionId)
+                                        },
+                                        onSubmit = { viewModel.submitQuiz() },
+                                        onRetake = { viewModel.retakeQuiz() },
+                                        onExit = { viewModel.closeQuizRunner() },
+                                        onBackToList = { viewModel.leaveQuizResult() }
+                                    )
+                                }
                             } else if (uiState.isAdminPanelOpen) {
                                 val dynamicPapers by viewModel.dynamicPapers.collectAsStateWithLifecycle()
                                 val isLiveDb by viewModel.isLiveDatabaseConnected.collectAsStateWithLifecycle()
                                 val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
                                 val isTestingConn by viewModel.isTestingConnection.collectAsStateWithLifecycle()
                                 val connResult by viewModel.connectionTestResult.collectAsStateWithLifecycle()
+                                val adminQuizzes by viewModel.adminQuizzes.collectAsStateWithLifecycle()
+                                val isAdminQuizzesLoading by viewModel.isAdminQuizzesLoading.collectAsStateWithLifecycle()
 
                                 AdminPanelScreen(
                                     papersList = dynamicPapers,
@@ -285,6 +331,13 @@ class MainActivity : ComponentActivity() {
                                     isTestingConnection = isTestingConn,
                                     connectionTestResult = connResult,
                                     onTestAndSaveServerUrl = { viewModel.testAndSaveServerUrl(it) },
+                                    adminQuizzes = adminQuizzes,
+                                    isAdminQuizzesLoading = isAdminQuizzesLoading,
+                                    onLoadAdminQuizzes = { viewModel.loadAdminQuizzes() },
+                                    onNewQuiz = { viewModel.openQuizEditor(0) },
+                                    onEditQuiz = { viewModel.openQuizEditor(it.id) },
+                                    onQuizStatus = { id, status -> viewModel.setQuizStatus(id, status) },
+                                    onDeleteQuiz = { viewModel.deleteQuiz(it) },
                                     onBack = { viewModel.closeAdminPanel() }
                                 )
                             } else if (uiState.isAiAssistantOpen) {
@@ -483,6 +536,11 @@ class MainActivity : ComponentActivity() {
                                                         val isLiveDb by viewModel.isLiveDatabaseConnected.collectAsStateWithLifecycle()
                                                         val serverUrl by viewModel.serverUrlState.collectAsStateWithLifecycle()
     
+                                                        val quizzes by viewModel.quizzes.collectAsStateWithLifecycle()
+                                                        val isQuizLoading by viewModel.isQuizLoading.collectAsStateWithLifecycle()
+                                                        val isQuizOffline by viewModel.isQuizOffline.collectAsStateWithLifecycle()
+                                                        val quizError by viewModel.quizError.collectAsStateWithLifecycle()
+
                                                         PapersScreen(
                                                             papers = dynamicPapers,
                                                             savedPapers = savedPapers,
@@ -490,6 +548,14 @@ class MainActivity : ComponentActivity() {
                                                             isLoading = uiState.isLoadingContent,
                                                             isLiveDatabase = isLiveDb,
                                                             serverUrl = serverUrl,
+                                                            quizzes = quizzes,
+                                                            isQuizLoading = isQuizLoading,
+                                                            isQuizOffline = isQuizOffline,
+                                                            quizError = quizError,
+                                                            segment = uiState.librarySegment,
+                                                            onSegmentChange = { viewModel.setLibrarySegment(it) },
+                                                            onOpenQuiz = { viewModel.openQuiz(it) },
+                                                            onRefreshQuizzes = { viewModel.loadQuizzes(forceRefresh = true) },
                                                             onLevelSelected = {
                                                                 viewModel.setEducationLevel(it)
                                                                 viewModel.simulateSkeletonRefresh()

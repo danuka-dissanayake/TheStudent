@@ -13,6 +13,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Description
+import androidx.compose.material.icons.filled.EmojiEvents
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.DoneAll
 import androidx.compose.material.icons.filled.Forum
 import androidx.compose.material.icons.filled.Star
@@ -584,6 +586,8 @@ private fun AwardTile(award: ExpAward) {
         "rating_received" -> Color(0xFF8B5CF6) to Icons.Default.Star
         "rated" -> Color(0xFF8B5CF6) to Icons.Default.Star
         "paper_uploaded" -> Color(0xFF0EA5E9) to Icons.Default.Description
+        "quiz_passed" -> Color(0xFF059669) to Icons.Default.Quiz
+        "quiz_perfect" -> Color(0xFFF59E0B) to Icons.Default.EmojiEvents
         else -> Color(0xFF64748B) to Icons.Default.Star
     }
     Box(
