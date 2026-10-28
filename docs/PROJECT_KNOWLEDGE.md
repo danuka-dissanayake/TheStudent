@@ -61,7 +61,7 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `AuthScreen.kt` | 1921 | Sign-in / sign-up / OTP keypad, Google & Apple buttons, shimmer transitions |
 | `HomeScreen.kt` | 875 | Greeting, stats (streak, hours, papers, points), courses, papers, notes, AI entry points |
 | `ChatScreen.kt` | ~1050 | **Production 1:1 student chat** — directory of registered students (full name + avatar only), live online rail/count, unread badges, typing + last-seen, one-time safety notice, clear chat. Data from `api/chat.php` via `TheStudentChatClient`; see `docs/CHAT.md` |
-| `PapersScreen.kt` | 1423 | Grade/stream/medium/year filters (`FilterRightSidebar`), search, skeleton shimmer, save/download, server-URL sheet |
+| `PapersScreen.kt` | ~1160 | Two segments under one header — `Papers` (search, category chips, sort sheet, filter sheet, save/download, server-URL sheet) and `Quizzes`. |
 | `AiTutorScreen.kt` | 603 | English voice tutor: visualizer, transcript, grammar tip, scenario pills, hands-free, HF settings |
 | `AiLanguageScreen.kt` | 786 | 4 sub-tabs: Voice Conversation, Vocabulary, Grammar quiz, Pronunciation |
 | `AiAssistantScreen.kt` | 4526 | **Flagship**: ChatGPT-style chat, markdown/table/link rendering, chain-of-thought reasoning blocks, model picker, OCR preview, document cards, stop/retry/rate |
@@ -69,7 +69,10 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 | `AcademicSetupScreen.kt` | ~190 | The academic step across all four Sri Lankan stages — Grades 6–9, O/L (six compulsory + one from each of three buckets), A/L (stream + three subjects, with General English and the Common General Test stated but not counted) and undergraduate (university, field, year). See `docs/ACADEMIC.md`. |
 | `AcademicFormSections.kt` | ~760 | `AcademicStageForm` — the one academic form, shared by the sign-up setup screen (`flat = true`, inside its own card) and the Academic details screen. Four stages, stage-specific sections, `academicTodo()` / `targetExamFor()` / `streamOrDegreeFor()` helpers. |
 | `ProfileScreen.kt` | ~1080 | The student's own record: identity hero (avatar, name, level chip), stats strip, level + badge ladder, reputation card (average, distribution, the private notes only they can read), studies card with subject rows, library tabs (saved / courses / history), and account rows (account, security, appearance, admin, sign out behind a confirmation). Opens `ExpScreen`, `SecurityScreen`, `AdminPanelScreen`. |
-| `AdminPanelScreen.kt` | 1103 | Upload form (thumbnail/PDF/marking-scheme pickers), paper list + delete, backend URL tester |
+| `AdminPanelScreen.kt` | ~1180 | Upload form (thumbnail/PDF/marking-scheme pickers), paper list + delete, **Quizzes** tab (`QuizAdminList`), backend URL tester |
+| `QuizzesScreen.kt` | ~695 | The quiz hub inside the Papers tab: engine-free chips (A/L, O/L, Grades 6–9, University, Passed, New), search, per-quiz cover, question/time/EXP badges, best-score chip, skeleton/empty/offline states |
+| `QuizRunnerScreen.kt` | ~900 | One question at a time, remembered picks, optional countdown that auto-submits, leave confirmation, then the result page (score ring, pass pill, EXP card, wrong-only review, retake) |
+| `QuizAdminScreen.kt` | ~1000 | `QuizAdminList` (status badges, publish/archive/delete, attempt counts) and `QuizEditorScreen`: full-screen builder with chips for grade/category/medium/timer/pass mark, question reordering, a correct-answer radio per question, and a SharedPreferences draft autosave |
 | `LearnScreen.kt` | 428 | **Orphaned** — never referenced from `MainActivity` |
 
 Components (`ui/components`): logo, top bar, bottom nav, sidebar drawer, auth dialog, paper/course dialogs,

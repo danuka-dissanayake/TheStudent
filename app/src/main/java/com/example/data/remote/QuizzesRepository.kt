@@ -45,8 +45,10 @@ class QuizzesRepository(context: Context) {
     private val sessionPrefs by lazy { TheStudentPreferences(appContext) }
 
     /** The papers repository already owns backend-URL storage and validation. */
+    private val backend by lazy { PastPapersRemoteRepository(appContext) }
+
     private val backendUrl: String
-        get() = PastPapersRemoteRepository(appContext).backendBaseUrl
+        get() = backend.backendBaseUrl
 
     private var cachedService: QuizzesApiService? = null
     private var cachedBaseUrl: String = ""
