@@ -423,12 +423,30 @@ class MainActivity : ComponentActivity() {
                             } else {
                                 ModalNavigationDrawer(
                                     drawerState = drawerState,
-                                    gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME,
+                                    // Reachable from every tab that shows the app bar; the
+                                    // screens with their own header keep the edge to themselves.
+                                    gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME ||
+                                        uiState.currentTab == TheStudentNavTab.AI_TUTOR,
                                     drawerContent = {
                                         val isAdmin by viewModel.isAdmin.collectAsStateWithLifecycle()
+                                        val drawerProgress by viewModel.quizProgress.collectAsStateWithLifecycle()
                                         ModernSidebarDrawer(
                                             userProfile = userProfile,
                                             isAdmin = isAdmin,
+                                            quizProgress = drawerProgress,
+                                            onOpenCourseCollection = {
+                                                viewModel.openCourseCollection()
+                                                coroutineScope.launch { drawerState.close() }
+                                            },
+                                            onOpenQuizzes = {
+                                                viewModel.setTab(TheStudentNavTab.PAPERS)
+                                                viewModel.setLibrarySegment(1)
+                                                coroutineScope.launch { drawerState.close() }
+                                            },
+                                            onOpenProgress = {
+                                                viewModel.openProgress()
+                                                coroutineScope.launch { drawerState.close() }
+                                            },
                                             currentTab = uiState.currentTab,
                                             onSelectTab = { tab ->
                                                 viewModel.setTab(tab)
@@ -486,15 +504,14 @@ class MainActivity : ComponentActivity() {
                                                  TheStudentTopAppBar(
                                                      currentTab = uiState.currentTab,
                                                      streakDays = userProfile.streakDays,
+                                                     userName = userProfile.name,
+                                                     avatarUrl = userProfile.avatarUrl,
                                                      onNavigationClick = {
-                                                         if (uiState.currentTab == TheStudentNavTab.HOME) {
-                                                             coroutineScope.launch { drawerState.open() }
-                                                         } else {
-                                                             viewModel.setTab(TheStudentNavTab.HOME)
-                                                         }
+                                                         coroutineScope.launch { drawerState.open() }
                                                      },
                                                      onLanguageLabClick = { viewModel.openLanguageLab(0) },
-                                                     onSearchClick = { viewModel.setTab(TheStudentNavTab.PAPERS) }
+                                                     onSearchClick = { viewModel.setTab(TheStudentNavTab.PAPERS) },
+                                                     onProfileClick = { viewModel.setTab(TheStudentNavTab.PROFILE) }
                                                  )
                                              }
                                          },
@@ -536,6 +553,7 @@ class MainActivity : ComponentActivity() {
                                             ) { tab ->
                                                 when (tab) {
                                                     TheStudentNavTab.HOME -> {
+                                                        val homeQuizzes by viewModel.quizzes.collectAsStateWithLifecycle()
                                                         HomeScreen(
                                                             userProfile = userProfile,
                                                             popularCourses = viewModel.allCourses,
@@ -552,9 +570,18 @@ class MainActivity : ComponentActivity() {
                                                             onOpenProgress = { viewModel.openProgress() },
                                                             onContinueLearning = { viewModel.practiseSuggested() },
                                                             onOpenCourseCollection = { viewModel.openCourseCollection() },
-                                                            onNavigateTab = { viewModel.setTab(it) }
+                                                            onNavigateTab = { viewModel.setTab(it) },
+                                                            quizzes = homeQuizzes.filter { it.isPublished },
+                                                            onQuizClick = { viewModel.openQuiz(it) },
+                                                            onOpenQuizzes = {
+                                                                viewModel.setTab(TheStudentNavTab.PAPERS)
+                                                                viewModel.setLibrarySegment(1)
+                                                            }
                                                         )
-                                                        LaunchedEffect(Unit) { viewModel.loadProgress() }
+                                                        LaunchedEffect(Unit) {
+                                                            viewModel.loadProgress()
+                                                            viewModel.loadQuizzes()
+                                                        }
                                                     }
                                                     TheStudentNavTab.CHAT -> {
                                                          ChatScreen(

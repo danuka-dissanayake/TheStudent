@@ -23,6 +23,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -33,16 +34,18 @@ import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.Insights
 import androidx.compose.material.icons.filled.LocalFireDepartment
 import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Stars
-import androidx.compose.material.icons.filled.Translate
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -61,13 +64,16 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import coil.compose.AsyncImage
 import com.example.data.local.SavedCourseEntity
 import com.example.data.model.Course
 import com.example.data.model.CourseCatalog
 import com.example.data.model.PastPaper
 import com.example.data.model.QuizProgress
+import com.example.data.model.QuizSummary
+import com.example.data.model.StudyMetrics
 import com.example.data.model.StudyNote
+import com.example.data.model.SubjectCodes
+import com.example.data.model.SubjectProgress
 import com.example.data.model.UserProfile
 import com.example.ui.components.HomeSkeletonLoading
 import com.example.ui.components.PaperCover
@@ -75,9 +81,9 @@ import com.example.ui.components.TheStudentNavTab
 import com.example.ui.components.paperCoverTint
 import com.example.ui.theme.EmeraldPrimary
 import com.example.ui.theme.MaisonNeueFontFamily
-import java.text.SimpleDateFormat
+import coil.compose.AsyncImage
 import java.util.Calendar
-import java.util.Locale
+import kotlinx.coroutines.delay
 
 // ─────────────────────────────────────────────────────────────────────────────
 //  Palette — one place, so the dashboard has a single visual voice
@@ -97,10 +103,10 @@ private val HBlue = Color(0xFF2563EB)
 private val HBlueSoft = Color(0xFFEEF2FF)
 private val HAmber = Color(0xFFB45309)
 private val HAmberSoft = Color(0xFFFFFBEB)
-private val HDeep = Color(0xFF06281F)
+private val HTrack = Color(0xFFEDF1F6)
 
 private object HT {
-    val screen: androidx.compose.ui.unit.TextUnit = 22.sp
+    val screen: androidx.compose.ui.unit.TextUnit = 34.sp
     val section: androidx.compose.ui.unit.TextUnit = 16.sp
     val cardTitle: androidx.compose.ui.unit.TextUnit = 14.sp
     val body: androidx.compose.ui.unit.TextUnit = 12.5.sp
@@ -111,12 +117,12 @@ private object HT {
 /**
  * The dashboard.
  *
- * Everything numeric here comes from a real source: the hero ring, the pass
- * count, study time and EXP are the same figures the progress page computes;
- * the weekly bars are the student's own attempts bucketed by weekday; the
- * subject rows are their weakest subjects. Nothing is a decorative placeholder —
- * where there is no data yet, the card says so and offers the action that would
- * create it.
+ * Everything numeric here comes from a real source: the report ring, the pass
+ * count, study time and EXP are the same figures the progress page computes; the
+ * weekly bars are the student's own attempts bucketed by weekday; the subject
+ * rows are their weakest subjects. Nothing is a decorative placeholder — where
+ * there is no data yet, the card says so and offers the action that would create
+ * it.
  */
 @Composable
 fun HomeScreen(
@@ -136,7 +142,10 @@ fun HomeScreen(
     onContinueLearning: () -> Unit = {},
     onOpenCourseCollection: () -> Unit = {},
     onNavigateTab: (TheStudentNavTab) -> Unit,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    quizzes: List<QuizSummary> = emptyList(),
+    onQuizClick: (QuizSummary) -> Unit = {},
+    onOpenQuizzes: () -> Unit = {}
 ) {
     if (isLoading) {
         HomeSkeletonLoading(modifier = modifier)
@@ -147,60 +156,74 @@ fun HomeScreen(
     val practice = quizProgress.practice
     val firstName = userProfile.name.trim().split(" ").firstOrNull().orEmpty()
     val streak = maxOf(summary.streakDays, userProfile.streakDays)
+    val stage = listOf(userProfile.academicLevel, userProfile.streamOrDegree)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
+    val subtitle = listOf(StudyMetrics.today(), stage)
+        .filter { it.isNotBlank() }
+        .joinToString(" · ")
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
             .testTag("home_screen_content"),
-        contentPadding = PaddingValues(bottom = 26.dp),
-        verticalArrangement = Arrangement.spacedBy(0.dp)
+        contentPadding = PaddingValues(bottom = 26.dp)
     ) {
         // ── greeting ────────────────────────────────────────────────────────
         item(key = "greeting") {
-            GreetingRow(
+            GreetingHeader(
                 firstName = firstName,
-                avatarUrl = userProfile.avatarUrl,
+                subtitle = subtitle,
                 streakDays = streak,
                 modifier = Modifier
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 14.dp, bottom = 14.dp)
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 16.dp, bottom = 16.dp)
                     .testTag("welcome_card")
             )
         }
 
-        // ── hero report card ────────────────────────────────────────────────
-        item(key = "hero") {
-            HeroReportCard(
+        // ── report card ─────────────────────────────────────────────────────
+        item(key = "report_card") {
+            ReportCard(
                 averagePercent = summary.averagePercent,
                 quizzesPassed = summary.quizzesPassed,
                 quizzesPublished = summary.quizzesPublished,
                 studySeconds = summary.durationSeconds,
                 exp = summary.expFromQuizzes,
                 hasData = summary.attempts > 0,
+                subjects = quizProgress.subjects,
                 onOpenProgress = onOpenProgress,
                 onOpenExp = onOpenExp,
-                onPractise = { if (practice != null) onContinueLearning() else onOpenProgress() },
-                modifier = Modifier.padding(horizontal = 16.dp)
+                onPractise = { if (practice != null) onContinueLearning() else onOpenQuizzes() },
+                modifier = Modifier.padding(horizontal = 18.dp)
             )
         }
 
         // ── quick actions ───────────────────────────────────────────────────
+        item(key = "actions_header") {
+            SectionHeader(
+                title = "Quick actions",
+                action = null,
+                onAction = null,
+                modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 22.dp, bottom = 10.dp)
+            )
+        }
         item(key = "actions") {
             QuickActions(
                 onAskAi = onOpenAiAssistant,
                 onCourses = onOpenCourseCollection,
                 onPapers = { onNavigateTab(TheStudentNavTab.PAPERS) },
-                onReport = onOpenProgress,
-                modifier = Modifier.padding(horizontal = 16.dp).padding(top = 14.dp)
+                onQuizzes = onOpenQuizzes,
+                modifier = Modifier.padding(horizontal = 18.dp)
             )
         }
 
-        // ── weekly report ───────────────────────────────────────────────────
-        item(key = "report") {
+        // ── this week ───────────────────────────────────────────────────────
+        item(key = "weekly_report") {
             WeeklyReportCard(
                 progress = quizProgress,
                 onOpenProgress = onOpenProgress,
-                modifier = Modifier.padding(horizontal = 16.dp).padding(top = 14.dp)
+                modifier = Modifier.padding(horizontal = 18.dp).padding(top = 16.dp)
             )
         }
 
@@ -216,9 +239,9 @@ fun HomeScreen(
                     0
                 },
                 onStart = {
-                    if (practice != null) onContinueLearning() else onNavigateTab(TheStudentNavTab.PAPERS)
+                    if (practice != null) onContinueLearning() else onOpenQuizzes()
                 },
-                modifier = Modifier.padding(horizontal = 16.dp).padding(top = 14.dp)
+                modifier = Modifier.padding(horizontal = 18.dp).padding(top = 14.dp)
             )
         }
 
@@ -227,8 +250,8 @@ fun HomeScreen(
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 14.dp)
+                    .padding(horizontal = 18.dp)
+                    .padding(top = 16.dp)
                     // Intrinsic height, so the shorter card stretches to match
                     // its neighbour instead of leaving a ragged bottom edge.
                     .height(IntrinsicSize.Min),
@@ -245,25 +268,21 @@ fun HomeScreen(
             }
         }
 
-        // ── popular courses ─────────────────────────────────────────────────
+        // ── popular courses: auto-advancing rail with page dots ─────────────
         if (popularCourses.isNotEmpty()) {
             item(key = "courses_header") {
                 SectionHeader(
                     title = "Popular courses",
                     action = "See all",
                     onAction = onOpenCourseCollection,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
                 )
             }
             item(key = "courses_rail") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
-                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    items(popularCourses, key = { it.id }) { course ->
-                        CourseRailCard(course = course, onClick = { onCourseClick(course) })
-                    }
-                }
+                AutoCourseRail(
+                    courses = popularCourses.take(6),
+                    onCourseClick = onCourseClick
+                )
             }
         }
 
@@ -274,16 +293,38 @@ fun HomeScreen(
                     title = "Past papers",
                     action = "See all",
                     onAction = { onNavigateTab(TheStudentNavTab.PAPERS) },
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
                 )
             }
             item(key = "papers_rail") {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(recentPapers.take(10), key = { it.id }) { paper ->
                         PaperRailCard(paper = paper, onClick = { onPaperClick(paper) })
+                    }
+                }
+            }
+        }
+
+        // ── quizzes ─────────────────────────────────────────────────────────
+        if (quizzes.isNotEmpty()) {
+            item(key = "quizzes_header") {
+                SectionHeader(
+                    title = "Quizzes",
+                    action = "See all",
+                    onAction = onOpenQuizzes,
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
+                )
+            }
+            item(key = "quizzes_rail") {
+                LazyRow(
+                    contentPadding = PaddingValues(horizontal = 18.dp),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    items(quizzes.take(8), key = { "quiz-${it.id}" }) { quiz ->
+                        QuizRailCard(quiz = quiz, onClick = { onQuizClick(quiz) })
                     }
                 }
             }
@@ -296,15 +337,15 @@ fun HomeScreen(
                     title = "High-yield notes",
                     action = "${recentNotes.size}",
                     onAction = null,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
                 )
             }
             items(recentNotes.take(3), key = { "note-${it.id}" }) { note ->
                 CompactNoteCard(
                     note = note,
                     modifier = Modifier
-                        .padding(horizontal = 16.dp)
-                        .padding(top = 8.dp)
+                        .padding(horizontal = 18.dp)
+                        .padding(bottom = 8.dp)
                 )
             }
         }
@@ -316,12 +357,12 @@ fun HomeScreen(
                     title = "Saved courses",
                     action = "${savedCourses.size}",
                     onAction = null,
-                    modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 22.dp)
+                    modifier = Modifier.padding(start = 18.dp, end = 18.dp, top = 24.dp, bottom = 10.dp)
                 )
             }
             item(key = "saved_rail") {
                 LazyRow(
-                    contentPadding = PaddingValues(horizontal = 16.dp),
+                    contentPadding = PaddingValues(horizontal = 18.dp),
                     horizontalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
                     items(savedCourses, key = { it.id }) { saved ->
@@ -338,7 +379,9 @@ fun HomeScreen(
         }
 
         // ── footer ──────────────────────────────────────────────────────────
-        val lastAttempt = quizProgress.recent.firstOrNull()?.submittedAt?.let(::shortDate)
+        val lastAttempt = quizProgress.recent.firstOrNull()?.submittedAt
+            ?.let(StudyMetrics::shortDate)
+            ?.takeIf { it.isNotBlank() }
         if (lastAttempt != null) {
             item(key = "footer") {
                 Text(
@@ -360,94 +403,6 @@ fun HomeScreen(
 //  Greeting
 // ─────────────────────────────────────────────────────────────────────────────
 
-@Composable
-private fun GreetingRow(
-    firstName: String,
-    avatarUrl: String,
-    streakDays: Int,
-    modifier: Modifier = Modifier
-) {
-    Row(modifier = modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = greetingForNow(),
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = HT.body,
-                color = HMuted
-            )
-            Text(
-                text = firstName.ifBlank { "there" },
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = HT.screen,
-                fontWeight = FontWeight.ExtraBold,
-                color = HInk,
-                letterSpacing = (-0.4).sp,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-        if (streakDays > 0) {
-            Box(
-                modifier = Modifier
-                    .clip(RoundedCornerShape(50))
-                    .background(HAmberSoft)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-                    .testTag("home_streak_pill")
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
-                ) {
-                    Icon(
-                        Icons.Default.LocalFireDepartment,
-                        contentDescription = null,
-                        tint = HAmber,
-                        modifier = Modifier.size(14.dp)
-                    )
-                    Text(
-                        text = "$streakDays day streak",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = HT.micro,
-                        fontWeight = FontWeight.Bold,
-                        color = HAmber,
-                        maxLines = 1
-                    )
-                }
-            }
-            Spacer(Modifier.width(9.dp))
-        }
-        Avatar(url = avatarUrl, initials = firstName.take(1).uppercase())
-    }
-}
-
-@Composable
-private fun Avatar(url: String, initials: String) {
-    Box(
-        modifier = Modifier
-            .size(42.dp)
-            .clip(CircleShape)
-            .background(HGreenSoft),
-        contentAlignment = Alignment.Center
-    ) {
-        if (url.isNotBlank()) {
-            AsyncImage(
-                model = url,
-                contentDescription = null,
-                contentScale = ContentScale.Crop,
-                modifier = Modifier.fillMaxSize().clip(CircleShape)
-            )
-        } else {
-            Text(
-                text = initials.ifBlank { "S" },
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 16.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = HGreen
-            )
-        }
-    }
-}
-
 private fun greetingForNow(): String {
     val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
     return when {
@@ -457,134 +412,239 @@ private fun greetingForNow(): String {
     }
 }
 
+@Composable
+private fun GreetingHeader(
+    firstName: String,
+    subtitle: String,
+    streakDays: Int,
+    modifier: Modifier = Modifier
+) {
+    Column(modifier = modifier.fillMaxWidth()) {
+        Text(
+            text = greetingForNow(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 15.5.sp,
+            fontWeight = FontWeight.Medium,
+            color = HMuted
+        )
+        Spacer(Modifier.height(2.dp))
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(
+                text = firstName.ifBlank { "there" },
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = HT.screen,
+                fontWeight = FontWeight.ExtraBold,
+                color = HInk,
+                letterSpacing = (-1.2).sp,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false)
+            )
+            if (streakDays > 0) {
+                Spacer(Modifier.width(10.dp))
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(HAmberSoft)
+                        .padding(horizontal = 9.dp, vertical = 5.dp)
+                        .testTag("home_streak_pill")
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(3.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.LocalFireDepartment,
+                            contentDescription = null,
+                            tint = HAmber,
+                            modifier = Modifier.size(13.dp)
+                        )
+                        Text(
+                            text = "$streakDays day streak",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 10.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = HAmber,
+                            maxLines = 1
+                        )
+                    }
+                }
+            }
+        }
+        if (subtitle.isNotBlank()) {
+            Spacer(Modifier.height(4.dp))
+            Text(
+                text = subtitle,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Medium,
+                color = HFaint,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
-//  Hero
+//  Report card
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun HeroReportCard(
+private fun ReportCard(
     averagePercent: Int,
     quizzesPassed: Int,
     quizzesPublished: Int,
     studySeconds: Int,
     exp: Int,
     hasData: Boolean,
+    subjects: List<SubjectProgress>,
     onOpenProgress: () -> Unit,
     onOpenExp: () -> Unit,
     onPractise: () -> Unit,
     modifier: Modifier = Modifier
 ) {
+    val strong = subjects.count { it.accuracy >= 75 }
+    val steady = subjects.count { it.accuracy in 50..74 }
+    val weak = subjects.count { it.accuracy < 50 }
+    val total = (strong + steady + weak).coerceAtLeast(1)
+
     Surface(
         shape = RoundedCornerShape(24.dp),
-        color = HDeep,
-        modifier = modifier.fillMaxWidth()
+        color = HCard,
+        border = BorderStroke(1.dp, HHairline),
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("home_report_card")
     ) {
-        Box(
-            modifier = Modifier.background(
-                Brush.linearGradient(listOf(Color(0xFF0E7A5F), Color(0xFF0B4A3B), HDeep))
-            )
-        ) {
-            Column(modifier = Modifier.padding(16.dp)) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    AccuracyRing(
-                        percent = averagePercent,
-                        modifier = Modifier.size(98.dp)
+        Column(modifier = Modifier.padding(16.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                AccuracyRing(
+                    percent = averagePercent,
+                    modifier = Modifier.size(104.dp)
+                )
+                Spacer(Modifier.width(16.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    KpiRow(
+                        value = if (quizzesPublished > 0) "$quizzesPassed of $quizzesPublished" else "—",
+                        label = "quizzes passed"
                     )
-                    Spacer(Modifier.width(16.dp))
-                    Column(modifier = Modifier.weight(1f)) {
-                        HeroStat(
-                            value = if (quizzesPublished > 0) "$quizzesPassed of $quizzesPublished" else "—",
-                            label = "quizzes passed"
+                    Hairline()
+                    KpiRow(
+                        value = if (studySeconds > 0) StudyMetrics.duration(studySeconds) else "—",
+                        label = "studied"
+                    )
+                    Hairline()
+                    // The EXP figure is the door to the ledger behind it.
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(8.dp))
+                            .clickable(onClick = onOpenExp)
+                            .testTag("home_exp_pill")
+                    ) {
+                        KpiRow(
+                            value = if (exp > 0) "$exp XP" else "—",
+                            label = "earned from quizzes"
                         )
-                        HeroDivider()
-                        HeroStat(
-                            value = if (studySeconds > 0) formatStudyTime(studySeconds) else "—",
-                            label = "studied"
-                        )
-                        HeroDivider()
-                        // The EXP figure is the door to the ledger behind it, as
-                        // it was when the pill lived in the header.
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .clickable(onClick = onOpenExp)
-                                .testTag("home_exp_pill")
-                        ) {
-                            HeroStat(
-                                value = if (exp > 0) "$exp XP" else "—",
-                                label = "earned from quizzes"
-                            )
-                        }
                     }
                 }
+            }
 
-                Spacer(Modifier.height(14.dp))
+            if (subjects.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                SegmentedBar(
+                    strong = strong,
+                    steady = steady,
+                    weak = weak,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = "Strong ${percentOf(strong, total)} · " +
+                        "Steady ${percentOf(steady, total)} · " +
+                        "Needs work ${percentOf(weak, total)}",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    color = HMuted,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
 
+            Spacer(Modifier.height(16.dp))
+
+            Surface(
+                onClick = onPractise,
+                shape = RoundedCornerShape(50),
+                color = HGreen,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("hero_cta")
+            ) {
                 Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.14f))
-                        .clickable(onClick = onPractise)
-                        .padding(horizontal = 16.dp, vertical = 11.dp)
-                        .testTag("hero_cta"),
+                    modifier = Modifier.fillMaxSize(),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.Center
                 ) {
                     Text(
                         text = if (hasData) "Keep practising" else "Take your first quiz",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 13.5.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
                     Spacer(Modifier.width(6.dp))
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowForward,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(15.dp)
                     )
                 }
-
-                Spacer(Modifier.height(10.dp))
-
-                Text(
-                    text = "Full report",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = HT.micro,
-                    fontWeight = FontWeight.SemiBold,
-                    color = Color.White.copy(alpha = 0.72f),
-                    modifier = Modifier
-                        .align(Alignment.CenterHorizontally)
-                        .clip(RoundedCornerShape(50))
-                        .clickable(onClick = onOpenProgress)
-                        .padding(horizontal = 10.dp, vertical = 4.dp)
-                        .testTag("home_open_progress")
-                )
             }
+
+            Spacer(Modifier.height(6.dp))
+
+            Text(
+                text = "Full report",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = HT.micro,
+                fontWeight = FontWeight.Bold,
+                color = HGreen,
+                modifier = Modifier
+                    .align(Alignment.CenterHorizontally)
+                    .clip(RoundedCornerShape(50))
+                    .clickable(onClick = onOpenProgress)
+                    .padding(horizontal = 10.dp, vertical = 6.dp)
+                    .testTag("home_open_progress")
+            )
         }
     }
 }
 
+private fun percentOf(part: Int, total: Int): String =
+    if (total <= 0) "0%" else "${(part * 100 + total / 2) / total}%"
+
 @Composable
-private fun HeroStat(value: String, label: String) {
-    Column(modifier = Modifier.fillMaxWidth()) {
+private fun KpiRow(value: String, label: String) {
+    Column(modifier = Modifier.fillMaxWidth().padding(vertical = 7.dp)) {
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 16.sp,
+            fontSize = 18.sp,
             fontWeight = FontWeight.ExtraBold,
-            color = Color.White,
+            letterSpacing = (-0.3).sp,
+            color = HInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = HT.micro,
-            color = Color.White.copy(alpha = 0.66f),
+            fontSize = 10.5.sp,
+            color = HFaint,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
@@ -592,17 +652,16 @@ private fun HeroStat(value: String, label: String) {
 }
 
 @Composable
-private fun HeroDivider() {
+private fun Hairline() {
     Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(vertical = 7.dp)
             .height(1.dp)
-            .background(Color.White.copy(alpha = 0.13f))
+            .background(HHairline)
     )
 }
 
-/** A white ring on a translucent track. Drawn, so it is crisp at any size. */
+/** A colour-coded ring: emerald on a pale track, with the figure in the middle. */
 @Composable
 private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
     val safe = percent.coerceIn(0, 100)
@@ -612,7 +671,7 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
             val inset = stroke / 2f
             val arcSize = Size(size.width - stroke, size.height - stroke)
             drawArc(
-                color = Color.White.copy(alpha = 0.18f),
+                color = HTrack,
                 startAngle = -90f,
                 sweepAngle = 360f,
                 useCenter = false,
@@ -620,29 +679,69 @@ private fun AccuracyRing(percent: Int, modifier: Modifier = Modifier) {
                 size = arcSize,
                 style = Stroke(width = stroke, cap = StrokeCap.Round)
             )
-            drawArc(
-                color = Color.White,
-                startAngle = -90f,
-                sweepAngle = 360f * (safe / 100f),
-                useCenter = false,
-                topLeft = Offset(inset, inset),
-                size = arcSize,
-                style = Stroke(width = stroke, cap = StrokeCap.Round)
-            )
+            if (safe > 0) {
+                drawArc(
+                    color = HGreen,
+                    startAngle = -90f,
+                    sweepAngle = 360f * (safe / 100f),
+                    useCenter = false,
+                    topLeft = Offset(inset, inset),
+                    size = arcSize,
+                    style = Stroke(width = stroke, cap = StrokeCap.Round)
+                )
+            }
         }
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Text(
                 text = "$safe%",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 22.sp,
+                fontSize = 25.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = Color.White
+                letterSpacing = (-0.8).sp,
+                color = HInk
             )
             Text(
-                text = "avg accuracy",
+                text = "accuracy",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
-                color = Color.White.copy(alpha = 0.7f)
+                fontSize = 10.sp,
+                fontWeight = FontWeight.Medium,
+                color = HMuted
+            )
+        }
+    }
+}
+
+/** One bar, three segments: the subject mix at a glance. */
+@Composable
+private fun SegmentedBar(strong: Int, steady: Int, weak: Int, modifier: Modifier = Modifier) {
+    Row(
+        modifier = modifier
+            .height(8.dp)
+            .clip(CircleShape)
+            .background(HTrack)
+    ) {
+        if (strong > 0) {
+            Box(
+                modifier = Modifier
+                    .weight(strong.toFloat())
+                    .fillMaxHeight()
+                    .background(HGreen)
+            )
+        }
+        if (steady > 0) {
+            Box(
+                modifier = Modifier
+                    .weight(steady.toFloat())
+                    .fillMaxHeight()
+                    .background(HBlue)
+            )
+        }
+        if (weak > 0) {
+            Box(
+                modifier = Modifier
+                    .weight(weak.toFloat())
+                    .fillMaxHeight()
+                    .background(Color(0xFFF59E0B))
             )
         }
     }
@@ -657,7 +756,7 @@ private fun QuickActions(
     onAskAi: () -> Unit,
     onCourses: () -> Unit,
     onPapers: () -> Unit,
-    onReport: () -> Unit,
+    onQuizzes: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Row(
@@ -692,12 +791,12 @@ private fun QuickActions(
             modifier = Modifier.weight(1f)
         )
         QuickAction(
-            icon = Icons.Default.Insights,
-            label = "Report",
+            icon = Icons.Default.Quiz,
+            label = "Quizzes",
             tint = HGreen,
             background = HGreenSoft,
-            tag = "home_quick_report",
-            onClick = onReport,
+            tag = "home_quick_quizzes",
+            onClick = onQuizzes,
             modifier = Modifier.weight(1f)
         )
     }
@@ -718,7 +817,7 @@ private fun QuickAction(
         shape = RoundedCornerShape(18.dp),
         color = HCard,
         border = BorderStroke(1.dp, HHairline),
-        modifier = modifier.heightIn(min = 86.dp).testTag(tag)
+        modifier = modifier.heightIn(min = 84.dp).testTag(tag)
     ) {
         Column(
             modifier = Modifier
@@ -750,7 +849,7 @@ private fun QuickAction(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Weekly report
+//  This week
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
@@ -760,7 +859,9 @@ private fun WeeklyReportCard(
     modifier: Modifier = Modifier
 ) {
     val subjects = progress.subjects.take(4)
-    val weekly = remember(progress.recent) { attemptsByWeekday(progress.recent.map { it.submittedAt }) }
+    val weekly = remember(progress.recent) {
+        StudyMetrics.attemptsByWeekday(progress.recent.map { it.submittedAt })
+    }
 
     Surface(
         shape = RoundedCornerShape(20.dp),
@@ -793,7 +894,7 @@ private fun WeeklyReportCard(
                         color = HGreen
                     )
                     Icon(
-                        Icons.Default.ChevronRight,
+                        imageVector = Icons.Default.ChevronRight,
                         contentDescription = null,
                         tint = HGreen,
                         modifier = Modifier.size(15.dp)
@@ -860,7 +961,7 @@ private fun WeeklyReportCard(
                     Spacer(Modifier.width(6.dp))
                     StatChip(
                         icon = Icons.Default.AccessTime,
-                        text = formatStudyTime(progress.summary.durationSeconds),
+                        text = StudyMetrics.duration(progress.summary.durationSeconds),
                         tint = HBlue,
                         background = HBlueSoft
                     )
@@ -898,7 +999,7 @@ private fun SubjectAccuracyRow(subject: String, accuracy: Int, tint: Color) {
                 .fillMaxWidth()
                 .height(5.dp)
                 .clip(CircleShape)
-                .background(Color(0xFFEDF1F6))
+                .background(HTrack)
         ) {
             Box(
                 modifier = Modifier
@@ -917,31 +1018,35 @@ private fun accuracyTint(accuracy: Int): Color = when {
     else -> Color(0xFFF59E0B)
 }
 
-/** Seven rounded bars, one per weekday, from the student's own attempts. */
+/** Seven bars on pale tracks, one per weekday, from the student's own attempts. */
 @Composable
 private fun WeekBars(counts: IntArray, modifier: Modifier = Modifier) {
     val peak = (counts.maxOrNull() ?: 0).coerceAtLeast(1)
     val labels = listOf("M", "Tu", "We", "Th", "Fr", "Sa", "Su")
     Column(modifier = modifier) {
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(66.dp),
             horizontalArrangement = Arrangement.spacedBy(3.dp),
             verticalAlignment = Alignment.Bottom
         ) {
-            counts.forEachIndexed { index, count ->
-                val fraction = if (count == 0) 0.12f else (count.toFloat() / peak) * 0.86f + 0.14f
+            counts.forEach { count ->
+                val fraction = if (count == 0) 0.14f else (count.toFloat() / peak) * 0.82f + 0.18f
                 Box(
                     modifier = Modifier
                         .weight(1f)
-                        .height(66.dp),
+                        .fillMaxHeight()
+                        .clip(RoundedCornerShape(4.dp))
+                        .background(Color(0xFFF1F5F9)),
                     contentAlignment = Alignment.BottomCenter
                 ) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
                             .fillMaxHeight(fraction)
-                            .clip(RoundedCornerShape(3.dp))
-                            .background(if (count == 0) Color(0xFFE7EDF4) else HGreen)
+                            .clip(RoundedCornerShape(4.dp))
+                            .background(if (count == 0) Color(0xFFE2E8F0) else HGreen)
                     )
                 }
             }
@@ -993,28 +1098,6 @@ private fun StatChip(
     }
 }
 
-/**
- * Attempts per weekday, Monday first, from the ISO dates the server returns.
- * `java.time` is off the table here (minSdk 24, no desugaring), so this uses
- * Calendar — the one API that is guaranteed on every supported device.
- */
-private fun attemptsByWeekday(dates: List<String>): IntArray {
-    val counts = IntArray(7)
-    if (dates.isEmpty()) return counts
-    val parser = SimpleDateFormat("yyyy-MM-dd", Locale.US)
-    val calendar = Calendar.getInstance()
-    dates.forEach { raw ->
-        val datePart = raw.substringBefore(' ').trim()
-        val parsed = runCatching { parser.parse(datePart) }.getOrNull() ?: return@forEach
-        calendar.time = parsed
-        // Calendar: Sunday = 1 … Saturday = 7 → Monday-first index.
-        val dayOfWeek = calendar.get(Calendar.DAY_OF_WEEK)
-        val index = (dayOfWeek + 5) % 7
-        counts[index] = counts[index] + 1
-    }
-    return counts
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Practise next
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1044,7 +1127,7 @@ private fun PractiseNextCard(
                         .padding(horizontal = 8.dp, vertical = 4.dp)
                 ) {
                     Text(
-                        text = (subject ?: "Quizzes").uppercase(),
+                        text = subject?.let { SubjectCodes.of(it) } ?: "QUIZ",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 9.5.sp,
                         fontWeight = FontWeight.ExtraBold,
@@ -1083,7 +1166,7 @@ private fun PractiseNextCard(
                         .weight(1f)
                         .height(6.dp)
                         .clip(CircleShape)
-                        .background(Color(0xFFEDF1F6))
+                        .background(HTrack)
                 ) {
                     Box(
                         modifier = Modifier
@@ -1129,7 +1212,7 @@ private fun PractiseNextCard(
                         horizontalArrangement = Arrangement.spacedBy(5.dp)
                     ) {
                         Icon(
-                            Icons.Default.PlayArrow,
+                            imageVector = Icons.Default.PlayArrow,
                             contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(15.dp)
@@ -1208,7 +1291,7 @@ private fun CoursesPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifier) 
                         color = Color.White
                     )
                     Icon(
-                        Icons.AutoMirrored.Filled.ArrowForward,
+                        imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                         contentDescription = null,
                         tint = Color.White,
                         modifier = Modifier.size(12.dp)
@@ -1266,7 +1349,7 @@ private fun LanguageLabPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifi
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
-                    Icons.Default.Translate,
+                    imageVector = Icons.Default.Translate,
                     contentDescription = null,
                     tint = HViolet,
                     modifier = Modifier.size(17.dp)
@@ -1298,7 +1381,7 @@ private fun LanguageLabPromoCard(onOpen: () -> Unit, modifier: Modifier = Modifi
                     color = HViolet
                 )
                 Icon(
-                    Icons.AutoMirrored.Filled.ArrowForward,
+                    imageVector = Icons.AutoMirrored.Filled.ArrowForward,
                     contentDescription = null,
                     tint = HViolet,
                     modifier = Modifier.size(12.dp)
@@ -1347,6 +1430,67 @@ private fun SectionHeader(
     }
 }
 
+/**
+ * The courses rail, which pages itself.
+ *
+ * One card slides in every four seconds and stops immediately while the student
+ * is dragging, so it never fights a finger. The page dots read the list state
+ * through `derivedStateOf`, so scrolling does not recompose the whole rail.
+ */
+@Composable
+private fun AutoCourseRail(
+    courses: List<Course>,
+    onCourseClick: (Course) -> Unit
+) {
+    val state = rememberLazyListState()
+    val currentPage by remember { derivedStateOf { state.firstVisibleItemIndex } }
+
+    LaunchedEffect(courses.size) {
+        if (courses.size <= 1) return@LaunchedEffect
+        while (true) {
+            delay(4200)
+            // A student's finger always wins: the next page is only animated
+            // when the rail is idle.
+            if (!state.isScrollInProgress) {
+                val next = (state.firstVisibleItemIndex + 1).mod(courses.size)
+                state.animateScrollToItem(next)
+            }
+        }
+    }
+
+    Column {
+        LazyRow(
+            state = state,
+            contentPadding = PaddingValues(horizontal = 18.dp),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            items(courses, key = { it.id }) { course ->
+                CourseRailCard(course = course, onClick = { onCourseClick(course) })
+            }
+        }
+        if (courses.size > 1) {
+            Spacer(Modifier.height(10.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.Center,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                courses.indices.forEach { index ->
+                    val active = index == currentPage.coerceIn(0, courses.lastIndex)
+                    Box(
+                        modifier = Modifier
+                            .padding(horizontal = 2.5.dp)
+                            .height(5.dp)
+                            .width(if (active) 18.dp else 5.dp)
+                            .clip(RoundedCornerShape(50))
+                            .background(if (active) HGreen else Color(0xFFDDE4EC))
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun CourseRailCard(course: Course, onClick: () -> Unit) {
     val tint = paperCoverTint(course.category)
@@ -1360,6 +1504,8 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
             .testTag("home_course_${course.id}")
     ) {
         Column {
+            // Cover: the provider, not the course's first letter. A letter told
+            // the student nothing; the institution is the reason to open a course.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1368,30 +1514,45 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                         Brush.linearGradient(listOf(tint, tint.copy(alpha = 0.62f)))
                     )
             ) {
-                Text(
-                    text = course.title.take(1).uppercase(),
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 34.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.align(Alignment.Center)
-                )
-                Box(
+                Row(
                     modifier = Modifier
-                        .align(Alignment.TopEnd)
-                        .padding(7.dp)
-                        .clip(RoundedCornerShape(50))
-                        .background(Color.White.copy(alpha = 0.22f))
-                        .padding(horizontal = 7.dp, vertical = 2.dp)
+                        .fillMaxWidth()
+                        .padding(8.dp),
+                    verticalAlignment = Alignment.Top
                 ) {
-                    Text(
-                        text = course.level.displayName,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 9.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White,
-                        maxLines = 1
-                    )
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = 0.22f))
+                            .padding(horizontal = 7.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = shortProvider(course.institution),
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 8.5.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.4.sp,
+                            color = Color.White,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Box(
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Color.White.copy(alpha = 0.16f))
+                            .padding(horizontal = 6.dp, vertical = 3.dp)
+                    ) {
+                        Text(
+                            text = course.level.displayName,
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 8.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color.White,
+                            maxLines = 1
+                        )
+                    }
                 }
             }
             Column(modifier = Modifier.padding(11.dp)) {
@@ -1420,7 +1581,7 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
                     horizontalArrangement = Arrangement.spacedBy(4.dp)
                 ) {
                     Icon(
-                        Icons.Default.AccessTime,
+                        imageVector = Icons.Default.AccessTime,
                         contentDescription = null,
                         tint = HFaint,
                         modifier = Modifier.size(11.dp)
@@ -1438,6 +1599,21 @@ private fun CourseRailCard(course: Course, onClick: () -> Unit) {
     }
 }
 
+/**
+ * "University of Moratuwa" → "MORATUWA", "MIT OpenCourseWare" → "MIT". The cover
+ * chip has room for one or two words, not a full institution name.
+ */
+private fun shortProvider(institution: String): String {
+    val trimmed = institution
+        .replace("University of ", "")
+        .replace("The Open University, UK", "Open University")
+        .trim()
+    if (trimmed.isBlank()) return "COURSE"
+    val words = trimmed.split(' ').filter { it.isNotBlank() }
+    val label = if (words.size > 2) words.take(2).joinToString(" ") else trimmed
+    return label.uppercase()
+}
+
 @Composable
 private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
     Column(
@@ -1447,31 +1623,163 @@ private fun PaperRailCard(paper: PastPaper, onClick: () -> Unit) {
             .clickable(onClick = onClick)
             .testTag("home_paper_${paper.id}")
     ) {
-        PaperCover(
-            paper = paper,
-            corner = 12.dp,
-            modifier = Modifier
-                .fillMaxWidth()
-                .aspectRatio(0.78f)
-        )
+        Box {
+            PaperCover(
+                paper = paper,
+                corner = 12.dp,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .aspectRatio(0.78f)
+            )
+            Box(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(5.dp)
+                    .clip(RoundedCornerShape(50))
+                    .background(Color.White.copy(alpha = 0.92f))
+                    .padding(horizontal = 6.dp, vertical = 2.dp)
+            ) {
+                Text(
+                    text = paper.year.toString(),
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 8.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = HInk,
+                    maxLines = 1
+                )
+            }
+        }
         Spacer(Modifier.height(6.dp))
         Text(
-            text = paper.title,
+            text = "${SubjectCodes.of(paper.subject)} · ${paper.subject}",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.sp,
-            lineHeight = 14.sp,
+            fontSize = 10.5.sp,
+            lineHeight = 13.sp,
             fontWeight = FontWeight.Bold,
             color = HInk,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
         )
         Text(
-            text = paper.subject,
+            text = paper.title,
             fontFamily = MaisonNeueFontFamily,
             fontSize = 9.5.sp,
             color = HMuted,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis
+        )
+    }
+}
+
+@Composable
+private fun QuizRailCard(quiz: QuizSummary, onClick: () -> Unit) {
+    val tint = paperCoverTint(quiz.subject)
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(18.dp),
+        color = HCard,
+        border = BorderStroke(1.dp, HHairline),
+        modifier = Modifier
+            .width(184.dp)
+            .height(142.dp)
+            .testTag("home_quiz_${quiz.id}")
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(tint.copy(alpha = 0.12f))
+                        .padding(horizontal = 7.dp, vertical = 3.dp)
+                ) {
+                    Text(
+                        text = SubjectCodes.of(quiz.subject),
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 8.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.4.sp,
+                        color = tint,
+                        maxLines = 1
+                    )
+                }
+                Spacer(Modifier.weight(1f))
+                if (quiz.passed) {
+                    Icon(
+                        imageVector = Icons.Default.EmojiEvents,
+                        contentDescription = null,
+                        tint = HGreen,
+                        modifier = Modifier.size(13.dp)
+                    )
+                }
+            }
+            Spacer(Modifier.height(7.dp))
+            Text(
+                text = quiz.title,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.5.sp,
+                lineHeight = 16.sp,
+                fontWeight = FontWeight.Bold,
+                color = HInk,
+                maxLines = 2,
+                overflow = TextOverflow.Ellipsis
+            )
+            Spacer(Modifier.weight(1f))
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                MiniPill("${quiz.questionCount} Qs")
+                val minutes = if (quiz.minutes > 0) quiz.minutes else quiz.timeLimitSeconds / 60
+                if (minutes > 0) MiniPill("${minutes}m")
+                MiniPill("+${quiz.expReward} XP")
+            }
+            Spacer(Modifier.height(8.dp))
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = quiz.bestPercent?.let { "Best $it%" }
+                        ?: if (quiz.isEnrolled) "Completed" else "${quiz.attemptsLeft} left",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 9.5.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = if (quiz.isEnrolled) HFaint else HMuted,
+                    maxLines = 1,
+                    modifier = Modifier.weight(1f)
+                )
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .background(if (quiz.isEnrolled) HTrack else HGreen)
+                        .padding(horizontal = 10.dp, vertical = 4.dp)
+                ) {
+                    Text(
+                        text = if (quiz.isEnrolled) "Done" else "Start",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 9.5.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (quiz.isEnrolled) HMuted else Color.White,
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MiniPill(text: String) {
+    Box(
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(HBg)
+            .padding(horizontal = 6.dp, vertical = 3.dp)
+    ) {
+        Text(
+            text = text,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 8.5.sp,
+            fontWeight = FontWeight.Bold,
+            color = HMuted,
+            maxLines = 1
         )
     }
 }
@@ -1491,7 +1799,7 @@ private fun SavedCourseChip(title: String, onClick: () -> Unit) {
             horizontalArrangement = Arrangement.spacedBy(6.dp)
         ) {
             Icon(
-                Icons.Default.PlayArrow,
+                imageVector = Icons.Default.PlayArrow,
                 contentDescription = null,
                 tint = HGreen,
                 modifier = Modifier.size(13.dp)
@@ -1531,11 +1839,13 @@ private fun CompactNoteCard(note: StudyNote, modifier: Modifier = Modifier) {
                 contentAlignment = Alignment.Center
             ) {
                 Text(
-                    text = note.subject.take(1).uppercase(),
+                    text = SubjectCodes.of(note.subject),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = 10.5.sp,
                     fontWeight = FontWeight.ExtraBold,
-                    color = tint
+                    color = tint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Clip
                 )
             }
             Spacer(Modifier.width(11.dp))
@@ -1663,34 +1973,5 @@ fun NoteCard(note: StudyNote) {
                 }
             }
         }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-//  Helpers
-// ─────────────────────────────────────────────────────────────────────────────
-
-/** "2026-10-27 14:02:11" → "27 Oct". */
-private fun shortDate(raw: String): String {
-    val parts = raw.substringBefore(' ').trim().split('-')
-    if (parts.size != 3) return raw.substringBefore(' ').trim()
-    val months = listOf(
-        "Jan", "Feb", "Mar", "Apr", "May", "Jun",
-        "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"
-    )
-    val month = parts[1].toIntOrNull()?.let { months.getOrNull(it - 1) } ?: return ""
-    val day = parts[2].toIntOrNull() ?: return ""
-    return "$day $month"
-}
-
-private fun formatStudyTime(seconds: Int): String {
-    val safe = seconds.coerceAtLeast(0)
-    val hours = safe / 3600
-    val minutes = (safe % 3600) / 60
-    return when {
-        hours > 0 && minutes > 0 -> "${hours}h ${minutes}m"
-        hours > 0 -> "${hours}h"
-        minutes > 0 -> "${minutes}m"
-        else -> "0m"
     }
 }

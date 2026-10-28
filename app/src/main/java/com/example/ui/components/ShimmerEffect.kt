@@ -193,21 +193,18 @@ fun HomeSkeletonLoading(modifier: Modifier = Modifier) {
                 .padding(top = 14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                ShimmerBox(modifier = Modifier.size(width = 118.dp, height = 12.dp))
-                ShimmerBox(modifier = Modifier.size(width = 150.dp, height = 22.dp))
+            Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                ShimmerBox(modifier = Modifier.size(width = 112.dp, height = 13.dp))
+                ShimmerBox(modifier = Modifier.size(width = 176.dp, height = 30.dp))
+                ShimmerBox(modifier = Modifier.size(width = 148.dp, height = 11.dp))
             }
-            Spacer(Modifier.weight(1f))
-            ShimmerBox(modifier = Modifier.size(width = 74.dp, height = 26.dp), shapeRadius = 13.dp)
-            Spacer(Modifier.size(9.dp))
-            ShimmerBox(modifier = Modifier.size(42.dp), shapeRadius = 21.dp)
         }
 
         // Hero report card.
         Column(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(232.dp)
+                .height(238.dp)
                 .clip(RoundedCornerShape(24.dp))
                 .background(MaterialTheme.colorScheme.surface)
                 .padding(16.dp),
@@ -233,6 +230,7 @@ fun HomeSkeletonLoading(modifier: Modifier = Modifier) {
         }
 
         // Quick actions.
+        ShimmerBox(modifier = Modifier.size(width = 104.dp, height = 16.dp))
         Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.spacedBy(8.dp)

@@ -44,7 +44,21 @@ SPLASH ──► ONBOARDING ──► AUTH ──► MAIN
 
 ### Bottom navigation (`TheStudentNavTab`)
 `HOME` · `CHAT` · `AI_TUTOR` · `PAPERS` · `PROFILE` — floating bar with an elevated center action
-(`ui/components/TheStudentBottomNav.kt`). Drawer (`ModernSidebarDrawer`) adds AI Assistant, Language Lab, Admin Panel.
+(`ui/components/TheStudentBottomNav.kt`).
+
+### Top bar and sidebar
+
+`TheStudentTopAppBar` is one white bar with a hairline rule: the hamburger (which opens the sidebar from
+every tab that shows the bar), a brand lockup — emerald mark, "TheStudent", and the destination underneath —
+then the streak capsule, the language-lab shortcut, search and the avatar. Screens with their own header
+(Chat, Papers, Profile, EXP, Account, Progress, Courses) hide it.
+
+`ModernSidebarDrawer` is organised around the student instead of around a link list: a deep-emerald
+identity header (avatar, name, stage, streak/XP/accuracy pills), a floating "This week" mini chart that
+straddles the header edge, then grouped navigation — **MENU** (Dashboard, Student chats, AI Voice Tutor,
+Past papers, My profile), **STUDY** (Quizzes, My progress, Free courses, AI Study Assistant, Language lab) —
+and a separated footer for Account & security and Sign out. Every row carries its own pastel icon chip; the
+active destination is marked by a bar on its leading edge.
 
 ---
 

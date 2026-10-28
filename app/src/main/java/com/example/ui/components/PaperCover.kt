@@ -26,6 +26,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
 import com.example.data.model.PastPaper
+import com.example.data.model.SubjectCodes
 import com.example.ui.theme.MaisonNeueFontFamily
 
 /**
@@ -34,9 +35,9 @@ import com.example.ui.theme.MaisonNeueFontFamily
  * The paper API has no thumbnail column, so most papers arrive with an empty
  * `thumbnailUrl` — showing one shared placeholder image made every row look the
  * same and told the user nothing. Instead each paper gets a cover drawn from its
- * own metadata: a sheet of paper with the examination colour, the subject
- * initial, the year and the medium. If a real thumbnail URL ever arrives, that
- * image wins.
+ * own metadata: a sheet of paper with the examination colour, the subject's
+ * short code (CM, SFT, ICT, AGRI …), the year and the medium. If a real
+ * thumbnail URL ever arrives, that image wins.
  */
 @Composable
 fun PaperCover(
@@ -94,7 +95,7 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
                     .background(Color.White.copy(alpha = 0.9f))
             )
         }
-        // Body — the subject initial on the left, ruled lines on the right.
+        // Body — the subject code on the left, ruled lines on the right.
         Row(
             modifier = Modifier
                 .fillMaxWidth()
@@ -102,12 +103,17 @@ private fun CoverArt(paper: PastPaper, tint: Color) {
                 .padding(horizontal = 4.dp, vertical = 3.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
+            // The code, not the initial: "SFT", "ET", "ICT", "AGRI" is what a
+            // student reads on the cover in the papers library.
             Text(
-                text = paper.subject.take(1).uppercase().ifBlank { "P" },
+                text = SubjectCodes.of(paper.subject),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 10.sp,
                 fontWeight = FontWeight.ExtraBold,
-                color = tint
+                letterSpacing = (-0.2).sp,
+                color = tint,
+                maxLines = 1,
+                overflow = TextOverflow.Clip
             )
             Column(
                 modifier = Modifier

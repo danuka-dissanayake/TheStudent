@@ -4,21 +4,36 @@
 from scratch in v2.0.3: the old "welcome card + stat row + three rails" layout is
 gone, replaced by a report-first dashboard.
 
-The reference renders are `designs/21-home-dashboard-top.png` and
-`designs/21-home-dashboard-lower.png`.
+The reference renders are `designs/22-dashboard-top-new.png` (bar, greeting,
+report card, quick actions), `designs/24-rails-new.png` (this week, courses rail
+with dots, paper codes, quizzes rail) and `designs/23-sidebar-new.png` (drawer).
 
 ## Layout, top to bottom
 
 | Block | What it shows | Where the data comes from |
 |---|---|---|
-| Greeting | time-of-day greeting, first name, amber streak pill, avatar | `UserProfile.name`, `max(summary.streakDays, userProfile.streakDays)` |
-| Hero report card | white accuracy ring, `quizzes passed`, `studied`, `EXP earned`, CTA, `Full report` | `QuizProgressSummary.averagePercent / quizzesPassed / quizzesPublished / durationSeconds / expFromQuizzes` |
-| Quick actions | Ask AI · Courses · Papers · Report | callbacks (`onOpenAiAssistant`, `onOpenCourseCollection`, `onNavigateTab(PAPERS)`, `onOpenProgress`) |
-| This week | up to four subject accuracy bars, seven weekday bars, `best` / `attempts` / `time` chips | `QuizProgress.subjects[].accuracy`, `QuizProgress.recent[].submittedAt`, `summary.bestPercent / attempts` |
-| Practise next | subject chip, quiz title, accuracy bar, attempts left, Practise button | `QuizProgress.practice` (server picks it); the button calls `onContinueLearning` |
+| Greeting | 15.5sp greeting, 34sp first name, amber streak pill, `Tuesday, 28 Oct · A/L · Physical Science` | `UserProfile.name / academicLevel / streamOrDegree`, `StudyMetrics.today()`, `max(summary.streakDays, userProfile.streakDays)` |
+| Report card | white card: 104dp emerald accuracy ring, three KPI rows (`4 of 6` passed · `2h 15m` studied · `240 XP`), a three-segment accuracy bar with legend, the emerald CTA and `Full report` | `QuizProgressSummary.averagePercent / quizzesPassed / quizzesPublished / durationSeconds / expFromQuizzes`; segments from `subjects[].accuracy` |
+| Quick actions | Ask AI · Courses · Papers · **Quizzes** | `onOpenAiAssistant`, `onOpenCourseCollection`, `onNavigateTab(PAPERS)`, `onOpenQuizzes` |
+| This week | up to four subject accuracy bars, seven weekday bars on pale tracks, `best` / `attempts` / `time` chips | `QuizProgress.subjects[].accuracy`, `QuizProgress.recent[].submittedAt`, `summary.bestPercent / attempts` |
+| Practise next | subject **code** chip, quiz title, accuracy bar, attempts left, Practise button | `QuizProgress.practice` (server picks it); the button calls `onContinueLearning` |
 | Promos | dark `N free courses` card with three provider logos · Language lab card | `CourseCatalog.courses.size`, `CourseCatalog.provider()` |
-| Rails | Popular courses (178dp cards), Past papers (`PaperCover`), High-yield notes, Saved courses chips | `popularCourses`, `recentPapers`, `recentNotes`, `savedCourses` |
+| Popular courses | 178dp cards in a self-paging `LazyRow` (one card every 4.2s, frozen while the student scrolls) with page dots; the cover shows the **provider** and the level, never the course initial | `popularCourses`, `Course.institution`, `Course.level` |
+| Past papers | 112dp `PaperCover` thumbnails printed with the subject **short code** (`CM`, `SFT`, `ICT`, `AGRI`), the year pill, then `CODE · Subject` | `recentPapers`, `SubjectCodes.of()` |
+| Quizzes | 184dp cards: subject code chip, title, `12 Qs` / `20m` / `+20 XP` pills, best score and a Start/Done pill | `quizzes` (`QuizSummary`), `onQuizClick` |
+| Notes / saved | compact note rows with the subject code, saved-course chips | `recentNotes`, `savedCourses` |
 | Footer | `Last attempt 27 Oct` | `QuizProgress.recent.first().submittedAt` |
+
+## Subject short codes
+
+`data/model/SubjectCodes.kt` maps a subject name to the code printed on its
+papers — the technology trio **SFT / ET / BST**, plus **ICT**, **AGRI**, **CM**,
+**PHY**, **CHEM**, **BIO**, **MATH**, **SCI**, **ACC**, **BS**, **ECON**, **HIST**
+and the rest of the school curriculum. The lookup canonicalises the name
+(`&` → `and`, punctuation stripped), retries with trailing qualifiers dropped
+(`"Physics 2023"` → `PHY`), and otherwise derives initials while skipping words
+like *for / and / of*. It never returns a blank, so an admin can upload a paper
+under any subject name and still get a readable cover.
 
 ## Rules baked into it
 
@@ -29,8 +44,10 @@ The reference renders are `designs/21-home-dashboard-top.png` and
   `totalPapersSolved` on the profile are not trusted for display; every figure is
   derived from submitted attempts, exactly as on `ProgressScreen`.
 - **`java.time` is not available** (minSdk 24, no desugaring). Weekday bucketing
-  and date formatting use `Calendar` + `SimpleDateFormat("yyyy-MM-dd")`, with
-  weekday index `(Calendar.DAY_OF_WEEK + 5) % 7` for a Monday-first week.
+  and date formatting go through `data/model/StudyMetrics.kt`
+  (`Calendar` + `SimpleDateFormat("yyyy-MM-dd")`, weekday index
+  `(Calendar.DAY_OF_WEEK + 5) % 7` for a Monday-first week), which the sidebar
+  shares so the two never drift apart.
 - **Scroll performance.** The screen is one `LazyColumn` of pre-composed sections;
   rails are `LazyRow`s with `key =` on every item, no `SubcomposeAsyncImage`, no
   per-row infinite animations, and all palettes / catalogue lookups are hoisted
@@ -44,7 +61,7 @@ The reference renders are `designs/21-home-dashboard-top.png` and
 No Compose test targets the dashboard, so the tags are the contract for new ones:
 
 `home_screen_content`, `welcome_card`, `home_streak_pill`, `home_exp_pill`,
-`hero_cta`, `home_open_progress`, `home_ai_assistant_card`,
-`home_course_collection_card`, `home_quick_papers`, `home_quick_report`,
+`home_report_card`, `hero_cta`, `home_open_progress`, `home_ai_assistant_card`,
+`home_course_collection_card`, `home_quick_papers`, `home_quick_quizzes`,
 `home_weekly_report`, `continue_learning_card`, `resume_lesson_button`,
-`home_course_<id>`, `home_paper_<id>`.
+`home_course_<id>`, `home_paper_<id>`, `home_quiz_<id>`.
