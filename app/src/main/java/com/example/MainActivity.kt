@@ -235,6 +235,7 @@ class MainActivity : ComponentActivity() {
                             val isQuizSaving by viewModel.isQuizSaving.collectAsStateWithLifecycle()
                             val quizSaveError by viewModel.quizSaveError.collectAsStateWithLifecycle()
                             val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
+                            val quizDetail by viewModel.quizDetail.collectAsStateWithLifecycle()
                             val quizAttempt by viewModel.quizAttempt.collectAsStateWithLifecycle()
                             val quizAnswers by viewModel.quizAnswers.collectAsStateWithLifecycle()
                             val quizResult by viewModel.quizResult.collectAsStateWithLifecycle()
@@ -301,6 +302,18 @@ class MainActivity : ComponentActivity() {
                                         }
                                     }
                                 )
+                            } else if (quizDetail != null) {
+                                // The quiz's own page: description, rules and the
+                                // Start button. It comes before the runner because
+                                // starting an attempt clears this page.
+                                quizDetail?.let { quiz ->
+                                    QuizDetailScreen(
+                                        quiz = quiz,
+                                        isStarting = isQuizStarting,
+                                        onStart = { viewModel.startQuizFromDetail() },
+                                        onBack = { viewModel.closeQuizDetail() }
+                                    )
+                                }
                             } else if (activeQuiz != null) {
                                 activeQuiz?.let { quiz ->
                                     QuizRunnerScreen(
@@ -573,7 +586,7 @@ class MainActivity : ComponentActivity() {
                                                                 viewModel.openCourseCollection(filter)
                                                             },
                                                             quizzes = homeQuizzes.filter { it.isPublished },
-                                                            onQuizClick = { viewModel.openQuiz(it) },
+                                                            onQuizClick = { viewModel.openQuizDetail(it) },
                                                             onOpenQuizzes = {
                                                                 viewModel.setTab(TheStudentNavTab.PAPERS)
                                                                 viewModel.setLibrarySegment(1)
@@ -613,7 +626,7 @@ class MainActivity : ComponentActivity() {
                                                             quizError = quizError,
                                                             segment = uiState.librarySegment,
                                                             onSegmentChange = { viewModel.setLibrarySegment(it) },
-                                                            onOpenQuiz = { viewModel.openQuiz(it) },
+                                                            onOpenQuiz = { viewModel.openQuizDetail(it) },
                                                             onOpenQuizProgress = { viewModel.openProgress() },
                                                             onRefreshQuizzes = { viewModel.loadQuizzes(forceRefresh = true) },
                                                             onLevelSelected = {

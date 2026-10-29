@@ -339,6 +339,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private val _activeQuiz = MutableStateFlow<QuizSummary?>(null)
     val activeQuiz: StateFlow<QuizSummary?> = _activeQuiz.asStateFlow()
 
+    /**
+     * The quiz whose detail page is open. Separate from [_activeQuiz]: reading
+     * about a quiz is not starting it, and starting it is what creates a server
+     * attempt — so the page must exist without one.
+     */
+    private val _quizDetail = MutableStateFlow<QuizSummary?>(null)
+    val quizDetail: StateFlow<QuizSummary?> = _quizDetail.asStateFlow()
+
     private val _quizAttempt = MutableStateFlow<QuizAttempt?>(null)
     val quizAttempt: StateFlow<QuizAttempt?> = _quizAttempt.asStateFlow()
 
@@ -692,6 +700,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /** Open the quiz's detail page — the description, rules and Start button. */
+    fun openQuizDetail(quiz: QuizSummary) {
+        if (quiz.isEnrolled) {
+            showSnackbar("You've used all ${quiz.maxAttempts} attempts for this quiz.")
+            return
+        }
+        _quizDetail.value = quiz
+    }
+
+    fun closeQuizDetail() {
+        _quizDetail.value = null
+    }
+
+    /** "Start quiz" on the detail page: leave the page, then begin the attempt. */
+    fun startQuizFromDetail() {
+        val quiz = _quizDetail.value ?: return
+        _quizDetail.value = null
+        openQuiz(quiz)
+    }
+
     /** Open the runner and start (or resume) an attempt. */
     fun openQuiz(quiz: QuizSummary) {
         // The server refuses the fourth attempt anyway; stopping here means the
@@ -735,6 +763,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun closeQuizRunner() {
         _quizAttempt.value = null
         _activeQuiz.value = null
+        _quizDetail.value = null
         _quizAnswers.value = emptyMap()
         _quizResult.value = null
     }
