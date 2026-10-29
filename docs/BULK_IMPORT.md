@@ -188,6 +188,21 @@ Run this in phpMyAdmin to confirm the files are reachable:
 SELECT id, title, pdf_url FROM past_papers ORDER BY id DESC LIMIT 5;
 ```
 
+**A 404 on a file you know you uploaded**
+
+Linux file systems are case-sensitive, and so are URLs. A staging tree that
+lands in `uploads/Papers/` is not served at `/uploads/papers/` — every row would
+then point at a 404. Match the prefix exactly, capital letters included:
+
+```bash
+--upload-prefix uploads/Papers
+```
+
+Check one URL in a browser before importing the SQL; if it opens, the prefix is
+right. Other causes, in order of likelihood: the staging *folder* was moved
+inside the target (`uploads/papers/upload_ready/physics/…`), or the domain's
+document root is not the `public_html` you uploaded into.
+
 **Notes**
 
 * `pdf_url` is what the app opens and downloads, so the folder must be web
