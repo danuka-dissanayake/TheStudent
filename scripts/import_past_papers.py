@@ -636,6 +636,21 @@ def write_issues(path: Path, issues: list[dict]) -> None:
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
+class OtpRequired(RuntimeError):
+    """
+    Sign-in was accepted but the server wants a mailed code for this device.
+
+    The code cannot be supplied from an earlier run: every login attempt issues
+    a fresh code and marks the previous one used, so the prompt has to happen
+    right after this login response.
+    """
+
+    def __init__(self, email: str, reason: str | None = None):
+        self.email = email
+        self.reason = reason
+        super().__init__("Verification code required.")
+
+
 class Backend:
     def __init__(
         self,
@@ -697,24 +712,26 @@ class Backend:
         reply = self._json(url, {"email": email, "password": password})
         if reply.get("status") == "requires_verification":
             if not otp:
-                raise RuntimeError(
-                    "The server emailed a verification code for this device.\n"
-                    "Re-run with --otp <code>, or sign in once in the app from this "
-                    "network and use --token instead."
-                )
-            verify = self._json(
-                self.base_url + AUTH_PATH + "?action=verify_otp",
-                {"email": email, "otp_code": otp},
-            )
-            if verify.get("status") != "success":
-                raise RuntimeError(verify.get("message") or "Verification failed.")
-            self.token = (verify.get("data") or {}).get("token")
-        elif reply.get("status") != "success":
+                raise OtpRequired(email, reply.get("message"))
+            self.verify_otp(email, otp)
+            return reply
+        if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or "Sign-in failed.")
-        else:
-            self.token = (reply.get("data") or {}).get("token")
+        self.token = (reply.get("data") or {}).get("token")
         if not self.token:
             raise RuntimeError("Sign-in did not return a session token.")
+        return reply
+
+    def verify_otp(self, email: str, code: str) -> dict:
+        reply = self._json(
+            self.base_url + AUTH_PATH + "?action=verify_otp",
+            {"email": email, "otp_code": code},
+        )
+        if reply.get("status") != "success":
+            raise RuntimeError(reply.get("message") or "Verification failed.")
+        self.token = (reply.get("data") or {}).get("token")
+        if not self.token:
+            raise RuntimeError("Verification did not return a session token.")
         return reply
 
     def whoami(self) -> dict:
@@ -1088,7 +1105,21 @@ def main(argv: list[str] | None = None) -> int:
                 print("Provide --email (to sign in) or --token.", file=sys.stderr)
                 return 2
             password = args.password or getpass.getpass(f"Password for {args.email}: ")
-            backend.login(args.email, password, otp=args.otp)
+            try:
+                backend.login(args.email, password, otp=args.otp)
+            except OtpRequired as challenge:
+                # The code has just been mailed by this very login call, so ask
+                # for it now: a code from an earlier run has already been
+                # invalidated by the attempt above.
+                print(f"  {challenge.reason or 'A verification code was emailed.'}")
+                if not sys.stdin.isatty():
+                    raise RuntimeError(
+                        "A verification code is needed but this shell cannot ask "
+                        "for it. Re-run in a terminal, or pass --token with a "
+                        "session from the app."
+                    ) from None
+                code = input(f"  Code sent to {challenge.email} (6 digits): ").strip()
+                backend.verify_otp(challenge.email, code)
         user = backend.whoami()
         print(f"  signed in as {user.get('email')} ({user.get('role')})")
 

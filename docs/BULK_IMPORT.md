@@ -71,8 +71,20 @@ python3 scripts/import_past_papers.py --scan ~/Branded_Past_Papers --upload \
 It signs in through `api/auth.php?action=login`, checks the account really has
 the `admin` role, then uploads one paper at a time with the scheme attached.
 Use `--token` (or `TS_ADMIN_TOKEN`) instead of an email/password if you already
-have a session token. If the server emails a verification code because the
-machine is on a new network, re-run with `--otp <code>`.
+have a session token.
+
+If the server emails a verification code because the machine is on a new
+network, the script asks for it **in the same run**:
+
+```
+  Sign-in from a new location detected.
+  Code sent to you@example.com (6 digits): 482915
+```
+
+Type the code that has just arrived and it carries on to the upload. A code
+from an earlier run cannot be used: every login attempt issues a fresh code and
+marks the previous one used, so `--otp` only helps if the code is newer than the
+sign-in attempt that triggers it.
 
 The API sits behind Cloudflare, whose bot protection rejects a script's default
 `Python-urllib/3.x` agent with `HTTP 403 · error code: 1010`. The script
