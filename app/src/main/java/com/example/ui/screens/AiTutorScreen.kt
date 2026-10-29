@@ -43,6 +43,9 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.GraphicEq
+import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -55,6 +58,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -62,8 +66,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -82,7 +89,6 @@ import com.example.data.model.CallSummary
 import com.example.data.model.GrammarFix
 import com.example.data.model.TutorCallEntry
 import com.example.data.model.TutorLesson
-import com.example.data.remote.HuggingFaceSpaceClient
 import com.example.data.remote.TutorLessonCatalog
 import com.example.ui.components.AssistantVoiceState
 import com.example.ui.theme.MaisonNeueFontFamily
@@ -157,9 +163,6 @@ fun AiTutorScreen(
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
     hfStatusMessage: String,
-    isHfSettingsOpen: Boolean,
-    customHfToken: String,
-    customHfBaseUrl: String,
     onStartCall: () -> Unit,
     onEndCall: () -> Unit,
     /** Leave the tutor tab entirely (the idle screen's back button). */
@@ -171,15 +174,15 @@ fun AiTutorScreen(
     onHearFix: () -> Unit,
     onSelectScenario: (String) -> Unit,
     onSelectLesson: (TutorLesson?) -> Unit,
-    onOpenHfSettings: (Boolean) -> Unit,
-    onUpdateHfCredentials: (String, String) -> Unit,
-    onTestHfConnection: () -> Unit,
     onDismissSummary: () -> Unit,
     onShowSnackbar: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     var menuOpen by remember { mutableStateOf(false) }
+    // Which tab the sheet opens on. The lesson tile asks for the lesson list; the
+    // ⋯ button opens wherever the student left off.
+    var menuLessons by remember { mutableStateOf(false) }
     val lesson = remember(activeLessonId) { TutorLessonCatalog.find(activeLessonId) }
     val onCall = callPhase == CallPhase.LIVE || callPhase == CallPhase.CONNECTING
 
@@ -208,7 +211,11 @@ fun AiTutorScreen(
             callPhase == CallPhase.ENDED && callSummary != null -> SummaryContent(
                 summary = callSummary,
                 onCallAgain = { onDismissSummary(); startWithPermission() },
-                onChangeTopic = { onDismissSummary(); menuOpen = true },
+                onChangeTopic = {
+                    onDismissSummary()
+                    menuLessons = true
+                    menuOpen = true
+                },
                 onClose = onDismissSummary
             )
 
@@ -228,7 +235,10 @@ fun AiTutorScreen(
                 onFinishTurn = onFinishTurn,
                 onReplay = onReplay,
                 onHearFix = onHearFix,
-                onMenu = { menuOpen = true },
+                onMenu = {
+                    menuLessons = activeLessonId != null
+                    menuOpen = true
+                },
                 onBack = onEndCall
             )
 
@@ -240,9 +250,15 @@ fun AiTutorScreen(
                 lesson = lesson,
                 status = hfStatusMessage,
                 onMic = { startWithPermission() },
-                onMenu = { menuOpen = true },
+                onMenu = {
+                    menuLessons = activeLessonId != null
+                    menuOpen = true
+                },
                 onExit = onExit,
-                onPickTopic = { menuOpen = true }
+                onPickLesson = {
+                    menuLessons = true
+                    menuOpen = true
+                }
             )
         }
     }
@@ -251,23 +267,23 @@ fun AiTutorScreen(
         TutorMenuSheet(
             currentScenario = currentScenario,
             activeLessonId = activeLessonId,
+            startOnLessons = menuLessons,
             onCall = onCall,
-            onSelectScenario = { onSelectScenario(it); menuOpen = false },
-            onSelectLesson = { onSelectLesson(it); menuOpen = false },
-            onOpenSettings = { menuOpen = false; onOpenHfSettings(true) },
+            // Picking a topic is not a settings change — it is the start of the
+            // call. Off a call we open it immediately; mid-call the topic swaps
+            // and the tutor carries on in the same call.
+            onSelectScenario = { picked ->
+                menuOpen = false
+                onSelectScenario(picked)
+                if (!onCall) startWithPermission()
+            },
+            onSelectLesson = { picked ->
+                menuOpen = false
+                onSelectLesson(picked)
+                if (!onCall) startWithPermission()
+            },
             onEndCall = { menuOpen = false; onEndCall() },
             onDismiss = { menuOpen = false }
-        )
-    }
-
-    if (isHfSettingsOpen) {
-        ModelSettingsDialog(
-            token = customHfToken,
-            baseUrl = customHfBaseUrl,
-            status = hfStatusMessage,
-            onSave = { token, url -> onUpdateHfCredentials(token, url) },
-            onTest = onTestHfConnection,
-            onDismiss = { onOpenHfSettings(false) }
         )
     }
 }
@@ -441,90 +457,131 @@ private fun IridescentOrb(
                     onTap = { onTap() }
                 )
             }
-            .clip(CircleShape)
     ) {
-        // Held explicitly: a local function cannot lean on the lambda's implicit
-        // receiver, and these helpers are clearer with the scope named.
         val scope = this
+        // The box is bigger than the sphere on purpose: the spare ring of space is
+        // where the glow and the drop shadow live.
         val r = scope.size.minDimension / 2f
+        val sr = r * 0.84f
         val c = Offset(scope.size.width / 2f, scope.size.height / 2f)
         // Read here, at draw time, so the sphere animates without re-composing.
         val energy = energyOf()
         val driftDeg = drift.value
         val rippleT = ripple.value
+        val pressLift = if (pressed) 1f else 0f
 
-        // Halo. Outside the clip on a Box this would need a second layer; drawn
-        // here it is simply cut to the circle, so the light reads as the sphere
-        // glowing rather than as a blur behind it.
-        val haloAlpha = (0.18f + 0.55f * energy + if (pressed) 0.18f else 0f).coerceAtMost(0.8f)
+        // ── Shadow ───────────────────────────────────────────────────────────
+        // A soft ground shadow tucked under the sphere: this is what stops it
+        // looking pasted onto the page. It deepens a touch while it is speaking
+        // or being pressed, as if the sphere sat closer to the glass.
         scope.drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color.White.copy(alpha = haloAlpha), Color.Transparent),
-                center = c,
+                colors = listOf(
+                    Color(0xFF2F6F5C).copy(alpha = 0.20f + 0.08f * energy + 0.06f * pressLift),
+                    Color(0xFF2F6F5C).copy(alpha = 0.06f),
+                    Color.Transparent
+                ),
+                center = Offset(c.x, c.y + sr * 0.62f),
+                radius = sr * 0.98f
+            ),
+            radius = sr * 0.98f,
+            center = Offset(c.x, c.y + sr * 0.62f)
+        )
+
+        // ── Bloom ────────────────────────────────────────────────────────────
+        // Brand light spilling out of the sphere, brightest at the bottom-right
+        // where the light would come from, and stronger when the voice is loud.
+        scope.drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(
+                    Brand.copy(alpha = 0.16f + 0.22f * energy),
+                    Brand.copy(alpha = 0.05f),
+                    Color.Transparent
+                ),
+                center = Offset(c.x + sr * 0.10f, c.y + sr * 0.10f),
                 radius = r
             ),
             radius = r,
-            center = c
+            center = Offset(c.x + sr * 0.10f, c.y + sr * 0.10f)
         )
 
         // Ripples while the call is live: the "it can hear me" cue.
         if (mode != OrbMode.IDLE) {
             repeat(2) { index ->
                 val t = (rippleT + index * 0.5f) % 1f
-                val alpha = ((1f - t) * (0.10f + 0.34f * energy)).coerceIn(0f, 0.44f)
+                val alpha = ((1f - t) * (0.16f + 0.40f * energy)).coerceIn(0f, 0.5f)
                 scope.drawCircle(
-                    color = Color.White.copy(alpha = alpha),
-                    radius = r * (0.82f + 0.36f * t),
+                    color = Brand.copy(alpha = alpha),
+                    radius = sr * (0.92f + 0.42f * t),
                     center = c,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.03f)
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.035f)
                 )
             }
         }
 
-        // body
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0xFFF7FFFC), Color(0xFFDBEFE6)),
-                center = Offset(c.x - r * 0.35f, c.y - r * 0.4f),
-                radius = r * 1.5f
-            ),
-            radius = r,
-            center = c
-        )
-
-        fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
-            val a = Math.toRadians((angleDeg + driftDeg + energy * 40f).toDouble())
-            val push = distance * r * (1f + 0.34f * energy)
-            val x = (c.x + push * Math.cos(a)).toFloat()
-            val y = (c.y + push * Math.sin(a)).toFloat()
-            scope.orbBlob(Offset(x, y), radius * r * (1f + 0.24f * energy), color)
+        // ── The sphere itself, masked to its own circle ──────────────────────
+        val oval = Path().apply {
+            addOval(Rect(center = c, radius = sr))
         }
+        scope.clipPath(oval) {
+            // body
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color(0xFFF7FFFC), Color(0xFFDBEFE6)),
+                    center = Offset(c.x - sr * 0.35f, c.y - sr * 0.4f),
+                    radius = sr * 1.5f
+                ),
+                radius = sr,
+                center = c
+            )
 
-        blob(300f, 0.35f, 0.75f, Color(0xCCBCEFD9))
-        blob(35f, 0.42f, 0.68f, Color(0xCCE8F7C0))
-        blob(95f, 0.48f, 0.60f, Color(0xCCB4EEE2))
-        blob(160f, 0.40f, 0.62f, Color(0xBFBBE4F2))
-        blob(235f, 0.44f, 0.55f, Color(0xBFCBEBB8))
-        blob(0f, 0f, 0.55f, Color(0xB3FFFFFF))
+            // inner light: white at the top-left, so the glass has a lit side
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
+                    center = Offset(c.x - sr * 0.30f, c.y - sr * 0.40f),
+                    radius = sr * 0.9f
+                ),
+                radius = sr * 0.9f,
+                center = Offset(c.x - sr * 0.30f, c.y - sr * 0.40f)
+            )
 
-        // specular highlight
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colors = listOf(Color(0xF2FFFFFF), Color(0x00FFFFFF)),
-                center = Offset(c.x - r * 0.33f, c.y - r * 0.42f),
-                radius = r * 0.55f
-            ),
-            radius = r * 0.55f,
-            center = Offset(c.x - r * 0.33f, c.y - r * 0.42f)
-        )
+            fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
+                val a = Math.toRadians((angleDeg + driftDeg + energy * 40f).toDouble())
+                val push = distance * sr * (1f + 0.34f * energy)
+                val x = (c.x + push * Math.cos(a)).toFloat()
+                val y = (c.y + push * Math.sin(a)).toFloat()
+                // Drawn through the outer scope: the clip lives on the canvas,
+                // so this stays inside the sphere.
+                scope.orbBlob(Offset(x, y), radius * sr * (1f + 0.24f * energy), color)
+            }
 
-        // rim, so the sphere keeps its edge against a light background
-        scope.drawCircle(
-            color = Color.White.copy(alpha = 0.26f + 0.20f * energy),
-            radius = r,
-            center = c,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.03f)
-        )
+            blob(300f, 0.35f, 0.75f, Color(0xCCBCEFD9))
+            blob(35f, 0.42f, 0.68f, Color(0xCCE8F7C0))
+            blob(95f, 0.48f, 0.60f, Color(0xCCB4EEE2))
+            blob(160f, 0.40f, 0.62f, Color(0xBFBBE4F2))
+            blob(235f, 0.44f, 0.55f, Color(0xBFCBEBB8))
+            blob(0f, 0f, 0.55f, Color(0xB3FFFFFF))
+
+            // specular highlight
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colors = listOf(Color(0xF2FFFFFF), Color(0x00FFFFFF)),
+                    center = Offset(c.x - sr * 0.33f, c.y - sr * 0.42f),
+                    radius = sr * 0.55f
+                ),
+                radius = sr * 0.55f,
+                center = Offset(c.x - sr * 0.33f, c.y - sr * 0.42f)
+            )
+
+            // rim, so the sphere keeps its edge against a light background
+            drawCircle(
+                color = Color.White.copy(alpha = 0.30f + 0.20f * energy),
+                radius = sr - sr * 0.015f,
+                center = c,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.03f)
+            )
+        }
     }
 }
 
@@ -676,7 +733,7 @@ private fun IdleContent(
     onMic: () -> Unit,
     onMenu: () -> Unit,
     onExit: () -> Unit,
-    onPickTopic: () -> Unit
+    onPickLesson: () -> Unit
 ) {
     val firstName = remember(studentName) {
         studentName.trim().split(" ").firstOrNull().orEmpty()
@@ -698,13 +755,13 @@ private fun IdleContent(
                 .padding(horizontal = 24.dp),
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
-            Spacer(Modifier.height(18.dp))
+            Spacer(Modifier.height(10.dp))
             IridescentOrb(
-                size = 224.dp,
+                size = 236.dp,
                 mode = OrbMode.IDLE,
                 onTap = onMic
             )
-            Spacer(Modifier.height(26.dp))
+            Spacer(Modifier.height(16.dp))
             Text(
                 text = if (firstName.isBlank()) "Hello" else "Hello, $firstName",
                 fontFamily = MaisonNeueFontFamily,
@@ -724,28 +781,29 @@ private fun IdleContent(
             )
             Spacer(Modifier.height(22.dp))
 
-            Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                ModeCard(
+            // Two full-width tiles instead of the old pair of small squares: the
+            // card is now a row, so the title gets a whole line and the tap target
+            // is the full width of the page.
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                ModeTile(
                     icon = Icons.Default.Mic,
-                    tint = Brand,
-                    title = "Free talk",
-                    subtitle = "Talk freely · I fix as you go",
+                    title = "Free conversation",
+                    subtitle = "Talk about anything — I correct as you go",
+                    meta = "A2 – B1",
                     selected = lesson == null,
-                    onClick = onPickTopic,
-                    modifier = Modifier.weight(1f)
+                    onClick = onMic
                 )
-                ModeCard(
+                ModeTile(
                     icon = Icons.Default.PlayArrow,
-                    tint = Fresh,
                     title = lesson?.title ?: "Guided lesson",
                     subtitle = if (lesson != null) {
-                        "Lesson · ${lesson.stepCount} steps · ${lesson.level}"
+                        "Following the plan · ${lesson.level}"
                     } else {
-                        "4 steps · A2–B1"
+                        "Pick a lesson and I will teach it step by step"
                     },
+                    meta = if (lesson != null) "${lesson.stepCount} steps" else "4 steps",
                     selected = lesson != null,
-                    onClick = onPickTopic,
-                    modifier = Modifier.weight(1f)
+                    onClick = onPickLesson
                 )
             }
 
@@ -776,51 +834,104 @@ private fun IdleContent(
     }
 }
 
+/**
+ * One way into the call, as a full-width glass row.
+ *
+ * The previous pair of square cards forced two-line titles into half the page;
+ * a row puts the icon, the promise and the badge on one baseline, which survives
+ * long lesson titles and a 320 dp screen without ellipsing the part that matters.
+ */
 @Composable
-private fun ModeCard(
+private fun ModeTile(
     icon: ImageVector,
-    tint: Color,
     title: String,
     subtitle: String,
+    meta: String,
     selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    GlassCard(
-        modifier = modifier.heightIn(min = 100.dp),
-        fill = if (selected) GlassFill else GlassFillSoft,
-        onClick = onClick
+    val accent = if (selected) Brand else Brand.copy(alpha = 0.55f)
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(RoundedCornerShape(20.dp))
+            .background(if (selected) GlassFill else GlassFillSoft)
+            .border(
+                width = if (selected) 1.4.dp else 1.dp,
+                color = if (selected) Brand.copy(alpha = 0.45f) else GlassEdge,
+                shape = RoundedCornerShape(20.dp)
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 14.dp, vertical = 13.dp)
+            .testTag("tutor_mode_tile")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(30.dp)
-                    .clip(CircleShape)
-                    .background(tint.copy(alpha = 0.16f)),
+                    .size(44.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(
+                        Brush.linearGradient(
+                            listOf(
+                                accent.copy(alpha = if (selected) 0.95f else 0.22f),
+                                Fresh.copy(alpha = if (selected) 0.75f else 0.16f)
+                            )
+                        )
+                    ),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(icon, contentDescription = null, tint = tint, modifier = Modifier.size(14.dp))
+                Icon(
+                    imageVector = icon,
+                    contentDescription = null,
+                    tint = if (selected) Color.White else BrandDeep,
+                    modifier = Modifier.size(21.dp)
+                )
             }
-            Spacer(Modifier.height(12.dp))
-            Text(
-                text = title,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Bold,
-                color = Ink,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = subtitle,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp,
-                color = Muted,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis
-            )
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 15.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = subtitle,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = Muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            Spacer(Modifier.width(10.dp))
+            Column(
+                horizontalAlignment = Alignment.End,
+                verticalArrangement = Arrangement.Center
+            ) {
+                Text(
+                    text = meta,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = if (selected) BrandDeep else Faint,
+                    maxLines = 1
+                )
+                Spacer(Modifier.height(4.dp))
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
+                    contentDescription = null,
+                    tint = if (selected) Brand else Faint,
+                    modifier = Modifier.size(17.dp)
+                )
+            }
         }
     }
 }
@@ -959,7 +1070,7 @@ private fun LiveContent(
                 voiceState = voiceState,
                 isMuted = isMuted,
                 micLevel = micLevel,
-                size = 96.dp
+                size = 112.dp
             )
         }
 
@@ -1009,12 +1120,18 @@ private fun LiveContent(
                     modifier = Modifier.padding(top = 20.dp)
                 )
             }
-            transcript.forEach { entry ->
-                when (entry.role) {
-                    TutorCallEntry.Role.STUDENT -> StudentBubble(entry.text)
-                    TutorCallEntry.Role.TUTOR -> TutorBubble(entry.text)
-                    TutorCallEntry.Role.FIX -> entry.fix?.let {
-                        CorrectionCard(fix = it, onHear = onHearFix)
+            transcript.forEachIndexed { index, entry ->
+                // Keyed by position and role: a new line slides up into place, an
+                // old one never replays its entrance when the list is re-composed.
+                key(index, entry.role) {
+                    AppearIn {
+                        when (entry.role) {
+                            TutorCallEntry.Role.STUDENT -> StudentBubble(entry.text)
+                            TutorCallEntry.Role.TUTOR -> TutorBubble(entry.text)
+                            TutorCallEntry.Role.FIX -> entry.fix?.let {
+                                CorrectionCard(fix = it, onHear = onHearFix)
+                            }
+                        }
                     }
                 }
             }
@@ -1022,7 +1139,7 @@ private fun LiveContent(
             // The live correction is shown even before the model's reply lands, so
             // the student sees the fix while the words are still fresh.
             if (currentFix != null && transcript.none { it.role == TutorCallEntry.Role.FIX }) {
-                CorrectionCard(fix = currentFix, onHear = onHearFix)
+                AppearIn { CorrectionCard(fix = currentFix, onHear = onHearFix) }
             }
 
             AnimatedVisibility(
@@ -1122,6 +1239,30 @@ private fun LessonChip(lesson: TutorLesson, stepIndex: Int, isComplete: Boolean)
                 overflow = TextOverflow.Ellipsis
             )
         }
+    }
+}
+
+/**
+ * Fade-and-rise for anything that arrives in the thread.
+ *
+ * A bubble that pops into place reads as a list updating; one that rises 8 dp
+ * while it fades reads as someone speaking. The height is reserved from the
+ * first frame (only alpha and offset animate), so the scroll does not jump as
+ * each line lands.
+ */
+@Composable
+private fun AppearIn(content: @Composable () -> Unit) {
+    var shown by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { shown = true }
+    AnimatedVisibility(
+        visible = shown,
+        enter = fadeIn(animationSpec = tween(240)) +
+            androidx.compose.animation.slideInVertically(
+                initialOffsetY = { it / 3 },
+                animationSpec = tween(300, easing = androidx.compose.animation.core.FastOutSlowInEasing)
+            )
+    ) {
+        content()
     }
 }
 
@@ -1278,12 +1419,17 @@ private fun ThinkingBubble() {
 //  The one control
 // ─────────────────────────────────────────────────────────────────────────────
 
+/** The five faces of the one button, so the icon itself says what a tap will do. */
+private enum class MicFace { IDLE, LISTENING, SPEAKING, THINKING, MUTED }
+
 /**
  * The microphone, and nothing else.
  *
  * The rings are the tutor's state made visible — a slow bloom while it speaks,
- * a still stack while it listens, a dull ring when muted — so the student reads
- * whose turn it is without looking for a label.
+ * a ring goes out while it listens, a dull circle when muted — so the student
+ * reads whose turn it is without looking for a label. The glyph inside changes
+ * with the face too: mic, level bars while the tutor talks, ellipsis while it
+ * thinks, mic-off when muted.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -1297,12 +1443,43 @@ private fun MicDock(
 ) {
     val transition = rememberInfiniteTransition(label = "mic")
     val pulse by transition.animateFloat(
-        initialValue = if (state == AssistantVoiceState.SPEAKING) 1.06f else 1f,
-        targetValue = if (state == AssistantVoiceState.SPEAKING) 1.16f else 1.04f,
+        initialValue = if (state == AssistantVoiceState.SPEAKING) 1.05f else 1f,
+        targetValue = if (state == AssistantVoiceState.SPEAKING) 1.15f else 1.03f,
         animationSpec = infiniteRepeatable(animation = tween(1200), repeatMode = RepeatMode.Reverse),
         label = "mic_pulse"
     )
+    val ringT by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(1_800, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "mic_ring"
+    )
     val isLive = phase == CallPhase.LIVE || phase == CallPhase.CONNECTING
+
+    val face = when {
+        isMuted -> MicFace.MUTED
+        !isLive -> MicFace.IDLE
+        state == AssistantVoiceState.LISTENING -> MicFace.LISTENING
+        state == AssistantVoiceState.SPEAKING -> MicFace.SPEAKING
+        state == AssistantVoiceState.THINKING -> MicFace.THINKING
+        else -> MicFace.IDLE
+    }
+    val solid = when (face) {
+        MicFace.MUTED -> Faint
+        MicFace.SPEAKING -> BrandDeep
+        MicFace.THINKING -> Brand.copy(alpha = 0.55f)
+        else -> Brand
+    }
+    val iconLabel = when (face) {
+        MicFace.MUTED -> "Unmute"
+        MicFace.SPEAKING -> "Interrupt the tutor"
+        MicFace.THINKING -> "Tutor is thinking"
+        MicFace.LISTENING -> "Listening"
+        MicFace.IDLE -> "Speak"
+    }
 
     Column(
         modifier = Modifier
@@ -1312,22 +1489,34 @@ private fun MicDock(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(contentAlignment = Alignment.Center) {
+            // Rings: they breathe while the tutor talks and send a ring out while
+            // it listens, so the state is legible before the icon is read.
             Box(
                 modifier = Modifier
                     .size(96.dp)
                     .graphicsLayer { scaleX = pulse; scaleY = pulse }
                     .clip(CircleShape)
-                    .background(
-                        if (isMuted) Faint.copy(alpha = 0.10f) else Brand.copy(alpha = 0.14f)
-                    )
+                    .background(solid.copy(alpha = 0.14f))
             )
+            if (face == MicFace.LISTENING) {
+                val alpha = ((1f - ringT) * 0.45f).coerceIn(0f, 0.45f)
+                Box(
+                    modifier = Modifier
+                        .size(96.dp)
+                        .graphicsLayer {
+                            val grow = 1f + 0.32f * ringT
+                            scaleX = grow
+                            scaleY = grow
+                            this.alpha = alpha
+                        }
+                        .border(2.dp, Brand.copy(alpha = 0.55f), CircleShape)
+                )
+            }
             Box(
                 modifier = Modifier
                     .size(78.dp)
                     .clip(CircleShape)
-                    .background(
-                        if (isMuted) Faint.copy(alpha = 0.16f) else Brand.copy(alpha = 0.22f)
-                    )
+                    .background(solid.copy(alpha = 0.22f))
             )
             // The button centres its own content: the icon used to be wrapped in a
             // second, unsized Box, which parked it in the top-left of the circle.
@@ -1335,7 +1524,7 @@ private fun MicDock(
                 modifier = Modifier
                     .size(66.dp)
                     .clip(CircleShape)
-                    .background(if (isMuted) Faint else Brand)
+                    .background(solid)
                     .combinedClickable(
                         onClick = onMic,
                         onLongClick = onLongPress
@@ -1343,12 +1532,25 @@ private fun MicDock(
                     .testTag("tutor_mic"),
                 contentAlignment = Alignment.Center
             ) {
-                Icon(
-                    imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                    contentDescription = if (isMuted) "Unmute" else "Speak",
-                    tint = Color.White,
-                    modifier = Modifier.size(28.dp)
-                )
+                // Crossfade, not a swap: the glyph the student is aiming at changes
+                // under their thumb, and a hard cut makes that feel like a glitch.
+                androidx.compose.animation.Crossfade(
+                    targetState = face,
+                    animationSpec = tween(220),
+                    label = "mic_face"
+                ) { current ->
+                    Icon(
+                        imageVector = when (current) {
+                            MicFace.MUTED -> Icons.Default.MicOff
+                            MicFace.SPEAKING -> Icons.Default.GraphicEq
+                            MicFace.THINKING -> Icons.Default.MoreHoriz
+                            else -> Icons.Default.Mic
+                        },
+                        contentDescription = iconLabel,
+                        tint = Color.White,
+                        modifier = Modifier.size(if (current == MicFace.THINKING) 30.dp else 28.dp)
+                    )
+                }
             }
         }
         Spacer(Modifier.height(10.dp))
@@ -1606,15 +1808,15 @@ private fun SummaryStat(value: String, label: String) {
 private fun TutorMenuSheet(
     currentScenario: String,
     activeLessonId: String?,
+    startOnLessons: Boolean,
     onCall: Boolean,
     onSelectScenario: (String) -> Unit,
     onSelectLesson: (TutorLesson?) -> Unit,
-    onOpenSettings: () -> Unit,
     onEndCall: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
-    var showLessons by remember { mutableStateOf(activeLessonId != null) }
+    var showLessons by remember(startOnLessons) { mutableStateOf(startOnLessons) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1687,13 +1889,9 @@ private fun TutorMenuSheet(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                TextButton(onClick = onOpenSettings) {
-                    Text("Model settings", color = BrandDeep, fontSize = 14.5.sp)
-                }
-                Spacer(Modifier.weight(1f))
-                if (onCall) {
+            if (onCall) {
+                Spacer(Modifier.height(12.dp))
+                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                     TextButton(onClick = onEndCall) {
                         Text("End call", color = Warm, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                     }
@@ -1774,81 +1972,6 @@ private fun MenuRow(
             }
         }
     }
-}
-
-@Composable
-private fun ModelSettingsDialog(
-    token: String,
-    baseUrl: String,
-    status: String,
-    onSave: (String, String) -> Unit,
-    onTest: () -> Unit,
-    onDismiss: () -> Unit
-) {
-    var tokenInput by remember { mutableStateOf(token) }
-    var urlInput by remember { mutableStateOf(baseUrl) }
-
-    androidx.compose.material3.AlertDialog(
-        onDismissRequest = onDismiss,
-        containerColor = Color(0xFFF7F8FC),
-        title = {
-            Text(
-                text = "Tutor model",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 19.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Ink
-            )
-        },
-        text = {
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text(
-                    text = status,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
-                    color = BrandDeep
-                )
-                Text(
-                    text = "The call works without a model: Miss Emma falls back to a local " +
-                        "script and the grammar rules on this phone. A token is only needed " +
-                        "if the Space is private.",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
-                    lineHeight = 18.sp,
-                    color = Muted
-                )
-                androidx.compose.material3.OutlinedTextField(
-                    value = tokenInput,
-                    onValueChange = { tokenInput = it },
-                    label = { Text("Access token") },
-                    placeholder = { Text("hf_xxxxxxxxxxxxxxxxxxxxx") },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                androidx.compose.material3.OutlinedTextField(
-                    value = urlInput,
-                    onValueChange = { urlInput = it },
-                    label = { Text("Base URL") },
-                    placeholder = { Text(HuggingFaceSpaceClient.DEFAULT_SPACE_DIRECT_URL) },
-                    singleLine = true,
-                    shape = RoundedCornerShape(12.dp),
-                    modifier = Modifier.fillMaxWidth()
-                )
-                TextButton(onClick = onTest) {
-                    Text("Test connection", color = BrandDeep, fontSize = 14.sp)
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(onClick = { onSave(tokenInput.trim(), urlInput.trim()) }) {
-                Text("Save", color = BrandDeep, fontWeight = FontWeight.Bold)
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) { Text("Close", color = Muted) }
-        }
-    )
 }
 
 /** mm:ss, the way a call app counts. */

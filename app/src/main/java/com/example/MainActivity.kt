@@ -659,8 +659,8 @@ class MainActivity : ComponentActivity() {
                                                     TheStudentNavTab.AI_TUTOR -> {
                                                         // The English tutor is a call: an
                                                         // iridescent orb, a bubble thread and a
-                                                        // single mic. Leaving, changing topic
-                                                        // and model settings live in the menu.
+                                                        // single mic. Leaving and changing topic
+                                                        // live in the menu.
                                                         AiTutorScreen(
                                                             voiceState = uiState.voiceAssistantState,
                                                             callPhase = uiState.callPhase,
@@ -678,9 +678,6 @@ class MainActivity : ComponentActivity() {
                                                             lessonStepIndex = uiState.lessonStepIndex,
                                                             isLessonComplete = uiState.isLessonComplete,
                                                             hfStatusMessage = uiState.hfStatusMessage,
-                                                            isHfSettingsOpen = uiState.isHfSettingsOpen,
-                                                            customHfToken = uiState.customHfToken,
-                                                            customHfBaseUrl = uiState.customHfBaseUrl,
                                                             onStartCall = { viewModel.startTutorCall() },
                                                             onEndCall = { viewModel.endTutorCall() },
                                                             onExit = { viewModel.setTab(TheStudentNavTab.HOME) },
@@ -691,11 +688,6 @@ class MainActivity : ComponentActivity() {
                                                             onHearFix = { viewModel.speakGrammarFix() },
                                                             onSelectScenario = { viewModel.selectVoiceScenario(it) },
                                                             onSelectLesson = { viewModel.selectTutorLesson(it) },
-                                                            onOpenHfSettings = { viewModel.toggleHfSettings(it) },
-                                                            onUpdateHfCredentials = { token, url ->
-                                                                viewModel.updateHfCredentials(token, url)
-                                                            },
-                                                            onTestHfConnection = { viewModel.testHfSpaceConnection() },
                                                             onDismissSummary = { viewModel.dismissCallSummary() },
                                                             onShowSnackbar = { viewModel.showSnackbar(it) }
                                                         )

@@ -4132,7 +4132,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     status = _uiState.value.hfStatusMessage
                 )
             } else {
-                speakText(lesson.step(0)?.teacherLine.orEmpty())
+                // Idle: the screen opens the call for this lesson, and the call's
+                // own opener is this teacher line. Saying it here would duplicate it.
             }
         } else {
             showSnackbar("Free conversation")
@@ -4645,6 +4646,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun selectVoiceScenario(scenario: String) {
         val starter = EnglishVoiceTutorEngine.getStarterGreeting(scenario)
+        val live = _uiState.value.callPhase == CallPhase.LIVE
         stopSpeaking()
         _uiState.update {
             it.copy(
@@ -4662,7 +4664,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 voiceAssistantState = AssistantVoiceState.IDLE
             )
         }
-        speakText(starter.spokenText)
+        // Off a call the UI starts one straight away, and startTutorCall speaks the
+        // opener for the topic that was just chosen; speaking here as well would
+        // play the same greeting twice.
+        if (live) speakText(starter.spokenText)
     }
 
     fun replayCurrentAiResponse() {

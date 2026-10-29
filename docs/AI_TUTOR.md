@@ -257,3 +257,28 @@ call owns the whole screen.
   headline 28sp, mic caption 12.5sp.
 - **The mic glyph is centred** — it was wrapped in a second, unsized `Box` that
   pinned it to the top-left corner of the button.
+
+### 11.2 Round 18, third pass
+
+- **The orb casts a shadow.** It draws its own ground shadow (dark emerald, offset
+  below the sphere) and a brand bloom, then masks only the sphere itself with
+  `clipPath`, so the light can spill outside the circle. Mockup:
+  `designs/37a-tutor-idle-emerald.png`.
+- **Entry cards are rows, not squares.** `ModeTile` is a full-width glass row:
+  rounded icon plate, title on one line, promise underneath, level/steps badge
+  and a chevron. It survives long lesson titles and narrow screens.
+- **The mic has five faces** (`MicFace`): mic when idle/listening (a ring goes out
+  while it listens), level bars while the tutor talks (tap = interrupt), ellipsis
+  while it thinks, mic-off when muted. The glyph crossfades. See
+  `designs/37b-tutor-mic-faces.png`.
+- **Picking a topic starts the call.** It used to only swap state, so the screen
+  stayed idle and the greeting went nowhere. Now the sheet closes, the topic or
+  lesson is applied, and the call opens (permission included). Mid-call the topic
+  simply changes under the same call, and the VM no longer speaks a duplicate
+  opener when it is about to start one.
+- **New lines rise in.** `AppearIn` fades each bubble/correction card over 240 ms
+  while sliding it up 8 dp; height is reserved from the first frame, so the
+  thread does not jump.
+- **Model settings are gone** from the tutor UI (and the `ModelSettingsDialog`
+  composable with them). The call still degrades to the local tutor on its own;
+  the status line keeps saying so.
