@@ -41,7 +41,10 @@ import com.example.data.remote.AuthApiResult
 import com.example.data.remote.SessionValidation
 import com.example.data.remote.TheStudentChatClient
 import com.example.data.remote.ChatResult
+import com.example.data.remote.EnglishGrammarRules
 import com.example.data.remote.EnglishVoiceTutorEngine
+import com.example.data.remote.TutorLessonCatalog
+import com.example.data.remote.TutorTurnPrompt
 import com.example.data.remote.HfApiResponse
 import com.example.data.remote.HuggingFaceSpaceClient
 import com.example.data.remote.VoiceTutorResponse
@@ -59,6 +62,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.yield
 
@@ -146,6 +150,28 @@ data class TheStudentUiState(
     val customHfToken: String = "",
     val customHfBaseUrl: String = HuggingFaceSpaceClient.DEFAULT_SPACE_DIRECT_URL,
     val hfStatusMessage: String = "Gemma/Qwen HuggingFace Model Ready",
+
+    // The English tutor runs as a call, not as a chat window: these fields are
+    // the call's clock, its transcript, and the record it leaves behind.
+    val callPhase: CallPhase = CallPhase.IDLE,
+    val callSeconds: Int = 0,
+    val isCallMuted: Boolean = false,
+    /** What the tutor is saying right now (spoken, and shown as a caption). */
+    val callTutorLine: String = "",
+    /** The student's last sentence, kept on screen while the tutor answers. */
+    val callStudentLine: String? = null,
+    /** The correction for the current turn, shown as soon as it is known. */
+    val callFix: GrammarFix? = null,
+    val callFixes: List<GrammarFix> = emptyList(),
+    val callWords: List<String> = emptyList(),
+    val callTurns: Int = 0,
+    val callSummary: CallSummary? = null,
+    /** The lesson being taught, if this call is a lesson rather than free talk. */
+    val activeLessonId: String? = null,
+    val lessonStepIndex: Int = 0,
+    val isLessonComplete: Boolean = false,
+    /** CEFR level the tutor aims at; raised from the profile once known. */
+    val tutorLevel: String = "B1",
 
     // Multimodal AI Study Assistant (ChatGPT / Gemini style)
     val isAiAssistantOpen: Boolean = false,
@@ -287,6 +313,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
     private val conversationTurns = mutableListOf<Pair<String, String>>()
+
+    // English tutor call state. Declared with the audio fields (not further down
+    // with the call functions) because the speech listeners created in `onInit`
+    // read them, and Kotlin initialises properties in declaration order.
+    private var callTimerJob: Job? = null
+    private var callTurnJob: Job? = null
+    private var endOfSpeechWatchdog: Job? = null
+    private var tutorSpeechSeq = 0
+    private var pendingTutorSentences = 0
+    private var isTutorTurnInFlight = false
+    private var recognitionMisses = 0
+    private var awaitingTranscript = false
+
+    /** Prefix that marks a text-to-speech utterance as belonging to the call. */
+    private val callUtterancePrefix = "tutor-call-"
 
     private val _uiState = MutableStateFlow(TheStudentUiState())
     val uiState: StateFlow<TheStudentUiState> = _uiState.asStateFlow()
@@ -446,9 +487,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
                         override fun onEndOfSpeech() {
                             _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.THINKING) }
+                            // Some devices stop the turn without ever delivering a
+                            // result; without this the call would wait forever.
+                            if (_uiState.value.callPhase != CallPhase.IDLE) startEndOfSpeechWatchdog()
                         }
 
                         override fun onError(error: Int) {
+                            // In a call a miss is not an exit: the line stays open and
+                            // the loop decides whether to retry, nudge or hang up.
+                            if (_uiState.value.callPhase == CallPhase.LIVE) {
+                                handleRecognitionMiss()
+                                return
+                            }
                             // Don't override if already transitioned to processing
                             if (_uiState.value.voiceAssistantState == AssistantVoiceState.LISTENING) {
                                 _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
@@ -458,8 +508,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         override fun onResults(results: Bundle?) {
                             val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val recognizedText = matches?.firstOrNull()
+                            awaitingTranscript = false
+                            endOfSpeechWatchdog?.cancel()
                             if (!recognizedText.isNullOrBlank()) {
-                                processUserVoiceInput(recognizedText)
+                                if (_uiState.value.callPhase == CallPhase.LIVE) {
+                                    submitCallTurn(recognizedText)
+                                } else {
+                                    processUserVoiceInput(recognizedText)
+                                }
+                            } else if (_uiState.value.callPhase == CallPhase.LIVE) {
+                                handleRecognitionMiss()
                             } else {
                                 _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
                             }
@@ -469,7 +527,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                             val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                             val partial = matches?.firstOrNull()
                             if (!partial.isNullOrBlank()) {
-                                _uiState.update { it.copy(currentUserTranscript = partial) }
+                                _uiState.update {
+                                    it.copy(
+                                        currentUserTranscript = partial,
+                                        // Live captions during a call: the student sees
+                                        // their own words while they are still speaking.
+                                        callStudentLine = if (it.callPhase == CallPhase.LIVE) partial else it.callStudentLine
+                                    )
+                                }
                             }
                         }
 
@@ -498,14 +563,35 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
                 override fun onDone(utteranceId: String?) {
                     viewModelScope.launch(Dispatchers.Main) {
+                        val callLine = utteranceId?.startsWith(callUtterancePrefix) == true
+                        if (callLine) {
+                            // A sentence from an answer the student already
+                            // interrupted must not resume the loop.
+                            val seq = utteranceId
+                                ?.removePrefix(callUtterancePrefix)
+                                ?.substringBefore('-')
+                                ?.toIntOrNull()
+                            if (seq != null && seq != tutorSpeechSeq) return@launch
+                            pendingTutorSentences = (pendingTutorSentences - 1).coerceAtLeast(0)
+                            if (pendingTutorSentences > 0) return@launch
+                            _uiState.update {
+                                it.copy(voiceAssistantState = AssistantVoiceState.IDLE, isTtsSpeaking = false)
+                            }
+                            onTutorSpeechFinished()
+                            return@launch
+                        }
                         _uiState.update {
                             it.copy(
                                 voiceAssistantState = AssistantVoiceState.IDLE,
                                 isTtsSpeaking = false
                             )
                         }
-                        // If hands-free mode is active, automatically listen again after a brief pause
-                        if (_uiState.value.isHandsFreeActive) {
+                        val state = _uiState.value
+                        if (state.callPhase == CallPhase.LIVE && !state.isCallMuted) {
+                            // A preview (a corrected sentence, a lesson line) read
+                            // during a call still hands the turn back afterwards.
+                            scheduleListening(650)
+                        } else if (state.isHandsFreeActive) {
                             delay(800)
                             startVoiceListening()
                         }
@@ -513,11 +599,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 }
 
                 override fun onError(utteranceId: String?) {
+                    val callLine = utteranceId?.startsWith(callUtterancePrefix) == true
                     _uiState.update {
                         it.copy(
                             voiceAssistantState = AssistantVoiceState.IDLE,
                             isTtsSpeaking = false
                         )
+                    }
+                    if (callLine) {
+                        // The engine gave up mid-answer; never strand the call in
+                        // "speaking" — hand the turn back like a finished sentence.
+                        pendingTutorSentences = 0
+                        onTutorSpeechFinished()
                     }
                 }
             })
@@ -3504,6 +3597,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     // Navigation and tabs
     fun setTab(tab: TheStudentNavTab) {
         val wasDifferent = _uiState.value.currentTab != tab
+        // Leaving the tutor tab hangs up. A microphone that keeps listening while
+        // the student is looking at something else is a privacy problem, not a
+        // feature, and the call has a summary to show anyway.
+        if (wasDifferent && _uiState.value.currentTab == TheStudentNavTab.AI_TUTOR &&
+            (_uiState.value.callPhase == CallPhase.LIVE ||
+                _uiState.value.callPhase == CallPhase.CONNECTING)
+        ) {
+            endTutorCall()
+        }
         _uiState.update {
             it.copy(
                 currentTab = tab,
@@ -3721,6 +3823,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun stopSpeaking() {
+        // Bumping the sequence invalidates the call sentences still queued in the
+        // speech engine, so their completion callbacks cannot restart the loop.
+        tutorSpeechSeq++
+        pendingTutorSentences = 0
         tts?.stop()
         _uiState.update { it.copy(isTtsSpeaking = false) }
     }
@@ -3773,6 +3879,565 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     // AI English Voice Tutor (Speech-to-Speech)
     // ==========================================
 
+    // ==========================================
+    // English tutor — the call engine
+    // ==========================================
+    //
+    // A call is a loop, not a form: the tutor speaks, the phone listens, the
+    // student answers, the tutor answers back. Every piece below exists to keep
+    // that loop turning without a tap — and to stop it cleanly when the student
+    // hangs up or the microphone gives up.
+    //
+    // The loop deliberately has three safety nets, because a voice UI fails in
+    // ways a chat UI never does:
+    //   1. a miss (silence, noise, no match) re-opens the microphone instead of
+    //      dumping the student back to an idle screen;
+    //   2. a turn that never returns a transcript cannot leave the call stuck in
+    //      "thinking" — a watchdog closes it;
+    //   3. a stale text-to-speech callback (from a sentence the student already
+    //      interrupted) is ignored by sequence number, so the tutor never
+    //      restarts listening in the middle of its own answer.
+
+    /**
+     * Start a call.
+     *
+     * The opening line is spoken from the local script rather than waited for
+     * from the server: a call that begins with eight seconds of silence feels
+     * broken, and the first turn is predictable enough to script.
+     */
+    fun startTutorCall() {
+        val state = _uiState.value
+        if (state.callPhase == CallPhase.LIVE || state.callPhase == CallPhase.CONNECTING) return
+
+        initTts()
+        initSpeechRecognizer()
+        conversationTurns.clear()
+        recognitionMisses = 0
+        isTutorTurnInFlight = false
+        awaitingTranscript = false
+        pendingTutorSentences = 0
+        tutorSpeechSeq++
+
+        _uiState.update {
+            it.copy(
+                callPhase = CallPhase.CONNECTING,
+                callSeconds = 0,
+                isCallMuted = false,
+                callTutorLine = "",
+                callStudentLine = null,
+                callFix = null,
+                callFixes = emptyList(),
+                callWords = emptyList(),
+                callTurns = 0,
+                callSummary = null,
+                lessonStepIndex = 0,
+                isLessonComplete = false,
+                voiceAssistantState = AssistantVoiceState.THINKING,
+                currentUserTranscript = null,
+                isKeyboardInputOpen = false
+            )
+        }
+        startCallClock()
+
+        viewModelScope.launch {
+            // Text-to-speech initialises off the main thread; give it a moment so
+            // the greeting is not silently dropped on the very first call.
+            if (!isTtsInitialized) delay(700)
+            val lesson = TutorLessonCatalog.find(_uiState.value.activeLessonId)
+            val scenario = _uiState.value.currentScenario
+            val opener = lesson?.step(0)?.teacherLine
+                ?: EnglishVoiceTutorEngine.getStarterGreeting(scenario).spokenText
+            val starters = lesson?.step(0)?.starters
+                ?: EnglishVoiceTutorEngine.getStarterGreeting(scenario).suggestedReplyPills
+            deliverTutorTurn(
+                say = opener,
+                fix = null,
+                word = null,
+                starters = starters,
+                status = _uiState.value.hfStatusMessage
+            )
+        }
+    }
+
+    /** Hang up, keep the results, and show the summary. */
+    fun endTutorCall(reason: String? = null) {
+        val state = _uiState.value
+        if (state.callPhase == CallPhase.IDLE) return
+
+        callTimerJob?.cancel()
+        callTurnJob?.cancel()
+        endOfSpeechWatchdog?.cancel()
+        tutorSpeechSeq++
+        pendingTutorSentences = 0
+        awaitingTranscript = false
+        isTutorTurnInFlight = false
+        try { tts?.stop() } catch (_: Exception) {}
+        try { speechRecognizer?.cancel() } catch (_: Exception) {}
+
+        val summary = CallSummary(
+            durationSeconds = state.callSeconds,
+            turns = state.callTurns,
+            corrections = state.callFixes,
+            words = state.callWords,
+            cleanTurnPercent = if (state.callTurns == 0) {
+                0
+            } else {
+                ((state.callTurns - state.callFixes.size).coerceAtLeast(0) * 100) / state.callTurns
+            },
+            scenario = state.currentScenario,
+            lessonTitle = TutorLessonCatalog.find(state.activeLessonId)?.title,
+            lessonCompleted = state.isLessonComplete
+        )
+
+        _uiState.update {
+            it.copy(
+                callPhase = CallPhase.ENDED,
+                callSummary = summary,
+                isCallMuted = false,
+                voiceAssistantState = AssistantVoiceState.IDLE,
+                isTtsSpeaking = false,
+                micRmsDb = 0f
+            )
+        }
+
+        if (state.callTurns > 0) {
+            viewModelScope.launch {
+                repository.recordLanguagePractice(
+                    mode = "AI Call (${state.currentScenario})",
+                    score = "${summary.durationLabel} · ${summary.turns} turns"
+                )
+            }
+        }
+        reason?.let { showSnackbar(it) }
+    }
+
+    /** Close the summary without starting another call. */
+    fun dismissCallSummary() {
+        _uiState.update {
+            it.copy(
+                callPhase = CallPhase.IDLE,
+                callSummary = null,
+                callTutorLine = "",
+                callStudentLine = null,
+                callFix = null
+            )
+        }
+    }
+
+    /** Mute is a listening switch, not a hardware one: it closes the microphone. */
+    fun toggleCallMute() {
+        val muted = !_uiState.value.isCallMuted
+        _uiState.update { it.copy(isCallMuted = muted) }
+        if (muted) {
+            callTurnJob?.cancel()
+            awaitingTranscript = false
+            try { speechRecognizer?.cancel() } catch (_: Exception) {}
+            if (_uiState.value.voiceAssistantState == AssistantVoiceState.LISTENING ||
+                _uiState.value.voiceAssistantState == AssistantVoiceState.THINKING
+            ) {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+            }
+        } else if (_uiState.value.callPhase == CallPhase.LIVE &&
+            _uiState.value.voiceAssistantState == AssistantVoiceState.IDLE
+        ) {
+            scheduleListening(250)
+        }
+    }
+
+    /**
+     * Barge-in: the student talks over the tutor and the tutor stops mid-sentence.
+     *
+     * The sequence number is bumped first, so the text-to-speech callbacks still
+     * queued for the cancelled answer cannot restart listening a second time.
+     */
+    fun interruptTutor() {
+        if (_uiState.value.callPhase != CallPhase.LIVE) return
+        tutorSpeechSeq++
+        pendingTutorSentences = 0
+        try { tts?.stop() } catch (_: Exception) {}
+        _uiState.update {
+            it.copy(voiceAssistantState = AssistantVoiceState.LISTENING, isTtsSpeaking = false)
+        }
+        startVoiceListening()
+    }
+
+    /** Pick a lesson, or pass null to go back to free conversation. */
+    fun selectTutorLesson(lesson: TutorLesson?) {
+        _uiState.update {
+            it.copy(
+                activeLessonId = lesson?.id,
+                lessonStepIndex = 0,
+                isLessonComplete = false
+            )
+        }
+        val live = _uiState.value.callPhase == CallPhase.LIVE
+        if (lesson != null) {
+            if (live) {
+                // Mid-call lesson change is a fresh start, announced out loud.
+                val opener = lesson.step(0)?.teacherLine.orEmpty()
+                deliverTutorTurn(
+                    say = "Let's start a new lesson: ${lesson.title}. $opener",
+                    fix = null,
+                    word = null,
+                    starters = lesson.step(0)?.starters.orEmpty(),
+                    status = _uiState.value.hfStatusMessage
+                )
+            } else {
+                speakText(lesson.step(0)?.teacherLine.orEmpty())
+            }
+        } else {
+            showSnackbar("Free conversation")
+        }
+    }
+
+    /** Re-hear the corrected sentence without restarting the call loop. */
+    fun speakGrammarFix() {
+        val fix = _uiState.value.callFix ?: return
+        speakText(fix.corrected)
+    }
+
+    private fun startCallClock() {
+        callTimerJob?.cancel()
+        callTimerJob = viewModelScope.launch {
+            while (isActive) {
+                delay(1000)
+                val state = _uiState.value
+                if (state.callPhase == CallPhase.LIVE || state.callPhase == CallPhase.CONNECTING) {
+                    _uiState.update { it.copy(callSeconds = it.callSeconds + 1) }
+                } else {
+                    break
+                }
+            }
+        }
+    }
+
+    /** Listen again shortly, unless the student muted or hung up in the meantime. */
+    private fun scheduleListening(delayMs: Long) {
+        callTurnJob?.cancel()
+        callTurnJob = viewModelScope.launch {
+            delay(delayMs)
+            val state = _uiState.value
+            if (state.callPhase == CallPhase.LIVE && !state.isCallMuted &&
+                state.voiceAssistantState != AssistantVoiceState.SPEAKING
+            ) {
+                startVoiceListening()
+            }
+        }
+    }
+
+    /**
+     * Put a tutor turn on screen and in the air.
+     *
+     * State is updated before the first word is spoken so the caption and the
+     * audio agree; the call loop resumes from [onTutorSpeechFinished], which is
+     * driven by the last sentence, not by a timer.
+     */
+    private fun deliverTutorTurn(
+        say: String,
+        fix: GrammarFix?,
+        word: String?,
+        starters: List<String>,
+        status: String
+    ) {
+        // A slow answer can arrive after the student hung up. Speaking it would
+        // start a call the student already ended, so late turns are dropped.
+        val phase = _uiState.value.callPhase
+        if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) return
+
+        _uiState.update { state ->
+            state.copy(
+                callTutorLine = say,
+                currentAiResponseText = say,
+                callFix = fix,
+                callFixes = if (fix != null && state.callFixes.none { it.corrected == fix.corrected }) {
+                    state.callFixes + fix
+                } else {
+                    state.callFixes
+                },
+                callWords = if (word != null && state.callWords.none { it.equals(word, ignoreCase = true) }) {
+                    state.callWords + word
+                } else {
+                    state.callWords
+                },
+                currentGrammarTip = fix?.let { "Better: \"${it.corrected}\"  ·  ${it.rule}" }
+                    ?: state.currentGrammarTip,
+                currentVocabularyHighlight = word ?: state.currentVocabularyHighlight,
+                suggestedVoicePills = starters.ifEmpty { state.suggestedVoicePills },
+                hfStatusMessage = status,
+                voiceAssistantState = AssistantVoiceState.SPEAKING,
+                isTtsSpeaking = true
+            )
+        }
+        speakTutorSentences(say)
+    }
+
+    /**
+     * Speak a turn sentence by sentence.
+     *
+     * Queuing each sentence separately means the student hears the first one
+     * while the rest is still being handed to the engine — the difference
+     * between a call and a voicemail. The sequence number tags every utterance so
+     * an interrupt can invalidate whatever is still queued.
+     */
+    private fun speakTutorSentences(text: String) {
+        val clean = text.trim()
+        if (clean.isEmpty()) {
+            onTutorSpeechFinished()
+            return
+        }
+        val engine = tts
+        if (engine == null || !isTtsInitialized) {
+            // No voice engine on this device: keep the call usable as captions.
+            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, isTtsSpeaking = false) }
+            onTutorSpeechFinished()
+            return
+        }
+        val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .ifEmpty { listOf(clean) }
+
+        tutorSpeechSeq++
+        val seq = tutorSpeechSeq
+        pendingTutorSentences = sentences.size
+        try {
+            engine.stop()
+            sentences.forEachIndexed { index, sentence ->
+                val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                engine.speak(sentence, mode, null, "$callUtterancePrefix$seq-$index")
+            }
+        } catch (_: Exception) {
+            pendingTutorSentences = 0
+            onTutorSpeechFinished()
+        }
+    }
+
+    /** The tutor has finished speaking: hand the turn back to the student. */
+    private fun onTutorSpeechFinished() {
+        val state = _uiState.value
+        _uiState.update { it.copy(isTtsSpeaking = false) }
+        when {
+            state.callPhase == CallPhase.CONNECTING -> {
+                _uiState.update {
+                    it.copy(callPhase = CallPhase.LIVE, voiceAssistantState = AssistantVoiceState.IDLE)
+                }
+                scheduleListening(400)
+            }
+            state.callPhase != CallPhase.LIVE -> {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+            }
+            state.isCallMuted -> {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+            }
+            else -> scheduleListening(450)
+        }
+    }
+
+    /**
+     * One student turn: transcribe, correct, answer, speak, advance the lesson.
+     *
+     * The local correction is shown immediately — before the network call — so
+     * the student sees their own sentence fixed while the tutor is "thinking",
+     * and a slow or unreachable server never means a silent call.
+     */
+    private fun submitCallTurn(text: String) {
+        val trimmed = text.trim()
+        val state = _uiState.value
+        if (trimmed.isBlank()) {
+            handleRecognitionMiss()
+            return
+        }
+        if (state.callPhase != CallPhase.LIVE && state.callPhase != CallPhase.CONNECTING) {
+            processUserVoiceInput(trimmed)
+            return
+        }
+        if (state.callPhase == CallPhase.CONNECTING) {
+            // The student spoke over the greeting: that *is* the start of the call.
+            _uiState.update { it.copy(callPhase = CallPhase.LIVE) }
+        }
+        if (EnglishGrammarRules.isStopRequest(trimmed)) {
+            tutorSpeechSeq++
+            pendingTutorSentences = 0
+            try { tts?.stop() } catch (_: Exception) {}
+            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+            scheduleListening(250)
+            return
+        }
+        if (EnglishGrammarRules.isBackchannel(trimmed) &&
+            state.voiceAssistantState == AssistantVoiceState.SPEAKING
+        ) {
+            return
+        }
+        if (isTutorTurnInFlight) return
+
+        isTutorTurnInFlight = true
+        recognitionMisses = 0
+        awaitingTranscript = false
+        endOfSpeechWatchdog?.cancel()
+        // A typed turn (or a recognised one that beat the audio) interrupts the
+        // tutor the same way speech would: the sentence in progress stops, and
+        // its stale callbacks can no longer reopen the microphone.
+        if (state.voiceAssistantState == AssistantVoiceState.SPEAKING) stopSpeaking()
+
+        val turnIndex = state.callTurns + 1
+        val localFix = EnglishGrammarRules.check(trimmed)
+        _uiState.update {
+            it.copy(
+                callTurns = turnIndex,
+                callStudentLine = trimmed,
+                currentUserTranscript = trimmed,
+                // Show the local fix at once; the model's version replaces it when
+                // it arrives, and a null from the model means the sentence was fine.
+                callFix = localFix,
+                voiceAssistantState = AssistantVoiceState.THINKING,
+                micRmsDb = 0f
+            )
+        }
+
+        viewModelScope.launch {
+            val current = _uiState.value
+            val lesson = if (current.isLessonComplete) {
+                null
+            } else {
+                TutorLessonCatalog.find(current.activeLessonId)
+            }
+            val scenario = current.currentScenario
+            val stepIndex = current.lessonStepIndex
+
+            val response = huggingFaceClient.getChatCompletion(
+                userMessage = TutorTurnPrompt.userMessage(trimmed),
+                conversationHistory = conversationTurns,
+                customToken = current.customHfToken.takeIf { it.isNotBlank() },
+                customBaseUrl = current.customHfBaseUrl.takeIf { it.isNotBlank() },
+                systemPrompt = TutorTurnPrompt.system(scenario, lesson, stepIndex, current.tutorLevel),
+                maxTokens = 200,
+                temperature = 0.6,
+                cleanForSpeech = false
+            )
+
+            val starters = lesson?.step(stepIndex)?.starters.orEmpty()
+            when (response) {
+                is HfApiResponse.Success -> {
+                    val turn = TutorTurnPrompt.parse(response.text)
+                    val modelFix = turn.fixCorrected?.let { corrected ->
+                        GrammarFix(
+                            original = trimmed,
+                            corrected = corrected,
+                            rule = turn.rule.orEmpty(),
+                            turnIndex = turnIndex
+                        ).takeIf { it.isUseful }
+                    }
+                    conversationTurns.add("user" to trimmed)
+                    conversationTurns.add("assistant" to turn.say)
+                    deliverTutorTurn(
+                        say = turn.say,
+                        // A model that echoed the sentence back is agreeing with it,
+                        // which must not be shown as a correction.
+                        fix = modelFix,
+                        word = turn.word,
+                        starters = starters,
+                        status = "Connected (${response.latencyMs}ms)"
+                    )
+                }
+                is HfApiResponse.Error -> {
+                    val fallback = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
+                    val nextStep = lesson?.step(stepIndex + 1)
+                    val say = when {
+                        nextStep != null -> nextStep.teacherLine
+                        lesson != null -> "That is the end of this lesson. Well done. " +
+                            "Let's keep talking freely. What else would you like to practise?"
+                        else -> fallback.spokenText
+                    }
+                    conversationTurns.add("user" to trimmed)
+                    conversationTurns.add("assistant" to say)
+                    deliverTutorTurn(
+                        say = say,
+                        fix = localFix,
+                        word = if (lesson != null) null else fallback.vocabularyHighlight?.substringBefore(" /"),
+                        starters = (nextStep?.starters ?: fallback.suggestedReplyPills),
+                        status = when {
+                            response.isAuthError -> "Private space: token required (local tutor active)"
+                            response.isSleepingOrOffline -> "Space asleep — local tutor keeping the call going"
+                            else -> "Local tutor mode"
+                        }
+                    )
+                }
+            }
+
+            advanceLesson()
+            isTutorTurnInFlight = false
+        }
+    }
+
+    /** Move the lesson plan forward one step after every answered turn. */
+    private fun advanceLesson() {
+        val state = _uiState.value
+        val lesson = TutorLessonCatalog.find(state.activeLessonId) ?: return
+        if (state.isLessonComplete) return
+        val next = state.lessonStepIndex + 1
+        if (next >= lesson.stepCount) {
+            _uiState.update { it.copy(isLessonComplete = true, lessonStepIndex = lesson.stepCount - 1) }
+        } else {
+            _uiState.update { it.copy(lessonStepIndex = next) }
+        }
+    }
+
+    /**
+     * The microphone heard nothing usable.
+     *
+     * A call keeps the line open: the first misses retry silently, then the tutor
+     * offers an easier question, and only a long run of failures hangs up.
+     */
+    private fun handleRecognitionMiss() {
+        val state = _uiState.value
+        awaitingTranscript = false
+        endOfSpeechWatchdog?.cancel()
+        if (state.callPhase != CallPhase.LIVE) {
+            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
+            return
+        }
+        if (state.isCallMuted) {
+            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+            return
+        }
+        recognitionMisses++
+        when {
+            recognitionMisses >= 5 -> endTutorCall("The call ended — I could not hear your microphone.")
+            recognitionMisses >= 3 -> {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+                deliverTutorTurn(
+                    say = "No rush. I'm still here. Say anything you like, even one word.",
+                    fix = state.callFix,
+                    word = null,
+                    starters = state.suggestedVoicePills,
+                    status = state.hfStatusMessage
+                )
+            }
+            else -> {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
+                scheduleListening(900)
+            }
+        }
+    }
+
+    /**
+     * If the recogniser reports end-of-speech but never delivers a result (some
+     * devices do this when the audio is too short), close the turn ourselves
+     * instead of leaving the call in "thinking" forever.
+     */
+    private fun startEndOfSpeechWatchdog() {
+        endOfSpeechWatchdog?.cancel()
+        endOfSpeechWatchdog = viewModelScope.launch {
+            delay(4_500)
+            if (awaitingTranscript &&
+                _uiState.value.callPhase == CallPhase.LIVE &&
+                _uiState.value.voiceAssistantState == AssistantVoiceState.THINKING
+            ) {
+                handleRecognitionMiss()
+            }
+        }
+    }
+
     fun startVoiceListening() {
         stopSpeaking()
         if (SpeechRecognizer.isRecognitionAvailable(getApplication())) {
@@ -3786,11 +4451,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
                     putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
                 }
+                awaitingTranscript = true
                 speechRecognizer?.startListening(intent)
                 _uiState.update {
                     it.copy(
                         voiceAssistantState = AssistantVoiceState.LISTENING,
-                        currentUserTranscript = "Listening..."
+                        // "Listening..." belongs to the old single-shot card; on a
+                        // call the student's last sentence stays on screen.
+                        currentUserTranscript = if (it.callPhase == CallPhase.LIVE) {
+                            it.currentUserTranscript
+                        } else {
+                            "Listening..."
+                        }
                     )
                 }
             } catch (e: Exception) {
@@ -3805,12 +4477,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun stopVoiceListening() {
         try {
+            // stopListening (unlike cancel) still hands over what was heard, which
+            // is what "I've finished speaking" means on a call.
             speechRecognizer?.stopListening()
         } catch (_: Exception) {}
-        _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
+        if (_uiState.value.callPhase != CallPhase.LIVE) {
+            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
+        }
     }
 
     fun toggleVoiceListening() {
+        if (_uiState.value.callPhase == CallPhase.LIVE) {
+            // On a call the button means "interrupt / I'm done / your turn".
+            when (_uiState.value.voiceAssistantState) {
+                AssistantVoiceState.SPEAKING -> interruptTutor()
+                AssistantVoiceState.LISTENING -> stopVoiceListening()
+                AssistantVoiceState.THINKING -> Unit
+                AssistantVoiceState.IDLE -> startVoiceListening()
+            }
+            return
+        }
         when (_uiState.value.voiceAssistantState) {
             AssistantVoiceState.LISTENING -> stopVoiceListening()
             AssistantVoiceState.SPEAKING -> stopSpeaking()
@@ -3822,6 +4508,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun processUserVoiceInput(userInput: String) {
         val trimmed = userInput.trim()
         if (trimmed.isBlank()) return
+
+        // During a call, typing is just another way of taking a turn: same
+        // correction, same answer, same lesson step. A student in a noisy place
+        // must not have to end the call to ask something.
+        if (_uiState.value.callPhase == CallPhase.LIVE ||
+            _uiState.value.callPhase == CallPhase.CONNECTING
+        ) {
+            submitCallTurn(trimmed)
+            return
+        }
 
         stopSpeaking()
         _uiState.update {
@@ -3898,6 +4594,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update {
             it.copy(
                 currentScenario = scenario,
+                // A topic and a lesson are alternatives: picking a topic leaves
+                // the lesson plan so the tutor is not answering two briefs.
+                activeLessonId = null,
+                lessonStepIndex = 0,
+                isLessonComplete = false,
                 currentAiResponseText = starter.spokenText,
                 currentGrammarTip = starter.grammarTip,
                 currentVocabularyHighlight = starter.vocabularyHighlight,

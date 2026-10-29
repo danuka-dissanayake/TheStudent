@@ -649,33 +649,46 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                     }
                                                     TheStudentNavTab.AI_TUTOR -> {
+                                                        // The English tutor is a call: it has a
+                                                        // clock, a mute, a hang-up and a summary,
+                                                        // and it keeps talking while the student
+                                                        // is elsewhere in the app only if the
+                                                        // ViewModel keeps the loop alive.
                                                         AiTutorScreen(
                                                             voiceState = uiState.voiceAssistantState,
-                                                            micRmsDb = uiState.micRmsDb,
-                                                            userTranscript = uiState.currentUserTranscript,
-                                                            aiResponseText = uiState.currentAiResponseText,
-                                                            grammarTip = uiState.currentGrammarTip,
-                                                            vocabularyHighlight = uiState.currentVocabularyHighlight,
+                                                            callPhase = uiState.callPhase,
+                                                            callSeconds = uiState.callSeconds,
+                                                            isMuted = uiState.isCallMuted,
+                                                            tutorLine = uiState.callTutorLine,
+                                                            studentLine = uiState.callStudentLine,
+                                                            currentFix = uiState.callFix,
+                                                            callSummary = uiState.callSummary,
+                                                            quickReplies = uiState.suggestedVoicePills,
                                                             currentScenario = uiState.currentScenario,
-                                                            suggestedPills = uiState.suggestedVoicePills,
-                                                            isHandsFree = uiState.isHandsFreeActive,
-                                                            isKeyboardOpen = uiState.isKeyboardInputOpen,
+                                                            activeLessonId = uiState.activeLessonId,
+                                                            lessonStepIndex = uiState.lessonStepIndex,
+                                                            isLessonComplete = uiState.isLessonComplete,
+                                                            hfStatusMessage = uiState.hfStatusMessage,
+                                                            isTypingOpen = uiState.isKeyboardInputOpen,
                                                             isHfSettingsOpen = uiState.isHfSettingsOpen,
                                                             customHfToken = uiState.customHfToken,
                                                             customHfBaseUrl = uiState.customHfBaseUrl,
-                                                            hfStatusMessage = uiState.hfStatusMessage,
-                                                            onStartListening = { viewModel.startVoiceListening() },
-                                                            onStopListening = { viewModel.stopVoiceListening() },
-                                                            onToggleVoice = { viewModel.toggleVoiceListening() },
-                                                            onSendQuery = { viewModel.processUserVoiceInput(it) },
-                                                            onReplaySpeech = { viewModel.replayCurrentAiResponse() },
-                                                            onStopSpeech = { viewModel.stopAiSpeech() },
+                                                            onStartCall = { viewModel.startTutorCall() },
+                                                            onEndCall = { viewModel.endTutorCall() },
+                                                            onToggleMute = { viewModel.toggleCallMute() },
+                                                            onInterrupt = { viewModel.interruptTutor() },
+                                                            onReplay = { viewModel.replayCurrentAiResponse() },
+                                                            onHearFix = { viewModel.speakGrammarFix() },
+                                                            onSendText = { viewModel.processUserVoiceInput(it) },
                                                             onSelectScenario = { viewModel.selectVoiceScenario(it) },
-                                                            onToggleHandsFree = { viewModel.toggleHandsFreeMode() },
-                                                            onToggleKeyboard = { viewModel.toggleKeyboardInput(it) },
-                                                            onToggleHfSettings = { viewModel.toggleHfSettings(it) },
-                                                            onUpdateHfCredentials = { token, url -> viewModel.updateHfCredentials(token, url) },
+                                                            onSelectLesson = { viewModel.selectTutorLesson(it) },
+                                                            onOpenTyping = { viewModel.toggleKeyboardInput(it) },
+                                                            onOpenHfSettings = { viewModel.toggleHfSettings(it) },
+                                                            onUpdateHfCredentials = { token, url ->
+                                                                viewModel.updateHfCredentials(token, url)
+                                                            },
                                                             onTestHfConnection = { viewModel.testHfSpaceConnection() },
+                                                            onDismissSummary = { viewModel.dismissCallSummary() },
                                                             onShowSnackbar = { viewModel.showSnackbar(it) }
                                                         )
                                                     }

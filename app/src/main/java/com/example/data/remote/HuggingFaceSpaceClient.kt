@@ -47,7 +47,13 @@ Your guidelines:
         userMessage: String,
         conversationHistory: List<Pair<String, String>> = emptyList(),
         customToken: String? = null,
-        customBaseUrl: String? = null
+        customBaseUrl: String? = null,
+        // A tutor turn needs more than the default persona: the lesson step, the
+        // answer format, and a budget short enough to keep the call flowing.
+        systemPrompt: String = SYSTEM_PROMPT,
+        maxTokens: Int = 250,
+        temperature: Double = 0.7,
+        cleanForSpeech: Boolean = true
     ): HfApiResponse = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         
@@ -67,7 +73,7 @@ Your guidelines:
                 // System message
                 put(JSONObject().apply {
                     put("role", "system")
-                    put("content", SYSTEM_PROMPT)
+                    put("content", systemPrompt)
                 })
 
                 // Prior turns
@@ -87,8 +93,8 @@ Your guidelines:
 
             val requestBodyJson = JSONObject().apply {
                 put("messages", messagesArray)
-                put("temperature", 0.7)
-                put("max_tokens", 250)
+                put("temperature", temperature)
+                put("max_tokens", maxTokens)
                 put("stream", false)
             }
 
@@ -124,8 +130,9 @@ Your guidelines:
                         val content = messageObj?.optString("content").orEmpty().trim()
                         val latency = System.currentTimeMillis() - startTime
                         if (content.isNotEmpty()) {
-                            // Strip any residual think tags or markdown asterisks for natural voice
-                            val cleanedText = cleanTextForSpeech(content)
+                            // Tutor turns keep their SAY/FIX/RULE/WORD labels for the
+                            // parser; everything else is cleaned for speech.
+                            val cleanedText = if (cleanForSpeech) cleanTextForSpeech(content) else content
                             HfApiResponse.Success(cleanedText, latency)
                         } else {
                             HfApiResponse.Error("Model returned empty text response.")
