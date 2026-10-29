@@ -25,15 +25,20 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.filled.CheckCircle
-import androidx.compose.material.icons.filled.Info
-import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material.icons.filled.EmojiEvents
-import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.Schedule
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -48,7 +53,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.QuizSummary
 import com.example.ui.components.QuizHeroArt
+import com.example.ui.components.shimmerEffect
 import com.example.ui.theme.MaisonNeueFontFamily
+import kotlinx.coroutines.delay
 
 private val DetailInk = Color(0xFF0F172A)
 private val DetailMuted = Color(0xFF64748B)
@@ -94,6 +101,15 @@ fun QuizDetailScreen(
     // The phone's back gesture leaves the page, never the app.
     BackHandler { onBack() }
 
+    // The page is built from data the list already holds, so the only thing that
+    // can still be missing is the hero photograph. The skeleton covers that first
+    // moment so the page never appears half-drawn.
+    var isEntering by remember(quiz.id) { mutableStateOf(true) }
+    LaunchedEffect(quiz.id) {
+        delay(320)
+        isEntering = false
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -135,7 +151,8 @@ fun QuizDetailScreen(
                     text = "Quizzes  ›  " + (quiz.code.ifBlank { "Details" }),
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = DQ.meta,
-                    color = DetailFaint,
+                    fontWeight = FontWeight.SemiBold,
+                    color = DetailInk,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -148,119 +165,134 @@ fun QuizDetailScreen(
             )
         }
 
-        // ── everything else scrolls ─────────────────────────────────────────
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 16.dp)
-                .padding(top = 18.dp, bottom = 16.dp)
-                .testTag("quiz_detail_content")
-        ) {
-            Text(
-                text = listOf(quiz.subject, quiz.grade, "${quiz.medium} medium")
-                    .filter { it.isNotBlank() }
-                    .joinToString("  ·  ")
-                    .uppercase(),
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = DQ.overline,
-                fontWeight = FontWeight.Bold,
-                color = DetailGreen,
-                letterSpacing = 0.8.sp
-            )
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = quiz.title,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = DQ.title,
-                lineHeight = DQ.titleHeight,
-                fontWeight = FontWeight.ExtraBold,
-                color = DetailInk,
-                letterSpacing = (-0.4).sp
-            )
-            Spacer(Modifier.height(4.dp))
-            Text(
-                text = listOf(quiz.category, quiz.stream)
-                    .filterNotNull()
-                    .filter { it.isNotBlank() }
-                    .joinToString(" · ") + " revision quiz",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = DQ.cardTitle,
-                color = DetailMuted
-            )
-
-            Spacer(Modifier.height(16.dp))
-            QuizHeroArt(
-                quiz = quiz,
+        if (isEntering) {
+            QuizDetailSkeleton(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .aspectRatio(16f / 9f)
-                    .testTag("quiz_detail_hero")
+                    .weight(1f)
+                    .testTag("quiz_detail_skeleton")
             )
-
-            Spacer(Modifier.height(14.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DetailStat(
-                    icon = Icons.Default.Quiz,
-                    value = "${quiz.questionCount}",
-                    label = "questions",
-                    modifier = Modifier.weight(1f)
-                )
-                DetailStat(
-                    icon = Icons.Default.Schedule,
-                    value = if (quiz.isTimed) "${quiz.minutes} min" else "No timer",
-                    label = if (quiz.isTimed) "to finish" else "take your time",
-                    modifier = Modifier.weight(1f)
-                )
-                DetailStat(
-                    icon = Icons.Default.EmojiEvents,
-                    value = "+${quiz.expReward}",
-                    label = "EXP",
-                    modifier = Modifier.weight(1f)
-                )
-                DetailStat(
-                    icon = Icons.Default.RestartAlt,
-                    value = "${quiz.attemptsLeft.coerceAtLeast(0)}",
-                    label = if (quiz.attemptsLeft == 1) "attempt left" else "attempts left",
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            if (quiz.description.isNotBlank()) {
-                Spacer(Modifier.height(16.dp))
+        } else {
+            // ── everything else scrolls ─────────────────────────────────────────
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 18.dp, bottom = 16.dp)
+                    .testTag("quiz_detail_content")
+            ) {
                 Text(
-                    text = quiz.description,
+                    text = listOf(quiz.subject, quiz.grade, "${quiz.medium} medium")
+                        .filter { it.isNotBlank() }
+                        .joinToString("  ·  ")
+                        .uppercase(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = DQ.meta,
-                    lineHeight = DQ.bodyHeight,
+                    fontSize = DQ.overline,
+                    fontWeight = FontWeight.Bold,
+                    color = DetailGreen,
+                    letterSpacing = 0.8.sp
+                )
+                Spacer(Modifier.height(8.dp))
+                Text(
+                    text = quiz.title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.title,
+                    lineHeight = DQ.titleHeight,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DetailInk,
+                    letterSpacing = (-0.4).sp
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = listOf(quiz.category, quiz.stream)
+                        .filterNotNull()
+                        .filter { it.isNotBlank() }
+                        .joinToString(" · ") + " revision quiz",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.cardTitle,
                     color = DetailMuted
                 )
-            }
 
-            Spacer(Modifier.height(16.dp))
-            DetailCard(title = "Rules & guidance", icon = Icons.Default.CheckCircle) {
-                quizRules(quiz).forEach { rule ->
-                    DetailBullet(text = rule, leading = true)
+                Spacer(Modifier.height(16.dp))
+                QuizHeroArt(
+                    quiz = quiz,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .testTag("quiz_detail_hero")
+                )
+
+                Spacer(Modifier.height(14.dp))
+                // Two by two, not four across: a phone gives four tiles about 78dp of
+                // text each, which is not enough for "No timer" or "2 attempts left"
+                // next to an icon — that is what was clipping behind the cards.
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailStat(
+                            icon = Icons.Default.Quiz,
+                            value = "${quiz.questionCount} questions",
+                            label = "one answer each",
+                            modifier = Modifier.weight(1f)
+                        )
+                        DetailStat(
+                            icon = Icons.Default.Schedule,
+                            value = if (quiz.isTimed) "${quiz.minutes} minutes" else "No timer",
+                            label = if (quiz.isTimed) "to finish" else "your own pace",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        DetailStat(
+                            icon = Icons.Default.EmojiEvents,
+                            value = "+${quiz.expReward} EXP",
+                            label = if (quiz.expReward > 0) "on a pass" else "no reward",
+                            modifier = Modifier.weight(1f)
+                        )
+                        DetailStat(
+                            icon = Icons.Default.RestartAlt,
+                            value = "${quiz.attemptsLeft.coerceAtLeast(0)} attempts left",
+                            label = "of ${quiz.maxAttempts}",
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
                 }
-            }
 
-            Spacer(Modifier.height(12.dp))
-            DetailCard(title = "Before you start", icon = Icons.Default.Info) {
-                DetailBullet(
-                    text = "Find a quiet place where you can focus for " +
-                        if (quiz.isTimed) "${quiz.minutes} minutes." else "a while.",
-                    leading = false
-                )
-                DetailBullet(
-                    text = "Keep a stable connection — your answers are saved as you go.",
-                    leading = false
-                )
-                if (quiz.bestPercent != null) {
+                if (quiz.description.isNotBlank()) {
+                    Spacer(Modifier.height(16.dp))
+                    Text(
+                        text = quiz.description,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = DQ.meta,
+                        lineHeight = DQ.bodyHeight,
+                        color = DetailMuted
+                    )
+                }
+
+                Spacer(Modifier.height(16.dp))
+                DetailCard(title = "Rules & guidance", icon = Icons.Default.CheckCircle) {
+                    quizRules(quiz).forEach { rule ->
+                        DetailBullet(text = rule, leading = true)
+                    }
+                }
+
+                Spacer(Modifier.height(12.dp))
+                DetailCard(title = "Before you start", icon = Icons.Default.Info) {
                     DetailBullet(
-                        text = "Your best so far is ${quiz.bestPercent}% across " +
-                            "${quiz.attempts} attempt${if (quiz.attempts == 1) "" else "s"}.",
+                        text = "Find a quiet place where you can focus for " +
+                            if (quiz.isTimed) "${quiz.minutes} minutes." else "a while.",
                         leading = false
                     )
+                    DetailBullet(
+                        text = "Keep a stable connection — your answers are saved as you go.",
+                        leading = false
+                    )
+                    if (quiz.bestPercent != null) {
+                        DetailBullet(
+                            text = "Your best so far is ${quiz.bestPercent}% across " +
+                                "${quiz.attempts} attempt${if (quiz.attempts == 1) "" else "s"}.",
+                            leading = false
+                        )
+                    }
                 }
             }
         }
@@ -396,6 +428,23 @@ private fun quizRules(quiz: QuizSummary): List<String> {
     return rules
 }
 
+/**
+ * One stat tile.
+ *
+ * Four tiles across a phone leaves roughly 78dp of text per tile, which is not
+ * enough for "15 min" at body size next to an icon — that is what was clipping.
+ * So the tile holds a **single line**: the value, with the label underneath only
+ * when it fits, and the whole tile scales its text down instead of truncating.
+ * Nothing is ever hidden behind the card edge.
+ */
+/**
+ * One stat tile: a soft icon disc on the left, the value and its label beside it.
+ *
+ * Laying the text out horizontally (rather than stacked and centred under an
+ * icon) is what makes it survive a narrow card: the value gets all the remaining
+ * width and still fits "2 attempts left" at body size. Both lines are single-line
+ * with ellipsis as a last resort, never `Visible` overflow.
+ */
 @Composable
 private fun DetailStat(
     icon: ImageVector,
@@ -407,34 +456,48 @@ private fun DetailStat(
         shape = RoundedCornerShape(14.dp),
         color = Color.White,
         border = BorderStroke(1.dp, DetailHairline),
-        modifier = modifier.height(66.dp)
+        modifier = modifier.height(60.dp)
     ) {
-        Column(
+        Row(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(horizontal = 6.dp, vertical = 8.dp),
-            horizontalAlignment = Alignment.CenterHorizontally,
-            verticalArrangement = Arrangement.Center
+                .padding(horizontal = 10.dp),
+            verticalAlignment = Alignment.CenterVertically
         ) {
-            Icon(icon, contentDescription = null, tint = DetailGreen, modifier = Modifier.size(15.dp))
-            Spacer(Modifier.height(3.dp))
-            Text(
-                text = value,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = DQ.body,
-                fontWeight = FontWeight.Bold,
-                color = DetailInk,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = label,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = DQ.overline,
-                color = DetailFaint,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
+            Box(
+                modifier = Modifier
+                    .size(28.dp)
+                    .clip(CircleShape)
+                    .background(DetailGreenSoft),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    icon,
+                    contentDescription = null,
+                    tint = DetailGreen,
+                    modifier = Modifier.size(15.dp)
+                )
+            }
+            Spacer(Modifier.width(9.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = value,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.body,
+                    fontWeight = FontWeight.Bold,
+                    color = DetailInk,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = label,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.overline,
+                    color = DetailFaint,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
         }
     }
 }
@@ -508,4 +571,90 @@ private fun DetailBullet(text: String, leading: Boolean) {
             color = DetailMuted
         )
     }
+}
+
+/**
+ * What the detail page shows for the first moment: the same shapes it is about
+ * to fill in, shimmering. Laid out with the identical spacing and rhythm as the
+ * real content, so nothing jumps when it swaps over.
+ */
+@Composable
+private fun QuizDetailSkeleton(modifier: Modifier = Modifier) {
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(top = 18.dp, bottom = 16.dp)
+    ) {
+        SkeletonLine(widthFraction = 0.42f, height = 11.dp)
+        Spacer(Modifier.height(12.dp))
+        SkeletonLine(widthFraction = 0.86f, height = 26.dp)
+        Spacer(Modifier.height(8.dp))
+        SkeletonLine(widthFraction = 0.52f, height = 18.dp)
+        Spacer(Modifier.height(18.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .aspectRatio(16f / 9f)
+                .shimmerEffect(shapeRadius = 20.dp)
+        )
+        Spacer(Modifier.height(14.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(60.dp)
+                    .shimmerEffect(shapeRadius = 14.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(60.dp)
+                    .shimmerEffect(shapeRadius = 14.dp)
+            )
+        }
+        Spacer(Modifier.height(8.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(60.dp)
+                    .shimmerEffect(shapeRadius = 14.dp)
+            )
+            Box(
+                modifier = Modifier
+                    .weight(1f)
+                    .height(60.dp)
+                    .shimmerEffect(shapeRadius = 14.dp)
+            )
+        }
+        Spacer(Modifier.height(18.dp))
+        SkeletonLine(widthFraction = 1f, height = 12.dp)
+        Spacer(Modifier.height(7.dp))
+        SkeletonLine(widthFraction = 0.92f, height = 12.dp)
+        Spacer(Modifier.height(18.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(158.dp)
+                .shimmerEffect(shapeRadius = 18.dp)
+        )
+        Spacer(Modifier.height(12.dp))
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(96.dp)
+                .shimmerEffect(shapeRadius = 18.dp)
+        )
+    }
+}
+
+@Composable
+private fun SkeletonLine(widthFraction: Float, height: androidx.compose.ui.unit.Dp) {
+    Box(
+        modifier = Modifier
+            .fillMaxWidth(widthFraction)
+            .height(height)
+            .shimmerEffect(shapeRadius = 6.dp)
+    )
 }

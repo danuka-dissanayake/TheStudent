@@ -727,36 +727,55 @@ navigation bar.
 
 ## Where the hero image comes from
 
-There is no image column in the quiz table and no photo library behind the app,
-so the hero is **drawn**, not fetched — `app/src/main/java/com/example/ui/components/QuizHeroArt.kt`.
+The hero is a **real photograph from Pexels**, loaded with Coil
+(`app/src/main/java/com/example/ui/components/QuizHeroArt.kt`). Pexels' CDN needs
+no API key, allows commercial use without attribution, and serves a pre-cropped
+size, so one URL is enough:
 
-The logic is a keyword match over the quiz's own text (`subject`, `title`,
+```
+https://images.pexels.com/photos/<id>/pexels-photo-<id>.jpeg?auto=compress&cs=tinysrgb&w=1200&h=675&fit=crop
+```
+
+The photo is chosen by keyword over the quiz's own text (`subject`, `title`,
 `description`), first match wins:
 
-| Scene | Triggered by |
-|---|---|
-| `MECHANICS` — Newton's cradle | mechanic, motion, kinematic, force, newton, momentum, energy, gravit, physics… |
-| `WAVES` — three sine waves | wave, sound, light, optic, oscillat, resonan… |
-| `CIRCUIT` — wired nodes + battery | circuit, current, electric, electronic, voltage, ict, computer… |
-| `CHEMISTRY` — conical flask | chem, reaction, acid, base, mole, organic, bond… |
-| `BIOLOGY` — leaf with veins | bio, cell, genetic, plant, ecolog, photosynth, agri… |
-| `MATHS` — axes, curve, tangent | math, algebra, geometry, trigon, calculus, statistic… |
-| `COMMERCE` — bars + trend | account, commerce, business, econom, finance… |
-| `LANGUAGE` — quotation and lines | english, sinhala, tamil, language, literature, grammar… |
-| `GENERAL` — concentric arcs | anything else |
+| Topic | Keywords | Photo |
+|---|---|---|
+| Mechanics | mechanic, motion, kinematic, force, newton, momentum, energy, physics | Newton's cradle `10424708` |
+| Waves / optics | wave, sound, light, optic, oscillat, resonan | plasma physics `9785612` |
+| Circuits / ICT | circuit, electric, voltage, ict, computer, network | electronics `34526423` |
+| Chemistry | chem, reaction, acid, mole, organic, bond | glassware `9243559` |
+| Biology / agriculture | bio, cell, genetic, plant, ecolog, photosynth, agri | microscope `5842066` |
+| Mathematics | math, algebra, geometry, calculus, statistic | numbers `5412108` |
+| Commerce | account, commerce, business, econom, finance | finance charts `5816298` |
+| Languages | english, sinhala, tamil, literature, grammar, poem | open books `7935224` |
+| Everything else | — | study `8199558` |
 
-The gradient comes from a second keyword table (physics teal, chemistry cyan,
-biology green, maths blue, ICT violet, commerce amber, languages pink, default
-emerald). Three properties matter:
+Three rules keep this honest:
 
-1. **Deterministic** — the same quiz always draws the same picture, so the list
-   card, the detail page and the result page agree.
-2. **Offline and licence-free** — no download, no 404, no credits.
-3. **Honest** — the medallion in the corner shows the subject's short code
-   (`SubjectCodes.of`), because there is no video behind a quiz to play.
+1. **Nothing is ever blank.** A gradient in the topic's colour (emerald for
+   physics, cyan for chemistry, violet for ICT, amber for commerce…) sits
+   underneath, with the shimmer while the photo is in flight. If the request
+   fails, the gradient stays and the subject's short code sits on it — the card
+   still looks finished.
+2. **Deterministic.** `quizHeroLook()` has no randomness, so the same quiz always
+   gets the same photo.
+3. **Swappable.** If the database ever gains a `hero_image_url`, pass it into
+   `QuizHeroArt` and keep the map as the fallback; call sites don't change.
+   The same map is where per-topic artwork from another source would go.
 
-To make the images database-driven later, add a `hero_image_url` column and put
-an `AsyncImage` above the canvas inside `QuizHeroArt`; the call sites do not
-change. The keyword tables are also the natural place to hang per-topic artwork
-if you would rather ship illustrated assets than drawn ones.
+### Loading skeleton
 
+`QuizDetailScreen` shows `QuizDetailSkeleton` for the first ~320 ms — shimmering
+blocks in exactly the shapes and spacing of the real page (overline, title,
+subtitle, 16:9 hero, the 2×2 stat grid, description lines, both cards) — so the
+page never appears half-drawn and nothing jumps when it swaps over. Inside the
+hero, the photo shimmers until Coil reports `Success`.
+
+### The stat tiles
+
+Four tiles across a phone leaves ~78 dp of text each, which clipped "15 min" and
+"2 attempts left". They are now a **2×2 grid** with a horizontal layout inside
+each tile (icon disc, then value over label), so every string fits at body size
+with no `Visible` overflow. Labels are short: "one answer each", "to finish",
+"on a pass", "of 3".
