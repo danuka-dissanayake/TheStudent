@@ -300,6 +300,8 @@ fun PapersScreen(
     }
 
     val entries = remember(papers) { buildPaperEntries(papers) }
+    val paperTotal = remember(papers) { papers.size }
+    val schemeTotal = remember(papers) { papers.count { it.hasMarkingScheme } }
 
     val visible = remember(entries, query, quickChip, savedOnly, sort, filters, savedIds) {
         entries
@@ -403,7 +405,7 @@ fun PapersScreen(
                             if (isLoading && papers.isEmpty()) {
                                 "Loading the library…"
                             } else {
-                                "${papers.size} papers · every year, every medium"
+                                "$paperTotal papers · $schemeTotal marking schemes"
                             }
                         } else {
                             if (isQuizLoading && quizzes.isEmpty()) {
@@ -519,7 +521,7 @@ fun PapersScreen(
                                 .testTag("papers_search_bar"),
                             placeholder = {
                                 Text(
-                                    text = "Search papers, subjects, years",
+                                    text = "Search subject, code or year — e.g. Physics, PHY, 2024",
                                     fontFamily = MaisonNeueFontFamily,
                                     fontSize = 13.5.sp,
                                     color = PaperFaint
