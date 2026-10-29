@@ -623,6 +623,7 @@ class MainActivity : ComponentActivity() {
                                                             onPaperClick = { viewModel.openPaperDetail(it) },
                                                             onToggleSavePaper = { viewModel.toggleSavePaper(it) },
                                                             onDownloadPaper = { viewModel.downloadPaperOffline(it) },
+                                                            onDownloadScheme = { viewModel.downloadSchemeOffline(it) },
                                                             onRefreshPapers = { viewModel.loadDynamicPapers(forceRefresh = true) },
                                                             onUpdateServerUrl = { viewModel.updateBackendUrl(it) },
                                                             onNavigateHome = { viewModel.setTab(TheStudentNavTab.HOME) }

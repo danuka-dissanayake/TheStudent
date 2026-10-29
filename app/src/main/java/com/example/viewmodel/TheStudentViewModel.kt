@@ -3593,6 +3593,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Downloads only the marking scheme. It is a separate file on the server and
+     * a separate tap here, so a student who just wants to check answers does not
+     * pay for the question paper, and vice versa.
+     */
+    fun downloadSchemeOffline(paper: PastPaper) {
+        if (!paper.hasMarkingScheme) return
+        viewModelScope.launch {
+            pastPapersRepository.downloadMarkingSchemePdf(paper)
+            showSnackbar("Downloading ${paper.title} marking scheme...")
+        }
+    }
+
     fun toggleSaveCourse(course: Course) {
         viewModelScope.launch {
             val isSaved = savedCourses.value.any { it.id == course.id }

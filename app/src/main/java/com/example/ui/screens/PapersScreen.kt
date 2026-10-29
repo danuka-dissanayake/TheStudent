@@ -10,12 +10,15 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
@@ -26,6 +29,9 @@ import androidx.compose.material.icons.filled.Description
 import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.FilterList
+import androidx.compose.material.icons.filled.GridView
+import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -37,6 +43,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -47,12 +54,15 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import kotlinx.coroutines.delay
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
+import com.example.data.model.SubjectCodes
 import com.example.ui.components.PaperCover
 import com.example.ui.components.PaperTileSkeleton
 import com.example.ui.theme.MaisonNeueFontFamily
@@ -73,6 +83,52 @@ private enum class PaperSort(val label: String) {
     MOST_DOWNLOADED("Most downloaded"),
     A_TO_Z("A–Z by subject")
 }
+
+/**
+ * Does this paper answer the search text?
+ *
+ * Students search with whatever they know: the subject's long name
+ * ("Combined Mathematics"), the short code printed on the paper ("CM"), a year,
+ * a medium, or an exam name. All of it is matched, case-insensitively, with
+ * spaces and punctuation ignored so "combinedmaths" still finds Combined Maths.
+ */
+private fun matchesQuery(paper: PastPaper, query: String): Boolean {
+    if (query.isBlank()) return true
+    val needle = query.trim()
+    val squeezed = needle.filter { it.isLetterOrDigit() }.lowercase()
+    // "PAPER" is SubjectCodes' fallback for a name it cannot place; matching it
+    // would quietly make every paper answer the word "paper".
+    val code = SubjectCodes.of(paper.subject).takeIf { it != "PAPER" }.orEmpty()
+    val fields = listOf(
+        paper.title,
+        paper.subject,
+        code,
+        paper.grade,
+        paper.medium,
+        paper.year.toString(),
+        paper.examType,
+        paper.examination,
+        paper.category,
+        paper.stream.orEmpty()
+    )
+    if (fields.any { it.contains(needle, ignoreCase = true) }) return true
+    if (squeezed.isEmpty()) return false
+    return fields.any {
+        it.filter { ch -> ch.isLetterOrDigit() }.lowercase().contains(squeezed)
+    }
+}
+
+/** The subject codes worth a one-tap shortcut; the rest are still searchable. */
+private val SUBJECT_CODE_CHIPS = listOf("PHY", "CM", "CHEM", "BIO", "ICT")
+
+/** How the results are laid out. Both are lists; one is compact, one is roomy. */
+private enum class PaperLayout(val label: String) {
+    LIST("Compact list"),
+    CARDS("Card list")
+}
+
+/** Fixed page size: the library is read best in small, finishable pages. */
+private const val PAPERS_PER_PAGE = 15
 
 /** Everything the filter sheet can narrow, in one place. */
 private data class PaperFilters(
@@ -120,6 +176,7 @@ fun PapersScreen(
     onPaperClick: (PastPaper) -> Unit,
     onToggleSavePaper: (PastPaper) -> Unit,
     onDownloadPaper: (PastPaper) -> Unit,
+    onDownloadScheme: (PastPaper) -> Unit = {},
     onRefreshPapers: () -> Unit = {},
     onUpdateServerUrl: (String) -> Unit = {},
     onNavigateHome: () -> Unit = {},
@@ -142,6 +199,36 @@ fun PapersScreen(
     var filters by remember { mutableStateOf(PaperFilters()) }
     var showFilters by remember { mutableStateOf(false) }
     var showSort by remember { mutableStateOf(false) }
+    var layout by remember { mutableStateOf(PaperLayout.LIST) }
+    var page by remember { mutableStateOf(1) }
+    // A short, deliberate shimmer whenever the list is about to change: the
+    // screen never jumps from one set of rows straight to another.
+    var isSettling by remember { mutableStateOf(false) }
+    var isRefreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(query, quickChip, savedOnly, filters, sort) {
+        isSettling = true
+        delay(320)
+        isSettling = false
+    }
+
+    LaunchedEffect(isLoading) {
+        if (!isLoading) isRefreshing = false
+    }
+
+    // The refresh spinner is a promise with a ceiling: if the request never
+    // reports back, the old list returns instead of shimmering indefinitely.
+    LaunchedEffect(isRefreshing) {
+        if (isRefreshing) {
+            delay(2000)
+            isRefreshing = false
+        }
+    }
+
+    // Any change to what is being shown returns to the first page.
+    LaunchedEffect(query, quickChip, savedOnly, filters, sort) {
+        page = 1
+    }
 
     val savedIds = remember(savedPapers) { savedPapers.map { it.id }.toSet() }
     val downloadedIds = remember(savedPapers) {
@@ -188,15 +275,7 @@ fun PapersScreen(
             .filter { paper -> filters.year == "Any year" || paper.year.toString() == filters.year }
             .filter { paper -> filters.subject == "Any subject" || paper.subject.equals(filters.subject, true) }
             .filter { paper -> !filters.markingSchemeOnly || paper.hasMarkingScheme }
-            .filter { paper ->
-                query.isBlank() ||
-                    paper.title.contains(query, true) ||
-                    paper.subject.contains(query, true) ||
-                    paper.grade.contains(query, true) ||
-                    paper.medium.contains(query, true) ||
-                    paper.year.toString().contains(query) ||
-                    (paper.stream?.contains(query, true) == true)
-            }
+            .filter { paper -> matchesQuery(paper, query) }
             .sortedWith(
                 when (sort) {
                     PaperSort.NEWEST -> compareByDescending<PastPaper> { it.year }
@@ -210,7 +289,21 @@ fun PapersScreen(
             .toList()
     }
 
+    val pageCount = ((visible.size + PAPERS_PER_PAGE - 1) / PAPERS_PER_PAGE)
+        .coerceAtLeast(1)
+    val safePage = page.coerceIn(1, pageCount)
+    val pageStart = (safePage - 1) * PAPERS_PER_PAGE
+    val pageItems = visible.drop(pageStart).take(PAPERS_PER_PAGE)
+
+    val listState = rememberLazyListState()
+    LaunchedEffect(safePage) {
+        if (safePage > 0) listState.scrollToItem(0)
+    }
+
     val isFiltering = query.isNotBlank() || quickChip != "All" || savedOnly || filters.count > 0
+    // The list shows skeletons while the library loads, while a refresh runs,
+    // and for the moment the filter or query changes.
+    val showSkeletons = isLoading || isSettling || isRefreshing
 
     Column(
         modifier = modifier
@@ -266,6 +359,16 @@ fun PapersScreen(
                     )
                 }
                 if (segment == 0) {
+                    CircleIconButton(
+                        icon = Icons.Default.Refresh,
+                        description = "Refresh library",
+                        onClick = {
+                            isRefreshing = true
+                            onRefreshPapers()
+                        },
+                        tag = "papers_refresh_button"
+                    )
+                    Spacer(Modifier.width(8.dp))
                     CircleIconButton(
                         icon = Icons.Default.FilterList,
                         description = "Filters",
@@ -350,6 +453,53 @@ fun PapersScreen(
                 )
             )
 
+            // Subject codes are how students actually name a paper. Offering the
+            // common ones turns the promise of "search by code" into one tap.
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .horizontalScroll(rememberScrollState())
+                    .padding(horizontal = 16.dp)
+                    .padding(top = 8.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Text(
+                    text = "Codes",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PaperFaint,
+                    letterSpacing = 0.4.sp
+                )
+                SUBJECT_CODE_CHIPS.forEach { code ->
+                    val active = query.trim().equals(code, ignoreCase = true)
+                    Surface(
+                        onClick = { query = if (active) "" else code },
+                        shape = RoundedCornerShape(50),
+                        color = if (active) PaperGreenSoft else Color.White,
+                        border = BorderStroke(1.dp, if (active) PaperGreen else PaperHairline),
+                        modifier = Modifier
+                            .height(26.dp)
+                            .testTag("papers_code_chip_$code")
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(horizontal = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = code,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                color = if (active) PaperGreen else PaperMuted,
+                                letterSpacing = 0.4.sp
+                            )
+                        }
+                    }
+                }
+            }
+
             // quick chips + saved
             Row(
                 modifier = Modifier
@@ -386,8 +536,10 @@ fun PapersScreen(
             ) {
                 Text(
                     text = when {
-                        isLoading -> "Loading…"
+                        isLoading && papers.isEmpty() -> "Loading…"
                         isFiltering -> "${visible.size} of ${papers.size} papers"
+                        visible.size > PAPERS_PER_PAGE ->
+                            "${pageStart + 1}–${pageStart + pageItems.size} of ${visible.size}"
                         else -> "${visible.size} papers"
                     },
                     fontFamily = MaisonNeueFontFamily,
@@ -412,6 +564,35 @@ fun PapersScreen(
                             }
                             .padding(horizontal = 8.dp, vertical = 6.dp)
                             .testTag("papers_clear_filters")
+                    )
+                }
+                Box(
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(50))
+                        .clickable {
+                            layout = if (layout == PaperLayout.LIST) {
+                                PaperLayout.CARDS
+                            } else {
+                                PaperLayout.LIST
+                            }
+                        }
+                        .padding(horizontal = 8.dp, vertical = 6.dp)
+                        .testTag("papers_layout_toggle")
+                ) {
+                    Icon(
+                        imageVector = if (layout == PaperLayout.LIST) {
+                            Icons.Default.GridView
+                        } else {
+                            Icons.Default.ViewList
+                        },
+                        contentDescription = "Switch to " +
+                            if (layout == PaperLayout.LIST) {
+                                PaperLayout.CARDS.label
+                            } else {
+                                PaperLayout.LIST.label
+                            },
+                        tint = PaperInk,
+                        modifier = Modifier.size(17.dp)
                     )
                 }
                 Row(
@@ -462,12 +643,12 @@ fun PapersScreen(
             )
         } else {
         when {
-            isLoading && papers.isEmpty() -> LazyColumn(
+            showSkeletons -> LazyColumn(
                 modifier = Modifier.fillMaxSize(),
                 contentPadding = PaddingValues(16.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(6) { PaperTileSkeleton() }
+                items(7) { PaperTileSkeleton() }
             }
 
             papers.isEmpty() -> LibraryOfflineState(
@@ -486,26 +667,56 @@ fun PapersScreen(
                 }
             )
 
-            else -> LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("papers_screen_content"),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 28.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp)
-            ) {
-                if (!isLiveDatabase) {
-                    item(key = "offline") {
-                        OfflineNotice(onRefresh = onRefreshPapers)
+            else -> Column(modifier = Modifier.fillMaxSize()) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier
+                        .weight(1f)
+                        .testTag("papers_screen_content"),
+                    contentPadding = PaddingValues(
+                        start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp
+                    ),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    if (!isLiveDatabase) {
+                        item(key = "offline") {
+                            OfflineNotice(onRefresh = onRefreshPapers)
+                        }
+                    }
+                    items(pageItems, key = { it.id }) { paper ->
+                        if (layout == PaperLayout.LIST) {
+                            PaperRow(
+                                paper = paper,
+                                isSaved = savedIds.contains(paper.id),
+                                isDownloaded = downloadedIds.contains(paper.id),
+                                onClick = { onPaperClick(paper) },
+                                onToggleSave = { onToggleSavePaper(paper) },
+                                onDownloadPaper = { onDownloadPaper(paper) },
+                                onDownloadScheme = { onDownloadScheme(paper) }
+                            )
+                        } else {
+                            PaperCardRow(
+                                paper = paper,
+                                isSaved = savedIds.contains(paper.id),
+                                isDownloaded = downloadedIds.contains(paper.id),
+                                onClick = { onPaperClick(paper) },
+                                onToggleSave = { onToggleSavePaper(paper) },
+                                onDownloadPaper = { onDownloadPaper(paper) },
+                                onDownloadScheme = { onDownloadScheme(paper) }
+                            )
+                        }
                     }
                 }
-                items(visible, key = { it.id }) { paper ->
-                    PaperRow(
-                        paper = paper,
-                        isSaved = savedIds.contains(paper.id),
-                        isDownloaded = downloadedIds.contains(paper.id),
-                        onClick = { onPaperClick(paper) },
-                        onToggleSave = { onToggleSavePaper(paper) },
-                        onDownload = { onDownloadPaper(paper) }
+
+                // Pagination stays visible: a page is a place, not a surprise.
+                if (pageCount > 1) {
+                    PaginationBar(
+                        page = safePage,
+                        pageCount = pageCount,
+                        total = visible.size,
+                        onPage = { target ->
+                            page = target
+                        }
                     )
                 }
             }
@@ -714,7 +925,8 @@ private fun PaperRow(
     isDownloaded: Boolean,
     onClick: () -> Unit,
     onToggleSave: () -> Unit,
-    onDownload: () -> Unit
+    onDownloadPaper: () -> Unit,
+    onDownloadScheme: () -> Unit
 ) {
     Surface(
         onClick = onClick,
@@ -748,9 +960,10 @@ private fun PaperRow(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    text = listOf(paper.subject, paper.year.toString(), paper.medium)
-                        .filter { it.isNotBlank() }
-                        .joinToString(" · "),
+                    text = "${SubjectCodes.of(paper.subject)} · " +
+                        listOf(paper.subject, paper.year.toString(), paper.medium)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 12.sp,
                     color = PaperMuted,
@@ -760,7 +973,7 @@ private fun PaperRow(
                 Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (paper.hasMarkingScheme) {
-                        MiniBadge("Marking scheme", PaperGreen, PaperGreenSoft)
+                        MiniBadge("Scheme", PaperGreen, PaperGreenSoft)
                     }
                     if (isDownloaded) {
                         MiniBadge("Offline", Color(0xFF2563EB), Color(0xFFEFF6FF))
@@ -770,8 +983,8 @@ private fun PaperRow(
                     }
                 }
             }
-            Spacer(Modifier.width(6.dp))
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            Spacer(Modifier.width(8.dp))
+            Column(horizontalAlignment = Alignment.End) {
                 IconAction(
                     icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
                     description = if (isSaved) "Remove from saved" else "Save paper",
@@ -780,15 +993,357 @@ private fun PaperRow(
                     tag = "papers_save_${paper.id}"
                 )
                 Spacer(Modifier.height(6.dp))
-                IconAction(
-                    icon = if (isDownloaded) Icons.Default.DownloadDone else Icons.Default.Download,
-                    description = "Download paper",
-                    tint = if (isDownloaded) PaperGreen else PaperMuted,
-                    onClick = onDownload,
-                    tag = "papers_download_${paper.id}"
+                // The paper and its marking scheme download independently.
+                DownloadPill(
+                    label = "Paper",
+                    filled = true,
+                    enabled = true,
+                    tag = "papers_download_${paper.id}",
+                    onClick = onDownloadPaper
+                )
+                Spacer(Modifier.height(5.dp))
+                DownloadPill(
+                    label = if (paper.hasMarkingScheme) "Scheme" else "No scheme",
+                    filled = false,
+                    enabled = paper.hasMarkingScheme,
+                    tag = "papers_download_scheme_${paper.id}",
+                    onClick = onDownloadScheme
                 )
             }
         }
+    }
+}
+
+/** The roomy layout: a large cover, the full title, and both downloads. */
+@Composable
+private fun PaperCardRow(
+    paper: PastPaper,
+    isSaved: Boolean,
+    isDownloaded: Boolean,
+    onClick: () -> Unit,
+    onToggleSave: () -> Unit,
+    onDownloadPaper: () -> Unit,
+    onDownloadScheme: () -> Unit
+) {
+    Surface(
+        onClick = onClick,
+        shape = RoundedCornerShape(20.dp),
+        color = Color.White,
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("papers_card_${paper.id}")
+    ) {
+        Column(modifier = Modifier.padding(14.dp)) {
+            Row(verticalAlignment = Alignment.Top) {
+                PaperCover(
+                    paper = paper,
+                    modifier = Modifier.size(width = 74.dp, height = 94.dp),
+                    corner = 14.dp
+                )
+                Spacer(Modifier.width(14.dp))
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = SubjectCodes.of(paper.subject),
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = PaperGreen,
+                        letterSpacing = 0.6.sp
+                    )
+                    Spacer(Modifier.height(2.dp))
+                    Text(
+                        text = paper.title,
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 15.sp,
+                        lineHeight = 19.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = PaperInk,
+                        maxLines = 3,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(6.dp))
+                    Text(
+                        text = listOf(paper.subject, paper.year.toString(), paper.medium)
+                            .filter { it.isNotBlank() }
+                            .joinToString(" · "),
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        color = PaperMuted,
+                        maxLines = 2,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        if (isDownloaded) {
+                            MiniBadge("Offline", Color(0xFF2563EB), Color(0xFFEFF6FF))
+                        }
+                        if (paper.examType.isNotBlank()) {
+                            MiniBadge(paper.examType, PaperMuted, Color(0xFFF1F5F9))
+                        }
+                    }
+                }
+                IconAction(
+                    icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                    description = if (isSaved) "Remove from saved" else "Save paper",
+                    tint = if (isSaved) PaperGreen else PaperMuted,
+                    onClick = onToggleSave,
+                    tag = "papers_card_save_${paper.id}"
+                )
+            }
+            Spacer(Modifier.height(12.dp))
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                DownloadButton(
+                    label = "Download paper",
+                    filled = true,
+                    enabled = true,
+                    modifier = Modifier.weight(1f),
+                    tag = "papers_card_download_${paper.id}",
+                    onClick = onDownloadPaper
+                )
+                DownloadButton(
+                    label = if (paper.hasMarkingScheme) "Marking scheme" else "No scheme",
+                    filled = false,
+                    enabled = paper.hasMarkingScheme,
+                    modifier = Modifier.weight(1f),
+                    tag = "papers_card_scheme_${paper.id}",
+                    onClick = onDownloadScheme
+                )
+            }
+        }
+    }
+}
+
+/** Small two-line pill used in the compact row. */
+@Composable
+private fun DownloadPill(
+    label: String,
+    filled: Boolean,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit
+) {
+    val ink = when {
+        !enabled -> PaperFaint
+        filled -> Color.White
+        else -> PaperGreen
+    }
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = when {
+            !enabled -> Color(0xFFF1F5F9)
+            filled -> PaperGreen
+            else -> Color.White
+        },
+        border = if (!enabled || filled) null else BorderStroke(1.dp, PaperGreen),
+        modifier = Modifier
+            .height(26.dp)
+            .testTag(tag)
+            .let { if (enabled) it.clickable(onClick = onClick) else it }
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 9.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = ink,
+                maxLines = 1
+            )
+        }
+    }
+}
+
+/** Wide button used in the card layout. */
+@Composable
+private fun DownloadButton(
+    label: String,
+    filled: Boolean,
+    enabled: Boolean,
+    modifier: Modifier = Modifier,
+    tag: String,
+    onClick: () -> Unit
+) {
+    Surface(
+        shape = RoundedCornerShape(50),
+        color = when {
+            !enabled -> Color(0xFFF1F5F9)
+            filled -> PaperGreen
+            else -> Color.White
+        },
+        border = if (!enabled || filled) null else BorderStroke(1.dp, PaperGreen),
+        modifier = modifier
+            .height(38.dp)
+            .testTag(tag)
+            .let { if (enabled) it.clickable(onClick = onClick) else it }
+    ) {
+        Row(
+            modifier = Modifier.fillMaxSize(),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            Icon(
+                imageVector = if (filled) Icons.Default.Download else Icons.Default.Description,
+                contentDescription = null,
+                tint = when {
+                    !enabled -> PaperFaint
+                    filled -> Color.White
+                    else -> PaperGreen
+                },
+                modifier = Modifier.size(15.dp)
+            )
+            Spacer(Modifier.width(6.dp))
+            Text(
+                text = label,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 12.sp,
+                fontWeight = FontWeight.Bold,
+                color = when {
+                    !enabled -> PaperFaint
+                    filled -> Color.White
+                    else -> PaperGreen
+                },
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+/**
+ * Page pills: first, last, and a window around the current page. 741 papers at
+ * 15 a page is 50 pages, so an unclipped row of numbers would be useless.
+ */
+@Composable
+private fun PaginationBar(
+    page: Int,
+    pageCount: Int,
+    total: Int,
+    onPage: (Int) -> Unit
+) {
+    val window = remember(page, pageCount) {
+        val pages = mutableListOf<Int>()
+        pages += 1
+        for (candidate in (page - 1)..(page + 1)) {
+            if (candidate in 2 until pageCount) pages += candidate
+        }
+        if (pageCount >= 2) pages += pageCount
+        pages.distinct().sorted()
+    }
+
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .background(PaperBg)
+            .padding(top = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .fillMaxWidth()
+                .height(1.dp)
+                .background(PaperHairline)
+        )
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center
+        ) {
+            PageArrow(
+                forward = false,
+                enabled = page > 1,
+                tag = "papers_page_prev",
+                onClick = { onPage(page - 1) }
+            )
+            Spacer(Modifier.width(6.dp))
+            window.forEachIndexed { index, number ->
+                if (index > 0 && number - window[index - 1] > 1) {
+                    Text(
+                        text = "…",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        color = PaperFaint,
+                        modifier = Modifier.padding(horizontal = 3.dp)
+                    )
+                }
+                PagePill(
+                    number = number,
+                    selected = number == page,
+                    onClick = { onPage(number) }
+                )
+                Spacer(Modifier.width(6.dp))
+            }
+            PageArrow(
+                forward = true,
+                enabled = page < pageCount,
+                tag = "papers_page_next",
+                onClick = { onPage(page + 1) }
+            )
+        }
+        Text(
+            text = "Page $page of $pageCount · $PAPERS_PER_PAGE per page · $total papers",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 11.sp,
+            color = PaperFaint,
+            textAlign = TextAlign.Center,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(bottom = 8.dp)
+                .testTag("papers_page_label")
+        )
+    }
+}
+
+@Composable
+private fun PagePill(number: Int, selected: Boolean, onClick: () -> Unit) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(if (selected) PaperGreen else Color.White)
+            .clickable(onClick = onClick)
+            .testTag("papers_page_$number"),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = number.toString(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.5.sp,
+            fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
+            color = if (selected) Color.White else PaperInk
+        )
+    }
+}
+
+@Composable
+private fun PageArrow(
+    forward: Boolean,
+    enabled: Boolean,
+    tag: String,
+    onClick: () -> Unit
+) {
+    Box(
+        modifier = Modifier
+            .size(30.dp)
+            .clip(CircleShape)
+            .background(Color.White)
+            .clickable(enabled = enabled, onClick = onClick)
+            .testTag(tag),
+        contentAlignment = Alignment.Center
+    ) {
+        Icon(
+            imageVector = if (forward) {
+                Icons.AutoMirrored.Filled.KeyboardArrowRight
+            } else {
+                Icons.AutoMirrored.Filled.KeyboardArrowLeft
+            },
+            contentDescription = if (forward) "Next page" else "Previous page",
+            tint = if (enabled) PaperInk else PaperFaint,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 
