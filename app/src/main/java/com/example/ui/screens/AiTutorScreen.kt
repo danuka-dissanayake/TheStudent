@@ -125,6 +125,7 @@ private val BubbleTutor = Color(0xC2FFFFFF)
 private val BubbleStudent = Color(0xF2059696)
 private val CorrectionFill = Color(0xD9FFF7E6) // warm amber, still translucent
 private val CardCream = Color(0xF7FFFDF8)       // the reference's off-white card
+private val MicWhite = Color(0xFAFFFFFF)        // the mic disc: white, like the header buttons
 
 /**
  * The English tutor screen — glass edition.
@@ -1099,19 +1100,22 @@ private fun MicDock(
         state == AssistantVoiceState.THINKING -> MicFace.THINKING
         else -> MicFace.IDLE
     }
-    // A squircle, not a circle: a solid brand gradient block with a coloured drop
-    // shadow reads as a button on this pastel page, where concentric rings read as
-    // a 2018 voice recorder.
-    val gradient = when (face) {
-        MicFace.MUTED -> listOf(Color(0xFFC3CBD5), Color(0xFF9AA6B2))
-        MicFace.SPEAKING -> listOf(Color(0xFF0FA97E), Color(0xFF0B6E5C))
-        MicFace.THINKING -> listOf(Color(0xFF3FC79A), Color(0xFF0F8A6B))
-        else -> listOf(Color(0xFF12B981), Color(0xFF047857))
+    // One white button, one coloured glyph — the same language as the two glass
+    // circle buttons in the header, scaled up to the most important control on
+    // the screen. It is deliberately *not* a filled green disc any more: a white
+    // disc with a green mic looks expensive on this pale page, and it lets the
+    // cloud orb above keep all of the colour.
+    val glyphTint = when (face) {
+        MicFace.MUTED -> Color(0xFFA3AEBC)
+        MicFace.SPEAKING -> TealDeep
+        MicFace.THINKING -> BrandDeep
+        else -> Brand
     }
+    // Only the shadow is tinted: it is what lifts the white disc off the page.
     val glow = when (face) {
         MicFace.MUTED -> Color(0xFF94A3B8)
-        MicFace.SPEAKING -> Color(0xFF0B6E5C)
-        MicFace.THINKING -> Color(0xFF0F8A6B)
+        MicFace.SPEAKING -> TealDeep
+        MicFace.THINKING -> BrandDeep
         else -> Brand
     }
     val shape: Shape = CircleShape
@@ -1131,29 +1135,30 @@ private fun MicDock(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // The bed: a wide, faint squircle that only exists to give the button
-            // a place to sit. It is not a ring and it never sweeps.
+            // The bed: a wide, faint white halo that only exists to give the
+            // button a place to sit. It is not a ring and it never sweeps.
             Box(
                 modifier = Modifier
-                    .size(96.dp)
+                    .size(104.dp)
                     .clip(CircleShape)
-                    .background(glow.copy(alpha = 0.10f))
+                    .background(Color.White.copy(alpha = 0.42f))
             )
             Box(
                 modifier = Modifier
-                    .size(72.dp)
+                    .size(76.dp)
                     .graphicsLayer {
                         scaleX = pulse
                         scaleY = pulse
                     }
                     .shadow(
-                        elevation = 16.dp,
+                        elevation = 18.dp,
                         shape = shape,
-                        ambientColor = glow.copy(alpha = 0.75f),
-                        spotColor = glow.copy(alpha = 0.85f)
+                        ambientColor = glow.copy(alpha = 0.30f),
+                        spotColor = glow.copy(alpha = 0.42f)
                     )
                     .clip(shape)
-                    .background(Brush.verticalGradient(gradient))
+                    .background(MicWhite)
+                    .border(1.dp, GlassEdge, shape)
                     .combinedClickable(
                         onClick = onMic,
                         onLongClick = onLongPress
@@ -1161,17 +1166,17 @@ private fun MicDock(
                     .testTag("tutor_mic"),
                 contentAlignment = Alignment.Center
             ) {
-                // gloss: a soft top-lit falloff over the whole circle, which is
-                // what makes a flat gradient read as a physical, lit button
+                // gloss: a soft top-lit falloff over the disc, so the white reads
+                // as a curved, lit surface rather than a flat sticker.
                 Box(
                     modifier = Modifier
                         .matchParentSize()
                         .background(
                             Brush.verticalGradient(
                                 colorStops = arrayOf(
-                                    0.00f to Color.White.copy(alpha = 0.34f),
-                                    0.45f to Color.White.copy(alpha = 0.06f),
-                                    1.00f to Color.Transparent
+                                    0.00f to Color.White.copy(alpha = 0.85f),
+                                    0.50f to Color.White.copy(alpha = 0.18f),
+                                    1.00f to Color.White.copy(alpha = 0.55f)
                                 )
                             )
                         )
@@ -1189,8 +1194,8 @@ private fun MicDock(
                             else -> Icons.Default.Mic
                         },
                         contentDescription = iconLabel,
-                        tint = Color.White,
-                        modifier = Modifier.size(if (current == MicFace.THINKING) 30.dp else 27.dp)
+                        tint = glyphTint,
+                        modifier = Modifier.size(if (current == MicFace.THINKING) 31.dp else 28.dp)
                     )
                 }
             }

@@ -367,3 +367,18 @@ recompose while the orb moves.
 
 Mockups: `designs/40a-tutor-idle-cloud-orb.png`,
 `designs/40b-tutor-live-cloud-orb.png`, `designs/40c-cloud-orb-states.png`.
+
+### 11.6 Round 19b — the mic becomes a white glass disc
+
+The filled green squircle/gradient button is gone. The microphone is now a 76 dp
+white disc (`MicWhite 0xFAFFFFFF`) with a hairline `GlassEdge` border, a top-lit
+white gloss, a brand-tinted soft shadow and a 104 dp white halo behind it — the
+same language as the two glass circle buttons in the header, scaled up. The glyph
+carries the state instead of the background: emerald `#059669` when idle or
+listening, `#047857` while the tutor thinks, `#0F766E` while it speaks, grey
+`#A3AEBC` with `MicOff` when muted. Nothing else about the control changed: one
+tap to speak / stop, long press to hand the floor back, the same five `MicFace`
+glyphs, the same gentle 1.5 s pulse.
+
+Mockups: `designs/41a-tutor-idle-cloud-orb.png`,
+`designs/41b-tutor-live-cloud-orb.png`.

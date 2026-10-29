@@ -1,7 +1,7 @@
 package com.example.ui.components
 
 import android.graphics.Bitmap
-import androidx.compose.animation.core.CubicOut
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
@@ -49,6 +49,9 @@ import kotlin.math.sqrt
  * (idle / connecting / listening / thinking / speaking / error).
  */
 enum class CloudOrbState { IDLE, CONNECTING, LISTENING, THINKING, SPEAKING, MUTED }
+
+/** The prototype's `cubic-bezier(.215, .61, .355, 1)` — ease-out for the entrance. */
+private val OrbEaseOut = CubicBezierEasing(0.215f, 0.61f, 0.355f, 1f)
 
 /**
  * The cloud orb.
@@ -166,7 +169,7 @@ fun CloudOrb(
         animationSpec = if (appeared) {
             keyframes<Float> {
                 durationMillis = 1_350
-                1.178f at 300 using CubicOut
+                1.178f at 300 using OrbEaseOut
                 1f at 1_350
             }
         } else {
