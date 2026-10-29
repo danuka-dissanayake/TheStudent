@@ -81,7 +81,8 @@ network, the script asks for it **in the same run**:
   Code sent to you@example.com (6 digits): 482915
 ```
 
-Type the code that has just arrived and it carries on to the upload. A code
+Type the code that has just arrived and it carries on to the upload. (`echo 123456
+| python3 scripts/import_past_papers.py …` works too, for unattended runs.) A code
 from an earlier run cannot be used: every login attempt issues a fresh code and
 marks the previous one used, so `--otp` only helps if the code is newer than the
 sign-in attempt that triggers it.
@@ -139,3 +140,11 @@ the three ordinary mediums instead.
   year whose paper is missing from the archive.
 * Create thumbnails: paper covers are drawn procedurally in the app from the
   subject code.
+
+## 7. Response shapes
+
+`api/auth.php` builds responses with `sendJsonResponse()`, which **merges** its
+payload into the top level — `{"status": "success", "token": …, "user": {…}}` —
+while `get_papers.php` wraps rows in a `data` key. The importer reads either
+shape (`payload_field()`), so a change on one endpoint cannot silently produce a
+"no session token" failure.

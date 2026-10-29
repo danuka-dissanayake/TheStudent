@@ -717,7 +717,7 @@ class Backend:
             return reply
         if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or "Sign-in failed.")
-        self.token = (reply.get("data") or {}).get("token")
+        self.token = payload_field(reply, "token")
         if not self.token:
             raise RuntimeError("Sign-in did not return a session token.")
         return reply
@@ -729,7 +729,7 @@ class Backend:
         )
         if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or "Verification failed.")
-        self.token = (reply.get("data") or {}).get("token")
+        self.token = payload_field(reply, "token")
         if not self.token:
             raise RuntimeError("Verification did not return a session token.")
         return reply
@@ -740,7 +740,7 @@ class Backend:
         )
         if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or "The session was refused.")
-        user = (reply.get("data") or {}).get("user") or {}
+        user = payload_field(reply, "user") or {}
         if (user.get("role") or "") != "admin":
             raise RuntimeError(
                 f"This account is not an administrator (role: {user.get('role') or 'user'})."
@@ -812,6 +812,22 @@ class Backend:
         if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or f"HTTP {status_code}")
         return reply
+
+
+def payload_field(reply: dict, key: str, default=None):
+    """
+    Read a field from a PHP response.
+
+    `sendJsonResponse()` merges its payload into the top level, so auth.php
+    answers `{"status": …, "token": …}` — there is no `data` envelope. Older
+    handlers (and get_papers.php) do use one, so accept both shapes.
+    """
+    if key in reply:
+        return reply[key]
+    data = reply.get("data")
+    if isinstance(data, dict) and key in data:
+        return data[key]
+    return default
 
 
 def _describe_non_json(url: str, status: int, raw: bytes) -> str:
@@ -1112,13 +1128,18 @@ def main(argv: list[str] | None = None) -> int:
                 # for it now: a code from an earlier run has already been
                 # invalidated by the attempt above.
                 print(f"  {challenge.reason or 'A verification code was emailed.'}")
-                if not sys.stdin.isatty():
+                try:
+                    code = input(
+                        f"  Code sent to {challenge.email} (6 digits): "
+                    ).strip()
+                except EOFError:
                     raise RuntimeError(
                         "A verification code is needed but this shell cannot ask "
                         "for it. Re-run in a terminal, or pass --token with a "
                         "session from the app."
                     ) from None
-                code = input(f"  Code sent to {challenge.email} (6 digits): ").strip()
+                if not code:
+                    raise RuntimeError("No code entered — nothing was uploaded.")
                 backend.verify_otp(challenge.email, code)
         user = backend.whoami()
         print(f"  signed in as {user.get('email')} ({user.get('role')})")
