@@ -639,6 +639,16 @@ def write_issues(path: Path, issues: list[dict]) -> None:
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
+class BodyTooLarge(RuntimeError):
+    """
+    PHP discarded the request body, so `$_POST` arrived empty.
+
+    When a multipart body exceeds `post_max_size`, PHP drops the whole form and
+    `upload_paper.php` sees no `title` — it answers "Paper title is required."
+    even though a title was sent. Retrying can never help.
+    """
+
+
 class OtpRequired(RuntimeError):
     """
     Sign-in was accepted but the server wants a mailed code for this device.
@@ -772,7 +782,13 @@ class Backend:
             ))
         return keys
 
-    def upload(self, paper: Item, root: Path, status: str) -> dict:
+    def upload(
+        self,
+        paper: Item,
+        root: Path,
+        status: str,
+        with_scheme: bool = True,
+    ) -> dict:
         fields = {
             "title": paper.title,
             "grade": GRADE,
@@ -792,7 +808,7 @@ class Backend:
             fields["pages"] = str(paper.pages)
 
         files = {"pdf_file": root / paper.rel_path}
-        if paper.scheme is not None:
+        if with_scheme and paper.scheme is not None:
             files["scheme_file"] = root / paper.scheme.rel_path
 
         body, content_type = _multipart(fields, files)
@@ -812,8 +828,16 @@ class Backend:
                 "The server refused the request as too large (HTTP 413) — check "
                 "PHP's post_max_size / upload_max_filesize."
             )
+        message = str(reply.get("message") or "")
         if reply.get("status") != "success":
-            raise RuntimeError(reply.get("message") or f"HTTP {status_code}")
+            # An empty $_POST is the signature of a dropped body, not of a
+            # missing title — the title was in the request we just wrote.
+            if fields.get("title") and "title is required" in message.lower():
+                raise BodyTooLarge(
+                    f"the server dropped the {human_size(len(body))} body "
+                    f"(post_max_size) — it saw no fields at all"
+                )
+            raise RuntimeError(message or f"HTTP {status_code}")
         return reply
 
 
@@ -892,6 +916,8 @@ def upload_all(
     retries: int,
     limit: int | None,
     workers: int = 1,
+    scheme_mode: str = "attach",
+    max_body_mb: float = 8.0,
 ) -> None:
     done = load_state(state_path)
     existing = backend.existing_keys() if skip_existing else set()
@@ -921,17 +947,43 @@ def upload_all(
     print(f"  {workers} parallel upload(s)\n" if workers > 1 else "")
 
     failures: list[dict] = []
+    deferred: list[dict] = []
+    fatal: list[str] = []
     started = time.time()
     counters = {"sent_bytes": 0, "done": 0, "ok": 0}
     lock = threading.Lock()
 
     def send(paper: Item) -> None:
         """One paper, with retries. Runs on a worker thread."""
+        if fatal:
+            return
+
+        # Shared hosts commonly cap the request body at 8 MB; sending a big
+        # paper plus its scheme in one request gets the whole form discarded.
+        budget = max_body_mb * 1048576
+        combined = paper.size_bytes + (
+            paper.scheme.size_bytes if paper.scheme else 0
+        )
+        with_scheme = scheme_mode != "skip" and paper.scheme is not None
+        if with_scheme and scheme_mode == "auto" and combined > budget:
+            with_scheme = False
+            with lock:
+                deferred.append({
+                    "path": paper.rel_path,
+                    "scheme_path": paper.scheme.rel_path if paper.scheme else "",
+                    "paper_size": human_size(paper.size_bytes),
+                    "combined": human_size(combined),
+                    "reason": f"paper + scheme is {human_size(combined)}, over "
+                              f"the {max_body_mb:g} MB request budget",
+                })
+                print(f"{paper.label():<56} … scheme deferred "
+                      f"({human_size(combined)})")
+
         attempt = 0
         while True:
             attempt += 1
             try:
-                reply = backend.upload(paper, root, status)
+                reply = backend.upload(paper, root, status, with_scheme=with_scheme)
                 with lock:
                     append_state(state_path, paper, reply.get("paper_id"))
                     counters["sent_bytes"] += paper.size_bytes + (
@@ -946,6 +998,11 @@ def upload_all(
                           f"{paper.label():<56} ✓ "
                           f"{human_size(paper.size_bytes):>9} {pages:>5}  "
                           f"id={reply.get('paper_id')}  {rate:4.0f} KB/s")
+                return
+            except BodyTooLarge as error:
+                with lock:
+                    fatal.append(str(error))
+                    append_state(state_path, paper, None, error=str(error))
                 return
             except Exception as error:  # noqa: BLE001 - reported, not raised
                 if attempt <= retries:
@@ -983,7 +1040,32 @@ def upload_all(
     print()
     print(f"  finished in {elapsed / 60:.1f} min · "
           f"{human_size(counters['sent_bytes'])} sent")
-    print(f"  uploaded {counters['ok']} · failed {len(failures)}")
+    print(f"  uploaded {counters['ok']} · failed {len(failures)} · "
+          f"schemes deferred {len(deferred)}")
+
+    if fatal:
+        print()
+        print("  STOPPED — the server refused the request body:")
+        print(f"    {fatal[0]}")
+        print()
+        print("  PHP's post_max_size is smaller than the file being sent, so it")
+        print("  throws the whole form away and upload_paper.php sees no fields.")
+        print("  Raise it on the host (DirectAdmin → PHP settings, or a .user.ini")
+        print("  next to the API):  post_max_size = 64M · upload_max_filesize = 40M")
+        print("  then re-run this command — finished papers are skipped, so it")
+        print("  picks up exactly here.")
+
+    if deferred:
+        pending_path = state_path.with_name("schemes_pending.csv")
+        with pending_path.open("w", newline="", encoding="utf-8") as handle:
+            writer = csv.DictWriter(
+                handle, fieldnames=["path", "scheme_path", "paper_size",
+                                    "combined", "reason"]
+            )
+            writer.writeheader()
+            writer.writerows(deferred)
+        print(f"  deferred → {pending_path} "
+              f"(send those with --scheme-mode attach once the limit is raised)")
     if failures:
         failed_path = state_path.with_name("upload_failed.csv")
         with failed_path.open("w", newline="", encoding="utf-8") as handle:
@@ -1054,6 +1136,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--limit", type=int, help="upload at most N papers this run")
     parser.add_argument("--delay", type=float, default=0.0,
                         help="seconds to sleep between uploads (workers=1)")
+    parser.add_argument("--scheme-mode", default="attach",
+                        choices=["attach", "auto", "skip"],
+                        help="attach = paper + scheme in one request (default); "
+                             "auto = attach only when both fit --max-body-mb, "
+                             "otherwise upload the paper and defer the scheme; "
+                             "skip = papers only")
+    parser.add_argument("--max-body-mb", type=float, default=8.0,
+                        help="request body budget for --scheme-mode auto "
+                             "(default 8, the usual shared-hosting post_max_size)")
     parser.add_argument("--workers", type=int, default=1, metavar="N",
                         help="upload N papers at once (4–6 usually saturates a "
                              "home uplink; more just queues on the server)")
@@ -1172,6 +1263,8 @@ def main(argv: list[str] | None = None) -> int:
             retries=args.retries,
             limit=args.limit,
             workers=max(1, args.workers),
+            scheme_mode=args.scheme_mode,
+            max_body_mb=args.max_body_mb,
         )
     except KeyboardInterrupt:
         print("\n  stopped — progress is saved, re-run to continue.")

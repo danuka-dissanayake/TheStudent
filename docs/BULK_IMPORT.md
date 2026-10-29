@@ -180,7 +180,48 @@ the six papers over the 25 MB limit back under it. Use `300` instead of `150`
 for diagram-heavy subjects, or run `--scan` on the compressed tree first and
 compare the page counts in the plan before uploading.
 
-## 8. Response shapes
+## 8. "Paper title is required." — a body limit, not a bug
+
+If uploads fail with `Paper title is required.` after the first few papers,
+nothing on the client is wrong: PHP discarded the request body, so `$_POST`
+arrived empty and `upload_paper.php` never saw the `title` it was sent. That
+happens when the multipart body is larger than `post_max_size` — usually 8 MB on
+shared hosting, and a paper plus its marking scheme passes that easily. Retrying
+cannot help, so the importer stops the run and prints the fix.
+
+Check what the host allows (define `DIAG_TOKEN` in `config.secrets.php` first):
+
+```
+https://app.quizontal.site/api/health.php?token=YOUR_DIAG_TOKEN
+```
+
+`php.post_max_size` and `php.upload_max_filesize` are reported, and
+`upload_warnings` names anything too small. On DirectAdmin, open **PHP Settings**
+for the domain (or drop a `.user.ini` beside `api/`):
+
+```ini
+post_max_size = 64M
+upload_max_filesize = 40M
+memory_limit = 256M
+max_execution_time = 120
+```
+
+Then re-run the same command — finished papers are in `import_state.jsonl`, so it
+resumes exactly where it stopped.
+
+If the limits cannot be changed, import in two passes:
+
+```bash
+python3 scripts/import_past_papers.py --scan "<dir>" --upload --email you@x \
+    --scheme-mode auto --max-body-mb 8
+```
+
+`auto` attaches a scheme only when paper + scheme fit the budget; otherwise the
+paper is uploaded alone and the scheme is written to `schemes_pending.csv` for
+later. A single paper larger than `post_max_size` cannot be worked around at
+all — compress it (`scripts/compress_papers.sh`) or raise the limit.
+
+## 9. Response shapes
 
 `api/auth.php` builds responses with `sendJsonResponse()`, which **merges** its
 payload into the top level — `{"status": "success", "token": …, "user": {…}}` —

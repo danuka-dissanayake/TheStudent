@@ -92,6 +92,23 @@ if (!headers_sent()) {
     header('Cache-Control: no-store');
 }
 
+/** "64M" / "8M" / "512K" → bytes, so limits can be compared. */
+function ts_bytes(string $value): int
+{
+    $value = trim($value);
+    if ($value === '' || $value === '-1') {
+        return PHP_INT_MAX;
+    }
+    $unit = strtolower(substr($value, -1));
+    $number = (int) $value;
+    switch ($unit) {
+        case 'g': return $number * 1073741824;
+        case 'm': return $number * 1048576;
+        case 'k': return $number * 1024;
+        default:  return $number;
+    }
+}
+
 $report = [
     'generated_at' => date('c'),
     'php' => [
@@ -99,7 +116,33 @@ $report = [
         'sapi'         => PHP_SAPI,
         'memory_limit' => ini_get('memory_limit'),
         'max_execution_time' => ini_get('max_execution_time'),
+        // Upload limits. Below the size of a paper plus its marking scheme,
+        // PHP discards the whole request body and upload_paper.php answers
+        // "Paper title is required." — which looks like a client bug.
+        'post_max_size'       => ini_get('post_max_size'),
+        'upload_max_filesize' => ini_get('upload_max_filesize'),
+        'max_file_uploads'    => ini_get('max_file_uploads'),
+        'max_input_time'      => ini_get('max_input_time'),
     ],
+    'upload_warnings' => (static function (): array {
+        $warnings = [];
+        if (ts_bytes((string) ini_get('post_max_size')) < 33554432) {
+            $warnings[] = 'post_max_size is ' . ini_get('post_max_size')
+                . ' — a paper plus its marking scheme above this is discarded '
+                . 'silently (upload_paper.php then reports "Paper title is '
+                . 'required"). Raise it to 64M.';
+        }
+        if (ts_bytes((string) ini_get('upload_max_filesize')) < 26214400) {
+            $warnings[] = 'upload_max_filesize is ' . ini_get('upload_max_filesize')
+                . ' — larger files are rejected outright. Raise it to 40M.';
+        }
+        $memory = (string) ini_get('memory_limit');
+        if ($memory !== '-1' && ts_bytes($memory) < 201326592) {
+            $warnings[] = 'memory_limit is ' . $memory
+                . ' — 256M or more is safer for large PDFs.';
+        }
+        return $warnings;
+    })(),
     'extensions' => [
         'pdo'        => extension_loaded('pdo'),
         'pdo_mysql'  => extension_loaded('pdo_mysql'),
