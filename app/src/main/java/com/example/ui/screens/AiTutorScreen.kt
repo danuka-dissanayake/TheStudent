@@ -46,6 +46,7 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CallMade
+import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
@@ -73,6 +74,7 @@ import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -510,96 +512,142 @@ private fun IridescentOrb(
         )
 
         // ── The sphere itself, masked to its own circle ──────────────────────
+        // Modelled on the assistant-ui voice orb (assistant-ui.com/elements/orb):
+        // a saturated liquid sphere, not a pastel bubble. The flow is built from
+        // soft *elliptical* gradients — wide bands and thin streaks at different
+        // angles — each one turning at its own speed, which is what reads as
+        // liquid rather than as a handful of blobs. Compose has no shader here,
+        // but with the mask, the vignette and the rim it holds up.
         val oval = Path().apply {
             addOval(Rect(center = c, radius = sr))
         }
         scope.clipPath(oval) {
-            // body: white at the top-left, deep sea-green at the far edge, so the
-            // ball has a lit side and a shaded side even before the colour moves
+            // base: lit from the top-left, deep sea-green at the far side
             drawCircle(
                 brush = Brush.radialGradient(
                     colorStops = arrayOf(
-                        0.00f to Color(0xFFFFFFFF),
-                        0.45f to Color(0xFFF0FBF6),
-                        1.00f to Color(0xFFB6DCCD)
+                        0.00f to Color(0xFF7FE9C6),
+                        0.45f to Color(0xFF1FB28C),
+                        0.80f to Color(0xFF0A7A63),
+                        1.00f to Color(0xFF055146)
                     ),
-                    center = Offset(c.x - sr * 0.35f, c.y - sr * 0.42f),
-                    radius = sr * 1.65f
+                    center = Offset(c.x - sr * 0.40f, c.y - sr * 0.46f),
+                    radius = sr * 1.6f
                 ),
                 radius = sr,
                 center = c
             )
 
-            // inner light: white at the top-left, so the glass has a lit side
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.55f), Color.Transparent),
-                    center = Offset(c.x - sr * 0.30f, c.y - sr * 0.40f),
-                    radius = sr * 0.9f
-                ),
-                radius = sr * 0.9f,
-                center = Offset(c.x - sr * 0.30f, c.y - sr * 0.40f)
-            )
+            // Wide bands
+            orbBand(c, sr, -0.35f, -0.48f, 0.95f, 0.55f, -30f + driftDeg * 0.35f, Color(0xFFE6FFF3), 0.85f)
+            orbBand(c, sr, 0.42f, -0.10f, 0.80f, 0.42f, 25f - driftDeg * 0.28f, Color(0xFFC9F96A), 0.55f)
+            orbBand(c, sr, 0.10f, 0.42f, 0.90f, 0.50f, -15f + driftDeg * 0.42f, Color(0xFF3FE0D0), 0.60f)
+            orbBand(c, sr, -0.55f, 0.30f, 0.70f, 0.40f, 40f - driftDeg * 0.30f, Color(0xFF5FD8F2), 0.50f)
+            orbBand(c, sr, 0.30f, 0.55f, 0.65f, 0.34f, -40f + driftDeg * 0.50f, Color(0xFF8BFFD0), 0.55f)
+            orbBand(c, sr, 0.60f, -0.45f, 0.55f, 0.30f, 15f - driftDeg * 0.45f, Color.White, 0.35f)
 
-            fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
-                val a = Math.toRadians((angleDeg + driftDeg + energy * 40f).toDouble())
-                val push = distance * sr * (1f + 0.34f * energy)
-                val x = (c.x + push * Math.cos(a)).toFloat()
-                val y = (c.y + push * Math.sin(a)).toFloat()
-                // Drawn through the outer scope: the clip lives on the canvas,
-                // so this stays inside the sphere.
-                scope.orbBlob(Offset(x, y), radius * sr * (1f + 0.24f * energy), color)
-            }
+            // Thin streaks: the marble lines that make it look liquid
+            orbBand(c, sr, -0.10f, -0.10f, 1.25f, 0.16f, -22f + driftDeg * 0.22f, Color.White, 0.42f)
+            orbBand(c, sr, -0.15f, 0.20f, 1.10f, 0.14f, -28f - driftDeg * 0.26f, Color(0xFFD9FFF0), 0.40f)
+            orbBand(c, sr, 0.05f, -0.30f, 1.05f, 0.10f, -20f + driftDeg * 0.34f, Color(0xFF0B4C41), 0.18f)
 
-            blob(300f, 0.35f, 0.72f, Color(0xE6A8EBCB))
-            blob(35f, 0.42f, 0.66f, Color(0xE6D6F1A8))
-            blob(95f, 0.48f, 0.58f, Color(0xE69FE4D6))
-            blob(160f, 0.40f, 0.60f, Color(0xD99FD2EC))
-            blob(235f, 0.44f, 0.52f, Color(0xD9B4E2A6))
-            blob(0f, 0f, 0.50f, Color(0xD9FFFFFF))
-
-            // inner shade: the underside of a glass sphere is darker than its rim,
-            // and that single gradient is what stops it reading as a flat disc
+            // depth: dark at the rim, clear in the middle
             drawCircle(
                 brush = Brush.radialGradient(
                     colorStops = arrayOf(
                         0.00f to Color.Transparent,
-                        0.62f to Color.Transparent,
-                        1.00f to Color(0xFF2F6F5C).copy(alpha = 0.34f)
+                        0.55f to Color.Transparent,
+                        1.00f to Color(0xFF043B32).copy(alpha = 0.30f)
                     ),
-                    center = Offset(c.x - sr * 0.10f, c.y - sr * 0.18f),
+                    center = Offset(c.x - sr * 0.10f, c.y - sr * 0.14f),
                     radius = sr * 1.28f
                 ),
                 radius = sr * 1.28f,
-                center = Offset(c.x - sr * 0.10f, c.y - sr * 0.18f)
+                center = Offset(c.x - sr * 0.10f, c.y - sr * 0.14f)
             )
 
-            // specular highlight
+            // specular: the small hot spot that says "glass"
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0xF2FFFFFF), Color(0x00FFFFFF)),
-                    center = Offset(c.x - sr * 0.33f, c.y - sr * 0.42f),
-                    radius = sr * 0.55f
+                    colorStops = arrayOf(
+                        0.00f to Color.White.copy(alpha = 0.95f),
+                        0.45f to Color.White.copy(alpha = 0.30f),
+                        1.00f to Color.Transparent
+                    ),
+                    center = Offset(c.x - sr * 0.34f, c.y - sr * 0.44f),
+                    radius = sr * 0.40f
                 ),
-                radius = sr * 0.55f,
-                center = Offset(c.x - sr * 0.33f, c.y - sr * 0.42f)
+                radius = sr * 0.40f,
+                center = Offset(c.x - sr * 0.34f, c.y - sr * 0.44f)
             )
 
-            // rim: a bright inner edge plus a hairline outer edge, which is the
-            // cheapest way to make a light object read against a light page
+            // rim light: bright toward the lower right, thin at the top left
             drawCircle(
-                color = Color.White.copy(alpha = 0.55f + 0.25f * energy),
-                radius = sr - sr * 0.018f,
+                brush = Brush.sweepGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.White.copy(alpha = 0.55f),
+                        0.25f to Color.White.copy(alpha = 0.12f),
+                        0.55f to Color.White.copy(alpha = 0.70f),
+                        0.75f to Color.White.copy(alpha = 0.35f),
+                        1.00f to Color.White.copy(alpha = 0.55f)
+                    ),
+                    center = c
+                ),
+                radius = sr - sr * 0.010f,
                 center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.035f)
-            )
-            drawCircle(
-                color = Color(0xFF7FB6A4).copy(alpha = 0.45f),
-                radius = sr - sr * 0.004f,
-                center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.012f)
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.020f)
             )
         }
+
+        // hairline edge so the ball keeps its outline on a pale page
+        scope.drawCircle(
+            color = Color(0xFF0B7A60).copy(alpha = 0.30f),
+            radius = sr,
+            center = c,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.010f)
+        )
+    }
+}
+
+/**
+ * One flowing band inside the orb.
+ *
+ * A radial gradient drawn through a rotate + scale transform becomes an ellipse,
+ * which is what turns "a few coloured balls" into flowing liquid. The rotation
+ * carries the drift, so every band turns at its own speed.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.orbBand(
+    center: Offset,
+    sphereRadius: Float,
+    offsetX: Float,
+    offsetY: Float,
+    radiusX: Float,
+    radiusY: Float,
+    rotation: Float,
+    color: Color,
+    alpha: Float
+) {
+    val bandCenter = Offset(
+        center.x + offsetX * sphereRadius,
+        center.y + offsetY * sphereRadius
+    )
+    androidx.compose.ui.graphics.drawscope.withTransform({
+        rotate(rotation, bandCenter)
+        scale(radiusX, radiusY, bandCenter)
+    }) {
+        drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.00f to color.copy(alpha = alpha),
+                    0.55f to color.copy(alpha = alpha * 0.45f),
+                    1.00f to Color.Transparent
+                ),
+                center = bandCenter,
+                radius = sphereRadius
+            ),
+            radius = sphereRadius,
+            center = bandCenter
+        )
     }
 }
 
@@ -610,29 +658,6 @@ private fun orbModeFor(voiceState: AssistantVoiceState, isMuted: Boolean): OrbMo
     voiceState == AssistantVoiceState.SPEAKING -> OrbMode.SPEAKING
     voiceState == AssistantVoiceState.THINKING -> OrbMode.THINKING
     else -> OrbMode.IDLE
-}
-
-/**
- * One drifting colour field of the orb.
- *
- * A `DrawScope` extension rather than a local function so the alpha falloff and
- * the centre are computed once, in one place, for every layer.
- */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.orbBlob(
-    center: Offset,
-    radius: Float,
-    color: Color
-) {
-    if (radius <= 0f) return
-    drawCircle(
-        brush = Brush.radialGradient(
-            colors = listOf(color, color.copy(alpha = 0f)),
-            center = center,
-            radius = radius
-        ),
-        radius = radius,
-        center = center
-    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -795,7 +820,7 @@ private fun IdleContent(
                 )
                 Spacer(Modifier.height(4.dp))
                 Text(
-                    text = "How can I help you?",
+                    text = "Ready to practice English with me?",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 25.sp,
                     lineHeight = 31.sp,
@@ -810,7 +835,7 @@ private fun IdleContent(
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     ModeCard(
-                        icon = Icons.Default.Mic,
+                        icon = Icons.Default.Chat,
                         tint = Brand,
                         title = "Free conversation",
                         subtitle = "Speak freely and let Miss Emma correct you as you talk",
@@ -1390,7 +1415,7 @@ private fun MicDock(
         MicFace.THINKING -> Color(0xFF0F8A6B)
         else -> Brand
     }
-    val shape = RoundedCornerShape(26.dp)
+    val shape: Shape = CircleShape
     val iconLabel = when (face) {
         MicFace.MUTED -> "Unmute"
         MicFace.SPEAKING -> "Interrupt the tutor"
@@ -1411,13 +1436,13 @@ private fun MicDock(
             // a place to sit. It is not a ring and it never sweeps.
             Box(
                 modifier = Modifier
-                    .size(96.dp, 88.dp)
-                    .clip(RoundedCornerShape(32.dp))
+                    .size(96.dp)
+                    .clip(CircleShape)
                     .background(glow.copy(alpha = 0.10f))
             )
             Box(
                 modifier = Modifier
-                    .size(78.dp, 72.dp)
+                    .size(72.dp)
                     .graphicsLayer {
                         scaleX = pulse
                         scaleY = pulse
@@ -1437,16 +1462,18 @@ private fun MicDock(
                     .testTag("tutor_mic"),
                 contentAlignment = Alignment.Center
             ) {
-                // gloss across the top half, the cheap trick that makes a flat
-                // gradient read as a physical key
+                // gloss: a soft top-lit falloff over the whole circle, which is
+                // what makes a flat gradient read as a physical, lit button
                 Box(
                     modifier = Modifier
-                        .align(Alignment.TopCenter)
-                        .fillMaxWidth()
-                        .height(30.dp)
+                        .matchParentSize()
                         .background(
                             Brush.verticalGradient(
-                                listOf(Color.White.copy(alpha = 0.30f), Color.Transparent)
+                                colorStops = arrayOf(
+                                    0.00f to Color.White.copy(alpha = 0.34f),
+                                    0.45f to Color.White.copy(alpha = 0.06f),
+                                    1.00f to Color.Transparent
+                                )
                             )
                         )
                 )

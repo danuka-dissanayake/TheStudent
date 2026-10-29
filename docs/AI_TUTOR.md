@@ -299,3 +299,17 @@ call owns the whole screen.
   the space actually left (`min(width * 0.62, height * 0.42)`, 120–250 dp) and
   the gaps are weights, so the header, greeting, cards and mic all fit on a
   640 dp phone as well as a tablet.
+
+### 11.4 Round 18, fifth pass
+
+- **The orb is now the assistant-ui voice orb in emerald**
+  (`assistant-ui.com/elements/orb`). A saturated liquid sphere rather than a
+  pastel bubble: a lit top-left to deep sea-green base, six wide colour bands and
+  three thin marble streaks drawn as *elliptical* gradients (rotate + scale), a
+  specular hot spot, a dark rim vignette and a sweep-gradient rim light. Each
+  band turns at its own speed, so the inside flows instead of pulsing.
+  `DrawScope.orbBand` is the shared helper. Mockup: `designs/39a-tutor-idle-orb.png`.
+- **Copy**: the greeting line is now "Ready to practice English with me?".
+- **Free conversation card** uses a chat icon, not a microphone.
+- **The mic is a circle again** — 72 dp, brand gradient, coloured drop shadow,
+  gloss — keeping the five `MicFace` glyphs.
