@@ -144,6 +144,7 @@ fun AiTutorScreen(
     callPhase: CallPhase,
     callSeconds: Int,
     isMuted: Boolean,
+    /** Live microphone energy (0..1). Kept out of UiState so it only redraws the orb. */
     micLevel: StateFlow<Float>,
     transcript: List<TutorCallEntry>,
     currentFix: GrammarFix?,
@@ -152,8 +153,6 @@ fun AiTutorScreen(
     studentName: String,
     spokenMinutes: Int,
     spokenCalls: Int,
-    /** Live microphone energy (0..1). Kept out of UiState so it only redraws the orb. */
-    micLevel: StateFlow<Float>,
     activeLessonId: String?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
@@ -910,6 +909,7 @@ private fun LiveContent(
     callPhase: CallPhase,
     callSeconds: Int,
     isMuted: Boolean,
+    micLevel: StateFlow<Float>,
     transcript: List<TutorCallEntry>,
     currentFix: GrammarFix?,
     lesson: TutorLesson?,
