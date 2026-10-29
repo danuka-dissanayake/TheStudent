@@ -63,9 +63,11 @@ and the applied query together.
 ### Tapping outside the field ends the focus
 
 The screen's root `Column` observes the pointer **Initial** pass and, on any tap
-that is not inside the search row, calls `focusManager.clearFocus()`. The field's
-bounds are captured with `boundsInRoot()` and compared against the tap converted
-into the same coordinate space, so tapping the field itself never dismisses it.
+that is not inside the search row, calls `focusManager.clearFocus()`. Both boxes
+are measured with `positionInRoot()` (a member of `LayoutCoordinates`, no
+extension import needed) and the field's `size`; the tap arrives in the Column's
+own coordinates, so the Column's root origin is added before the comparison.
+Tapping the field itself therefore never dismisses it.
 The observer consumes nothing, so scrolling, row taps, chips and the keyboard all
 behave exactly as before. Submitting also clears focus and hides the keyboard.
 

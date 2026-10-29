@@ -53,12 +53,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
-import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
@@ -67,6 +65,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -334,9 +333,12 @@ fun PapersScreen(
     val keyboard = LocalSoftwareKeyboardController.current
 
     // Where the search row sits, so a tap anywhere else can be told apart from a
-    // tap on the field itself. Both boxes are filled in by layout passes below.
-    var searchFieldBounds by remember { mutableStateOf(Rect.Zero) }
-    var screenBounds by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    // tap on the field itself. Both are filled in by layout passes below, in the
+    // same coordinate space (the root), which is why only their origins and the
+    // field's size are needed.
+    var searchFieldOrigin by remember { mutableStateOf(Offset.Zero) }
+    var searchFieldSize by remember { mutableStateOf(IntSize.Zero) }
+    var screenOrigin by remember { mutableStateOf(Offset.Zero) }
 
     val settleScope = rememberCoroutineScope()
 
@@ -498,7 +500,7 @@ fun PapersScreen(
         modifier = modifier
             .fillMaxSize()
             .background(PaperBg)
-            .onGloballyPositioned { screenBounds = it }
+            .onGloballyPositioned { screenOrigin = it.positionInRoot() }
             // Tapping anywhere that is not the search field ends the focus, the
             // way every other search box on the phone behaves. This observes the
             // Initial pass and consumes nothing, so scrolling, row taps, chips
@@ -510,12 +512,16 @@ fun PapersScreen(
                         val down = event.changes.firstOrNull {
                             it.changedToDownIgnoreConsumed()
                         } ?: continue
-                        // "boundsInRoot" is measured against the window, the tap
-                        // against this Column; the origin turns one into the other.
-                        val origin = screenBounds?.boundsInRoot()?.topLeft ?: Offset.Zero
-                        val field = searchFieldBounds
-                        val tappedTheField = field != Rect.Zero &&
-                            field.contains(down.position + origin)
+                        // The tap arrives in this Column's coordinates; the field
+                        // was measured in root coordinates. Adding the Column's
+                        // own root origin puts both in the same space.
+                        val x = down.position.x + screenOrigin.x
+                        val y = down.position.y + screenOrigin.y
+                        val tappedTheField = searchFieldSize.width > 0 &&
+                            x >= searchFieldOrigin.x &&
+                            y >= searchFieldOrigin.y &&
+                            x <= searchFieldOrigin.x + searchFieldSize.width &&
+                            y <= searchFieldOrigin.y + searchFieldSize.height
                         if (!tappedTheField) focusManager.clearFocus()
                     }
                 }
@@ -665,7 +671,10 @@ fun PapersScreen(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
-                                .onGloballyPositioned { searchFieldBounds = it.boundsInRoot() },
+                                .onGloballyPositioned {
+                                    searchFieldOrigin = it.positionInRoot()
+                                    searchFieldSize = it.size
+                                },
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
