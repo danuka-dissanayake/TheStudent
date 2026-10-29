@@ -2,18 +2,20 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.BorderStroke
-import androidx.compose.foundation.layout.ExperimentalLayoutApi
-import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardActions
+import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
@@ -23,16 +25,14 @@ import androidx.compose.material.icons.automirrored.filled.Sort
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
-import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Description
-import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.DownloadDone
 import androidx.compose.material.icons.filled.FilterList
 import androidx.compose.material.icons.filled.GridView
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.ViewList
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -52,16 +52,24 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.LayoutCoordinates
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import kotlinx.coroutines.delay
-import kotlinx.coroutines.launch
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
@@ -69,6 +77,8 @@ import com.example.data.model.SubjectCodes
 import com.example.ui.components.PaperCover
 import com.example.ui.components.PaperTileSkeleton
 import com.example.ui.theme.MaisonNeueFontFamily
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 // File-private palette: a calm paper-library surface with one emerald accent.
 private val PaperInk = Color(0xFF0F172A)
@@ -88,24 +98,54 @@ private enum class PaperSort(val label: String) {
 }
 
 /**
- * Does this paper answer the search text?
+ * Words a student types that are not the words in the database.
  *
- * Students search with whatever they know: the subject's long name
- * ("Combined Mathematics"), the short code printed on the paper ("CM"), a year,
- * a medium, or an exam name. All of it is matched, case-insensitively, with
- * spaces and punctuation ignored so "combinedmaths" still finds Combined Maths.
+ * Each entry maps what they type to the spellings worth trying. Nothing here
+ * invents a match — it only widens a token to the terms the library actually
+ * stores, so "maths 2020" still finds "Combined Mathematics 2020".
  */
-private fun matchesQuery(entry: PaperEntry, query: String): Boolean {
-    if (query.isBlank()) return true
-    val paper = entry.paper
-    val needle = query.trim()
-    val squeezed = needle.filter { it.isLetterOrDigit() }.lowercase()
-    // "PAPER" is SubjectCodes' fallback for a name it cannot place; matching it
-    // would quietly make every paper answer the word "paper".
+private val SEARCH_SYNONYMS: Map<String, List<String>> = mapOf(
+    "maths" to listOf("mathematics"),
+    "math" to listOf("mathematics"),
+    "mathematics" to listOf("mathematics", "combined mathematics"),
+    "chem" to listOf("chemistry"),
+    "bio" to listOf("biology"),
+    "phy" to listOf("physics"),
+    "phys" to listOf("physics"),
+    "eng" to listOf("english"),
+    "sin" to listOf("sinhala"),
+    "tam" to listOf("tamil"),
+    "ict" to listOf("information communication technology", "ict"),
+    "agri" to listOf("agricultural", "agriculture"),
+    "pastpaper" to listOf("paper"),
+    "pastpapers" to listOf("paper"),
+    "pp" to listOf("paper"),
+    "answers" to listOf("marking scheme", "answers"),
+    "answer" to listOf("marking scheme", "answers"),
+    "scheme" to listOf("marking scheme", "scheme"),
+    "markingscheme" to listOf("marking scheme", "scheme")
+)
+
+/** Letters and digits only, lowercased: "A/L 2020" and "al2020" meet here. */
+private fun String.squeezedSearch(): String =
+    filter { it.isLetterOrDigit() }.lowercase()
+
+private fun String.searchWords(): List<String> =
+    split(Regex("[^\\p{L}\\p{N}]+")).filter { it.isNotBlank() }.map { it.lowercase() }
+
+/**
+ * Everything a row can be found by, as flat strings.
+ *
+ * Two composite entries are added on purpose: students type "2020 sft" and
+ * "sft2020" and "2020sft" interchangeably, and the year and the subject code
+ * live in different columns, so `"$code $year"` and `"$code$year"` are what make
+ * the unspaced forms match.
+ */
+private fun PaperEntry.searchFields(): List<String> {
+    val paper = this.paper
     val code = SubjectCodes.of(paper.subject).takeIf { it != "PAPER" }.orEmpty()
-    val fields = listOf(
-        entry.title,
-        if (entry.isScheme) "marking scheme answers" else "",
+    val fields = mutableListOf(
+        title,
         paper.subject,
         code,
         paper.grade,
@@ -114,13 +154,52 @@ private fun matchesQuery(entry: PaperEntry, query: String): Boolean {
         paper.examType,
         paper.examination,
         paper.category,
-        paper.stream.orEmpty()
+        paper.stream.orEmpty(),
+        if (isScheme) "marking scheme answers" else ""
     )
-    if (fields.any { it.contains(needle, ignoreCase = true) }) return true
-    if (squeezed.isEmpty()) return false
-    return fields.any {
-        it.filter { ch -> ch.isLetterOrDigit() }.lowercase().contains(squeezed)
+    if (code.isNotEmpty()) {
+        fields += "$code ${paper.year}"
+        fields += "${paper.year} $code"
+        fields += "$code${paper.year}"
+        fields += "${paper.year}$code"
     }
+    if (paper.subject.isNotBlank()) {
+        fields += "${paper.subject} ${paper.year}"
+        fields += "${paper.year} ${paper.subject}"
+    }
+    return fields.filter { it.isNotBlank() }
+}
+
+/** Does one word of the query appear anywhere in the row? */
+private fun matchesToken(token: String, fields: List<String>): Boolean =
+    (SEARCH_SYNONYMS[token] ?: listOf(token)).any { alternative ->
+        val variant = alternative.squeezedSearch()
+        if (variant.isEmpty()) return@any false
+        fields.any { field ->
+            field.contains(alternative, ignoreCase = true) ||
+                field.squeezedSearch().contains(variant) ||
+                // A one-letter token would otherwise match almost every row, so
+                // short tokens have to start a word instead.
+                (variant.length < 2 && field.searchWords().any { it.startsWith(variant) })
+        }
+    }
+
+/**
+ * Does this row answer the search text?
+ *
+ * The query is split into words and **every** word must be found somewhere in
+ * the row — not necessarily in the same field. That is what makes "2020 sft"
+ * work: "2020" matches the year column and "sft" matches the subject code, and
+ * the row is kept because both matched. Requiring the whole phrase in one field,
+ * as the first version did, only ever found rows whose title happened to contain
+ * the phrase verbatim.
+ */
+private fun matchesQuery(entry: PaperEntry, query: String): Boolean {
+    if (query.isBlank()) return true
+    val tokens = query.searchWords().map { it.squeezedSearch() }.filter { it.isNotEmpty() }.distinct()
+    if (tokens.isEmpty()) return true
+    val fields = entry.searchFields()
+    return tokens.all { token -> matchesToken(token, fields) }
 }
 
 /** How the results are laid out. Both are lists; one is compact, one is roomy. */
@@ -167,9 +246,6 @@ private object PT {
     val bodyHeight: TextUnit = 19.sp
     val metaHeight: TextUnit = 17.sp
 }
-
-/** How long typing must pause before the library is re-filtered. */
-private const val SEARCH_SETTLE_MS = 400L
 
 /** Fixed page size: the library is read best in small, finishable pages. */
 private const val PAPERS_PER_PAGE = 15
@@ -254,9 +330,36 @@ fun PapersScreen(
     var isSettling by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
 
-    LaunchedEffect(queryInput) {
-        delay(SEARCH_SETTLE_MS)
-        query = queryInput
+    val focusManager = LocalFocusManager.current
+    val keyboard = LocalSoftwareKeyboardController.current
+
+    // Where the search row sits, so a tap anywhere else can be told apart from a
+    // tap on the field itself. Both boxes are filled in by layout passes below.
+    var searchFieldBounds by remember { mutableStateOf(Rect.Zero) }
+    var screenBounds by remember { mutableStateOf<LayoutCoordinates?>(null) }
+
+    val settleScope = rememberCoroutineScope()
+
+    // Search runs when the student says so — Enter on the keyboard, or the
+    // search button beside the field. Typing no longer re-filters the library
+    // under their fingers. The shimmer is raised here as well as by the query
+    // effect, so submitting the *same* words again still answers with a refresh.
+    fun submitSearch() {
+        query = queryInput.trim()
+        isSettling = true
+        settleScope.launch {
+            delay(320)
+            isSettling = false
+        }
+        focusManager.clearFocus()
+        keyboard?.hide()
+    }
+
+    fun clearSearch() {
+        queryInput = ""
+        query = ""
+        focusManager.clearFocus()
+        keyboard?.hide()
     }
 
     LaunchedEffect(query, quickChip, savedOnly, filters, sort) {
@@ -289,8 +392,7 @@ fun PapersScreen(
     }
 
     BackHandler(enabled = queryInput.isNotBlank() || filters.count > 0 || savedOnly) {
-        queryInput = ""
-        query = ""
+        clearSearch()
         filters = PaperFilters()
         savedOnly = false
         quickChip = "All"
@@ -372,8 +474,6 @@ fun PapersScreen(
     val pageItems = visible.drop(pageStart).take(PAPERS_PER_PAGE)
 
     val listState = rememberLazyListState()
-    val settleScope = rememberCoroutineScope()
-
     // The controls (tabs, search, chips, sort) are the list's first item, so the
     // first paper or scheme sits one item further down — plus the offline notice
     // when the library is showing cached rows.
@@ -398,6 +498,28 @@ fun PapersScreen(
         modifier = modifier
             .fillMaxSize()
             .background(PaperBg)
+            .onGloballyPositioned { screenBounds = it }
+            // Tapping anywhere that is not the search field ends the focus, the
+            // way every other search box on the phone behaves. This observes the
+            // Initial pass and consumes nothing, so scrolling, row taps, chips
+            // and the keyboard itself keep working exactly as before.
+            .pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent(PointerEventPass.Initial)
+                        val down = event.changes.firstOrNull {
+                            it.changedToDownIgnoreConsumed()
+                        } ?: continue
+                        // "boundsInRoot" is measured against the window, the tap
+                        // against this Column; the origin turns one into the other.
+                        val origin = screenBounds?.boundsInRoot()?.topLeft ?: Offset.Zero
+                        val field = searchFieldBounds
+                        val tappedTheField = field != Rect.Zero &&
+                            field.contains(down.position + origin)
+                        if (!tappedTheField) focusManager.clearFocus()
+                    }
+                }
+            }
     ) {
         // ── top bar: the only thing that stays put ──────────────────────────
         Column(
@@ -538,60 +660,88 @@ fun PapersScreen(
                                 onClick = { onSegmentChange(1) }
                             )
                         }
-                        // search
-                        OutlinedTextField(
-                            value = queryInput,
-                            onValueChange = { queryInput = it },
+                        // search: type, then Enter or the button to run it
+                        Row(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(horizontal = 16.dp, vertical = 6.dp)
-                                .height(50.dp)
-                                .testTag("papers_search_bar"),
-                            placeholder = {
-                                Text(
-                                    text = "Search subject, code or year — e.g. Physics, PHY, 2024",
-                                    fontFamily = MaisonNeueFontFamily,
-                                    fontSize = PT.meta,
-                                    color = PaperFaint
-                                )
-                            },
-                            leadingIcon = {
-                                Icon(
-                                    Icons.Default.Search,
-                                    contentDescription = null,
-                                    tint = PaperMuted,
-                                    modifier = Modifier.size(19.dp)
-                                )
-                            },
-                            trailingIcon = {
-                                if (queryInput.isNotEmpty()) {
+                                .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
+                                .onGloballyPositioned { searchFieldBounds = it.boundsInRoot() },
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            OutlinedTextField(
+                                value = queryInput,
+                                onValueChange = { queryInput = it },
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .height(50.dp)
+                                    .testTag("papers_search_bar"),
+                                placeholder = {
+                                    Text(
+                                        text = "Physics, PHY, 2020 SFT…",
+                                        fontFamily = MaisonNeueFontFamily,
+                                        fontSize = PT.meta,
+                                        color = PaperFaint
+                                    )
+                                },
+                                leadingIcon = {
                                     Icon(
-                                        Icons.Default.Close,
-                                        contentDescription = "Clear search",
+                                        Icons.Default.Search,
+                                        contentDescription = null,
                                         tint = PaperMuted,
-                                        modifier = Modifier
-                                            .size(18.dp)
-                                            .clickable {
-                                                queryInput = ""
-                                                query = ""
-                                            }
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                },
+                                trailingIcon = {
+                                    if (queryInput.isNotEmpty() || query.isNotEmpty()) {
+                                        Icon(
+                                            Icons.Default.Close,
+                                            contentDescription = "Clear search",
+                                            tint = PaperMuted,
+                                            modifier = Modifier
+                                                .size(18.dp)
+                                                .clickable { clearSearch() }
+                                                .testTag("papers_search_clear")
+                                        )
+                                    }
+                                },
+                                singleLine = true,
+                                shape = RoundedCornerShape(26.dp),
+                                textStyle = androidx.compose.ui.text.TextStyle(
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = PT.body,
+                                    color = PaperInk
+                                ),
+                                keyboardOptions = KeyboardOptions(imeAction = ImeAction.Search),
+                                keyboardActions = KeyboardActions(onSearch = { submitSearch() }),
+                                colors = OutlinedTextFieldDefaults.colors(
+                                    focusedBorderColor = PaperGreen,
+                                    unfocusedBorderColor = PaperHairline,
+                                    focusedContainerColor = Color.White,
+                                    unfocusedContainerColor = Color.White
+                                )
+                            )
+
+                            // The same row, one tap: nothing here depends on the
+                            // student knowing that a keyboard has a search key.
+                            Surface(
+                                onClick = { submitSearch() },
+                                shape = RoundedCornerShape(16.dp),
+                                color = PaperGreen,
+                                modifier = Modifier
+                                    .size(50.dp)
+                                    .testTag("papers_search_submit")
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        Icons.Default.Search,
+                                        contentDescription = "Search papers",
+                                        tint = Color.White,
+                                        modifier = Modifier.size(21.dp)
                                     )
                                 }
-                            },
-                            singleLine = true,
-                            shape = RoundedCornerShape(26.dp),
-                            textStyle = androidx.compose.ui.text.TextStyle(
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = PT.body,
-                                color = PaperInk
-                            ),
-                            colors = OutlinedTextFieldDefaults.colors(
-                                focusedBorderColor = PaperGreen,
-                                unfocusedBorderColor = PaperHairline,
-                                focusedContainerColor = Color.White,
-                                unfocusedContainerColor = Color.White
-                            )
-                        )
+                            }
+                        }
 
                         // quick chips + saved
                         Row(
@@ -744,8 +894,7 @@ fun PapersScreen(
                         Box(modifier = Modifier.fillParentMaxHeight(0.75f)) {
                             EmptyResultsState(
                                 onClear = {
-                                    queryInput = ""
-                                    query = ""
+                                    clearSearch()
                                     quickChip = "All"
                                     savedOnly = false
                                     filters = PaperFilters()
@@ -1492,7 +1641,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
         )
         Spacer(Modifier.height(6.dp))
         Text(
-            text = "Try a different subject, year or medium.",
+            text = "Try fewer words — e.g. \"Physics 2020\" or a code like SFT.",
             fontFamily = MaisonNeueFontFamily,
             fontSize = PT.meta,
             color = PaperMuted

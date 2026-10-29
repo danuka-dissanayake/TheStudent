@@ -25,17 +25,49 @@ use both, so the search field matches both.
 | Medium | "Sinhala" |
 | Grade, exam type, category, stream | "Grade 13", "A/L" |
 
-Two passes are made: a plain `contains`, then a punctuation- and space-insensitive
-one, so `combinedmaths` finds Combined Mathematics as well. `SubjectCodes`'
-fallback code `PAPER` is never used as a search term — otherwise every paper
-would answer the word "paper".
+Every row is reduced to a list of these fields, and each word of the query is
+compared against all of them (see below). Comparisons are case-insensitive, and
+run a second time with punctuation and spaces stripped, so `combinedmaths` finds
+Combined Mathematics as well. `SubjectCodes`' fallback code `PAPER` is never used
+as a search term — otherwise every paper would answer the word "paper".
 
-### Typing is debounced
+### Search runs on submit, in words
 
-The field holds `queryInput`; the list filters on `query`, which only catches up
-after 400 ms without a keystroke (`SEARCH_SETTLE_MS`). Filtering ~1,200 rows on
-every keystroke is what made the field feel laggy. Clearing the field clears
-both.
+The field holds `queryInput`; the list filters on `query`, which only changes
+when the student submits — **Enter** on the keyboard (`ImeAction.Search`) or the
+green search button sitting in the same row as the field. Typing never re-filters
+1,200 rows under their fingers, and nothing waits on a hidden timer. Submitting
+the same words twice still answers with a shimmer, so a tap never feels ignored.
+
+The query is split into words and **every word must match somewhere in the row** —
+not necessarily the same field. This is the fix for "2020 SFT", which the old
+whole-phrase `contains` could never match because the year and the subject code
+live in different columns:
+
+| Search | Matches because |
+|---|---|
+| `2020 sft` | "2020" hits the year column, "sft" hits the subject code |
+| `sft2020`, `2020sft` | composite `code year` / `year code` strings |
+| `maths 2021` | synonym "maths" → "mathematics" |
+| `scheme physics` | "scheme" hits the scheme row title, "physics" the subject |
+| `combinedmaths` | punctuation- and space-stripped comparison |
+
+`SEARCH_SYNONYMS` only widens a word to spellings the library already stores
+(maths/mathematics, chem/chemistry, phy/physics, eng/english, pastpaper/paper,
+answers/marking scheme…) — it never invents a match. One-letter words have to
+start a word rather than appear anywhere, so `a` cannot match everything.
+
+Nothing else changes: clearing the field (the X, Back, "Clear") resets the input
+and the applied query together.
+
+### Tapping outside the field ends the focus
+
+The screen's root `Column` observes the pointer **Initial** pass and, on any tap
+that is not inside the search row, calls `focusManager.clearFocus()`. The field's
+bounds are captured with `boundsInRoot()` and compared against the tap converted
+into the same coordinate space, so tapping the field itself never dismisses it.
+The observer consumes nothing, so scrolling, row taps, chips and the keyboard all
+behave exactly as before. Submitting also clears focus and hides the keyboard.
 
 ---
 
