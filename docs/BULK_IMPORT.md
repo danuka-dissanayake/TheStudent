@@ -141,7 +141,63 @@ the three ordinary mediums instead.
 * Create thumbnails: paper covers are drawn procedurally in the app from the
   subject code.
 
-## 7. Making the upload faster
+## 7. Direct-to-server import (no HTTP upload)
+
+The fastest route for a big archive, and the one to use for gigabytes: put the
+files on the host with FTP / SFTP / DirectAdmin's File Manager, then add the rows
+with SQL. Nothing goes through `upload_paper.php`, so `post_max_size`, the 25 MB
+cap, request timeouts and 700 round trips all stop mattering. Only the uplink
+matters, and FTP or `rsync` uses it better than 700 separate POSTs.
+
+**Step 1 — stage the files** (renames them to clean served names in one go):
+
+```bash
+python3 scripts/import_past_papers.py --scan ~/Branded_Past_Papers \
+    --stage ~/upload_ready --emit-sql ~/import.sql --copy-map ~/copy_map.csv \
+    --serve-base-url https://app.quizontal.site --upload-prefix uploads/papers
+```
+
+This writes:
+
+```
+upload_ready/                      ← upload the CONTENTS of this folder
+  physics/2024-physics-sinhala-paper.pdf
+  physics/2024-physics-sinhala-scheme.pdf
+  accounting/2015-accounting-english-paper.pdf
+  …
+import.sql                         ← 730 guarded INSERTs for phpMyAdmin
+copy_map.csv                       ← source file → served path, for auditing
+```
+
+Names come from the parsed fields, so they are ASCII, unique per
+subject/year/medium, and readable in a URL — no emoji or spaces to escape.
+
+**Step 2 — upload the tree** so it lands under `public_html/uploads/papers/`
+(File Manager → select all → Upload, or `rsync -avz ~/upload_ready/ user@host:…/uploads/papers/`).
+`rsync` is worth it: partial uploads resume instead of starting over.
+
+**Step 3 — import `import.sql` in phpMyAdmin** (Import → choose file → Go). Every
+statement is guarded with `NOT EXISTS` on subject + year + medium, so running it
+twice adds nothing.
+
+**Step 4 — check one row.** Open a paper in the app; if the PDF 404s, the URL
+base or prefix is wrong — fix `--serve-base-url` / `--upload-prefix` and re-emit.
+Run this in phpMyAdmin to confirm the files are reachable:
+
+```sql
+SELECT id, title, pdf_url FROM past_papers ORDER BY id DESC LIMIT 5;
+```
+
+**Notes**
+
+* `pdf_url` is what the app opens and downloads, so the folder must be web
+  accessible. `backend/uploads/` is denied only for `config`/`.sql`/dot files.
+* A single paper larger than `post_max_size` imports fine this way — that limit
+  is only about HTTP uploads.
+* The HTTP importer and this route use the same dedupe key, so mixing them is
+  safe: run whichever, then the other skips what exists.
+
+## 8. Making the upload faster
 
 A 5 GB archive at ~290 KB/s takes roughly four hours, so measure before
 blaming the script:
@@ -180,7 +236,7 @@ the six papers over the 25 MB limit back under it. Use `300` instead of `150`
 for diagram-heavy subjects, or run `--scan` on the compressed tree first and
 compare the page counts in the plan before uploading.
 
-## 8. "Paper title is required." — a body limit, not a bug
+## 9. "Paper title is required." — a body limit, not a bug
 
 If uploads fail with `Paper title is required.` after the first few papers,
 nothing on the client is wrong: PHP discarded the request body, so `$_POST`
@@ -221,7 +277,7 @@ paper is uploaded alone and the scheme is written to `schemes_pending.csv` for
 later. A single paper larger than `post_max_size` cannot be worked around at
 all — compress it (`scripts/compress_papers.sh`) or raise the limit.
 
-## 9. Response shapes
+## 10. Response shapes
 
 `api/auth.php` builds responses with `sendJsonResponse()`, which **merges** its
 payload into the top level — `{"status": "success", "token": …, "user": {…}}` —

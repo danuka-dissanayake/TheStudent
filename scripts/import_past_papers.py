@@ -636,6 +636,149 @@ def write_issues(path: Path, issues: list[dict]) -> None:
     print(f"  issues   → {path}")
 
 
+
+# ── direct-to-server route (no HTTP upload) ──────────────────────────────────
+
+
+def slug(text: str) -> str:
+    """A URL-safe spelling of a subject: "Communication & Media Studies" →
+    "communication-and-media-studies"."""
+    text = text.replace("&", " and ")
+    text = unicodedata.normalize("NFKD", text).encode("ascii", "ignore").decode()
+    text = re.sub(r"[^A-Za-z0-9]+", "-", text).strip("-").lower()
+    return re.sub(r"-{2,}", "-", text)
+
+
+def served_path(paper: Item, kind: str) -> str:
+    """
+    Where the file must live under the web root, relative to `--upload-prefix`.
+
+    Names are built from the parsed fields rather than copied from the archive,
+    so they are plain ASCII, unique per subject/year/medium, and readable in a
+    URL: papers/physics/2024-physics-sinhala-paper.pdf
+    """
+    folder = slug(paper.subject) or "subject"
+    medium = slug(paper.medium)
+    stem = f"{paper.year}-{folder}-{medium}-{kind}.pdf"
+    return f"{folder}/{stem}"
+
+
+def stage_files(papers: list[Item], root: Path, stage_dir: Path) -> list[dict]:
+    """
+    Copy every paper and scheme into `stage_dir` under its served name.
+
+    The staged tree is exactly what has to be uploaded: hand its contents to
+    FTP or DirectAdmin's File Manager and the URLs in the SQL will resolve.
+    """
+    import shutil
+
+    mapping: list[dict] = []
+    for index, paper in enumerate(papers, start=1):
+        paper_rel = served_path(paper, "paper")
+        target = stage_dir / paper_rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        if root is not None:
+            shutil.copy2(root / paper.rel_path, target)
+        mapping.append({
+            "kind": "paper",
+            "title": paper.title,
+            "source": paper.rel_path,
+            "served": paper_rel,
+        })
+        if paper.scheme is not None:
+            scheme_rel = served_path(paper, "scheme")
+            scheme_target = stage_dir / scheme_rel
+            scheme_target.parent.mkdir(parents=True, exist_ok=True)
+            if root is not None:
+                shutil.copy2(root / paper.scheme.rel_path, scheme_target)
+            mapping.append({
+                "kind": "scheme",
+                "title": paper.title,
+                "source": paper.scheme.rel_path,
+                "served": scheme_rel,
+            })
+        if index % 100 == 0:
+            print(f"  staged {index}/{len(papers)}")
+    return mapping
+
+
+def sql_quote(value) -> str:
+    if value is None:
+        return "NULL"
+    return "'" + str(value).replace("\\", "\\\\").replace("'", "''") + "'"
+
+
+def write_sql(
+    path: Path,
+    papers: list[Item],
+    base_url: str,
+    upload_prefix: str,
+) -> None:
+    """
+    INSERT statements for phpMyAdmin, one per paper.
+
+    Each is guarded with NOT EXISTS on subject + year + medium, so importing the
+    file twice adds nothing — the same rule the HTTP importer uses to skip papers
+    that are already on the server.
+    """
+    base = base_url.rstrip("/")
+    prefix = upload_prefix.strip("/")
+    header = (
+        "-- TheStudent · direct import of the past-paper archive\n"
+        f"-- {len(papers)} papers. Upload the files to {prefix}/ first, then import\n"
+        "-- this file in phpMyAdmin. Safe to run twice: every row is guarded by\n"
+        "-- subject + year + medium.\n"
+        "SET NAMES utf8mb4;"
+    )
+    parts: list[str] = [header]
+
+    for paper in papers:
+        pdf_url = f"{base}/{prefix}/{served_path(paper, 'paper')}"
+        scheme_url = (
+            f"{base}/{prefix}/{served_path(paper, 'scheme')}"
+            if paper.scheme is not None
+            else None
+        )
+        size = human_size(paper.size_bytes) if paper.size_bytes else ""
+        parts.append(
+            "INSERT INTO `past_papers`\n"
+            "  (`grade`, `category`, `subject`, `stream`, `year`, `exam_type`,\n"
+            "   `medium`, `title`, `pdf_url`, `marking_scheme_url`, `description`,\n"
+            "   `file_size`, `pages`, `status`)\n"
+            "SELECT "
+            f"{sql_quote(GRADE)}, {sql_quote(CATEGORY)}, {sql_quote(paper.subject)},\n"
+            f"       {sql_quote(paper.stream)}, {int(paper.year or 0)}, "
+            f"{sql_quote(EXAM_TYPE)}, {sql_quote(paper.medium)},\n"
+            f"       {sql_quote(paper.title)}, {sql_quote(pdf_url)},\n"
+            f"       {sql_quote(scheme_url)}, {sql_quote(paper.description)},\n"
+            f"       {sql_quote(size)}, {int(paper.pages or 0)}, 'published'\n"
+            "WHERE NOT EXISTS (\n"
+            "  SELECT 1 FROM `past_papers`\n"
+            f"  WHERE `subject` = {sql_quote(paper.subject)} "
+            f"AND `year` = {int(paper.year or 0)}\n"
+            f"    AND `medium` = {sql_quote(paper.medium)}\n"
+            ");"
+        )
+
+    if any(not paper.size_bytes for paper in papers):
+        print("  note: some sizes/pages are unknown (planned from a listing) — "
+              "run with --scan for exact values")
+    path.write_text("\n\n".join(parts) + "\n", encoding="utf-8")
+    print(f"  sql      → {path}")
+
+
+def write_copy_map(path: Path, mapping: list[dict], upload_prefix: str) -> None:
+    prefix = upload_prefix.strip("/")
+    with path.open("w", newline="", encoding="utf-8") as handle:
+        writer = csv.DictWriter(
+            handle, fieldnames=["kind", "title", "source", "served", "url_path"]
+        )
+        writer.writeheader()
+        for row in mapping:
+            writer.writerow({**row, "url_path": f"{prefix}/{row['served']}"})
+    print(f"  map      → {path}")
+
+
 # ── backend ──────────────────────────────────────────────────────────────────
 
 
@@ -1128,6 +1271,21 @@ def main(argv: list[str] | None = None) -> int:
                         help="write a plain-text summary here")
     parser.add_argument("--issues", type=Path, metavar="CSV",
                         help="write per-file warnings here")
+    parser.add_argument("--stage", type=Path, metavar="DIR",
+                        help="copy every paper and scheme into DIR under its "
+                             "served file name — upload that tree to the host, "
+                             "then import the SQL")
+    parser.add_argument("--emit-sql", type=Path, metavar="FILE",
+                        help="write INSERT statements for phpMyAdmin (no HTTP)")
+    parser.add_argument("--copy-map", type=Path, metavar="CSV",
+                        help="write source → served path for every staged file")
+    parser.add_argument("--upload-prefix", default="uploads/papers",
+                        help="folder under the web root holding the files "
+                             "(default: uploads/papers)")
+    parser.add_argument("--serve-base-url",
+                        default=os.environ.get("TS_SERVE_URL", DEFAULT_BASE_URL),
+                        help="public root used inside pdf_url "
+                             f"(default: {DEFAULT_BASE_URL})")
     parser.add_argument("--state", type=Path, default=Path("import_state.jsonl"),
                         help="progress log for resuming (default: ./import_state.jsonl)")
     parser.add_argument("--status", default="published",
@@ -1208,8 +1366,33 @@ def main(argv: list[str] | None = None) -> int:
                 print_plan(papers, orphans, issues)
         print(f"  report   → {args.report}")
 
+    # ── direct-to-server route: no HTTP upload at all ────────────────────
+    if args.emit_sql or args.stage:
+        if args.stage:
+            if args.tree:
+                print("--stage needs the real files: use --scan.", file=sys.stderr)
+                return 2
+            if args.stage.exists() and any(args.stage.iterdir()):
+                print(f"  note: {args.stage} is not empty — existing files are "
+                      f"kept and overwritten one by one")
+            args.stage.mkdir(parents=True, exist_ok=True)
+            print(f"  staging {len(papers)} paper(s) into {args.stage} …")
+            mapping = stage_files(papers, root, args.stage)
+            print(f"  staged  {len(mapping)} file(s)")
+            if args.copy_map:
+                write_copy_map(args.copy_map, mapping, args.upload_prefix)
+        if args.emit_sql:
+            write_sql(args.emit_sql, papers, args.serve_base_url, args.upload_prefix)
+        print()
+        print(f"  Next: upload the contents of {args.stage or '<staged folder>'} to")
+        print(f"  the web root so they land under {args.upload_prefix.strip('/')}/,")
+        print("  then import the .sql file in phpMyAdmin.")
+        print()
+        return 0
+
     if not args.upload:
-        print("  plan only — add --upload to send these to the backend.\n")
+        print("  plan only — add --upload to send these to the backend,")
+        print("  or --stage/--emit-sql for the direct-to-server route.\n")
         return 0
 
     if args.tree:
