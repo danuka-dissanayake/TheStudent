@@ -141,7 +141,46 @@ the three ordinary mediums instead.
 * Create thumbnails: paper covers are drawn procedurally in the app from the
   subject code.
 
-## 7. Response shapes
+## 7. Making the upload faster
+
+A 5 GB archive at ~290 KB/s takes roughly four hours, so measure before
+blaming the script:
+
+```bash
+# what the server is actually taking (a completed paper's rate)
+# then: what your line can do at all
+curl -o /dev/null -T "some-paper.pdf" https://speed.cloudflare.com/__up
+```
+
+If that second number is also ~2 Mbps, you are at the ceiling of your uplink and
+nothing on either side can beat it. If it is much higher, the bottleneck is
+per-connection, and parallel uploads help:
+
+```bash
+python3 scripts/import_past_papers.py --scan "<dir>" --upload \
+    --email you@example.com --workers 5
+```
+
+`--workers N` sends N papers at once; 4–6 saturates a typical home uplink, and
+beyond that the requests just queue on the shared host. Keep `--workers 1` if
+you see 429s or 5xx from the host — that is it asking for less concurrency.
+
+The bigger lever is **not sending 5 GB in the first place**:
+
+```bash
+./scripts/compress_papers.sh ~/Branded_Past_Papers ~/Branded_Compressed 150
+python3 scripts/import_past_papers.py --scan ~/Branded_Compressed --manifest papers.csv
+```
+
+Ghostscript re-writes every PDF at 150 dpi (`/ebook`) with the tree and file
+names intact, so papers and schemes still pair up. Scan-heavy archives typically
+drop to 20–30 % of their size — a 5 GB set becomes ~1.2 GB, which is not just a
+faster upload but a faster download for every student afterwards. It also brings
+the six papers over the 25 MB limit back under it. Use `300` instead of `150`
+for diagram-heavy subjects, or run `--scan` on the compressed tree first and
+compare the page counts in the plan before uploading.
+
+## 8. Response shapes
 
 `api/auth.php` builds responses with `sendJsonResponse()`, which **merges** its
 payload into the top level — `{"status": "success", "token": …, "user": {…}}` —

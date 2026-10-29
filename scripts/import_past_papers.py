@@ -47,12 +47,14 @@ import os
 import re
 import ssl
 import sys
+import threading
 import time
 import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -889,6 +891,7 @@ def upload_all(
     delay: float,
     retries: int,
     limit: int | None,
+    workers: int = 1,
 ) -> None:
     done = load_state(state_path)
     existing = backend.existing_keys() if skip_existing else set()
@@ -914,63 +917,73 @@ def upload_all(
     total_bytes = sum(p.size_bytes for p in queue) + sum(
         p.scheme.size_bytes for p in queue if p.scheme
     )
-    print(f"  queued {len(queue)} paper(s), {human_size(total_bytes)} to send\n")
+    print(f"  queued {len(queue)} paper(s), {human_size(total_bytes)} to send")
+    print(f"  {workers} parallel upload(s)\n" if workers > 1 else "")
 
     failures: list[dict] = []
     started = time.time()
-    sent_bytes = 0
-    previous_signature: tuple[str, float] | None = None
+    counters = {"sent_bytes": 0, "done": 0, "ok": 0}
+    lock = threading.Lock()
 
-    for index, paper in enumerate(queue, start=1):
-        # upload_paper.php names the stored file time() + original name, so two
-        # uploads of same-named files inside one second would overwrite each
-        # other. Serialise that rare case instead of losing a paper.
-        signature = (Path(paper.rel_path).name, 0.0)
-        if previous_signature and previous_signature[0] == signature[0]:
-            waited = time.time() - previous_signature[1]
-            if waited < 1.1:
-                time.sleep(1.1 - waited)
-
-        stamp = f"[{index:>4}/{len(queue)}] {paper.label():<56}"
+    def send(paper: Item) -> None:
+        """One paper, with retries. Runs on a worker thread."""
         attempt = 0
         while True:
             attempt += 1
             try:
                 reply = backend.upload(paper, root, status)
-                sent_bytes += paper.size_bytes
-                if paper.scheme is not None:
-                    sent_bytes += paper.scheme.size_bytes
-                append_state(state_path, paper, reply.get("paper_id"))
-                elapsed = time.time() - started
-                rate = sent_bytes / elapsed / 1024 if elapsed > 0 else 0
-                pages = f"{paper.pages}p" if paper.pages else "?p"
-                print(f"{stamp} ✓ {human_size(paper.size_bytes):>9} {pages:>5}  "
-                      f"id={reply.get('paper_id')}  {rate:4.0f} KB/s")
-                break
+                with lock:
+                    append_state(state_path, paper, reply.get("paper_id"))
+                    counters["sent_bytes"] += paper.size_bytes + (
+                        paper.scheme.size_bytes if paper.scheme else 0
+                    )
+                    counters["done"] += 1
+                    counters["ok"] += 1
+                    elapsed = time.time() - started
+                    rate = counters["sent_bytes"] / elapsed / 1024 if elapsed else 0
+                    pages = f"{paper.pages}p" if paper.pages else "?p"
+                    print(f"[{counters['done']:>4}/{len(queue)}] "
+                          f"{paper.label():<56} ✓ "
+                          f"{human_size(paper.size_bytes):>9} {pages:>5}  "
+                          f"id={reply.get('paper_id')}  {rate:4.0f} KB/s")
+                return
             except Exception as error:  # noqa: BLE001 - reported, not raised
                 if attempt <= retries:
-                    backoff = attempt * 2
-                    print(f"{stamp} ↻ {error} — retrying in {backoff}s")
-                    time.sleep(backoff)
+                    with lock:
+                        print(f"{paper.label():<56} ↻ {error} — retrying "
+                              f"in {attempt * 2}s")
+                    time.sleep(attempt * 2)
                     continue
-                print(f"{stamp} ✗ {error}")
-                failures.append({
-                    "path": paper.rel_path,
-                    "subject": paper.subject,
-                    "year": paper.year,
-                    "medium": paper.medium,
-                    "error": str(error),
-                })
-                append_state(state_path, paper, None, error=str(error))
-                break
-        previous_signature = (Path(paper.rel_path).name, time.time())
-        if delay:
-            time.sleep(delay)
+                with lock:
+                    counters["done"] += 1
+                    print(f"[{counters['done']:>4}/{len(queue)}] "
+                          f"{paper.label():<56} ✗ {error}")
+                    failures.append({
+                        "path": paper.rel_path,
+                        "subject": paper.subject,
+                        "year": paper.year,
+                        "medium": paper.medium,
+                        "error": str(error),
+                    })
+                    append_state(state_path, paper, None, error=str(error))
+                return
+
+    if workers <= 1:
+        # Sequential keeps the log in manifest order and lets a single stream
+        # use the whole uplink, which is usually all a shared host will take.
+        for paper in queue:
+            send(paper)
+            if delay:
+                time.sleep(delay)
+    else:
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            list(pool.map(send, queue))
 
     elapsed = time.time() - started
     print()
-    print(f"  finished in {elapsed / 60:.1f} min · {human_size(sent_bytes)} sent")
-    print(f"  uploaded {len(queue) - len(failures)} · failed {len(failures)}")
+    print(f"  finished in {elapsed / 60:.1f} min · "
+          f"{human_size(counters['sent_bytes'])} sent")
+    print(f"  uploaded {counters['ok']} · failed {len(failures)}")
     if failures:
         failed_path = state_path.with_name("upload_failed.csv")
         with failed_path.open("w", newline="", encoding="utf-8") as handle:
@@ -1040,7 +1053,10 @@ def main(argv: list[str] | None = None) -> int:
                         help="row status to write (default: published)")
     parser.add_argument("--limit", type=int, help="upload at most N papers this run")
     parser.add_argument("--delay", type=float, default=0.0,
-                        help="seconds to sleep between uploads")
+                        help="seconds to sleep between uploads (workers=1)")
+    parser.add_argument("--workers", type=int, default=1, metavar="N",
+                        help="upload N papers at once (4–6 usually saturates a "
+                             "home uplink; more just queues on the server)")
     parser.add_argument("--retries", type=int, default=2, help="retries per paper")
     parser.add_argument("--no-skip-existing", action="store_true",
                         help="upload even when the paper is already on the server")
@@ -1155,6 +1171,7 @@ def main(argv: list[str] | None = None) -> int:
             delay=args.delay,
             retries=args.retries,
             limit=args.limit,
+            workers=max(1, args.workers),
         )
     except KeyboardInterrupt:
         print("\n  stopped — progress is saved, re-run to continue.")
