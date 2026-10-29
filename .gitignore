@@ -16,6 +16,10 @@ backend/uploads/*
 !backend/uploads/avatars/.htaccess
 !backend/uploads/avatars/README.txt
 
+# Past-paper importer artefacts (scripts/import_past_papers.py)
+import_state.jsonl
+upload_failed.csv
+
 # Backend secrets (never commit real credentials)
 backend/config.secrets.php
 backend/config.secrets.*.php
@@ -30,3 +34,6 @@ app/website_php_mysql/config.secrets.php
 # Firebase service account key for push notifications (never commit)
 backend/api/chat-fcm-service-account.json
 backend/fcm-service-account.json
+
+# Python bytecode from scripts/
+__pycache__/
