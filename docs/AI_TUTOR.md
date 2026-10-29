@@ -282,3 +282,20 @@ call owns the whole screen.
 - **Model settings are gone** from the tutor UI (and the `ModelSettingsDialog`
   composable with them). The call still degrades to the local tutor on its own;
   the status line keeps saying so.
+
+### 11.3 Round 18, fourth pass
+
+- **No rings on the sphere.** The animated ripple rings are gone. What is left is
+  a stacked drop shadow (tight contact shadow + wide soft one + brand bloom),
+  a deeper glass body with a shaded underside, a bright inner rim and a hairline
+  outer edge — so the ball is legible against its own pastel background.
+  Mockup: `designs/38a-tutor-idle-emerald.png`.
+- **Cards follow the reference.** Two off-white `ModeCard`s side by side: tinted
+  icon chip, corner arrow, bold title, two or three lines of explanation. The
+  speaking-level strip was removed with them.
+- **The mic is a squircle**, not a ring stack: a brand gradient key with a
+  coloured drop shadow, a gloss across the top and the five `MicFace` glyphs.
+- **The home screen never scrolls.** `BoxWithConstraints` sizes the sphere from
+  the space actually left (`min(width * 0.62, height * 0.42)`, 120–250 dp) and
+  the gaps are weights, so the header, greeting, cards and mic all fit on a
+  640 dp phone as well as a tablet.

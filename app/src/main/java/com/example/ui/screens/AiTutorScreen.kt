@@ -21,6 +21,7 @@ import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -44,6 +45,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
+import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
@@ -65,6 +67,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
@@ -123,6 +126,7 @@ private val GlassEdge = Color(0xE6FFFFFF)      // 90% hairline
 private val BubbleTutor = Color(0xC2FFFFFF)
 private val BubbleStudent = Color(0xF2059696)
 private val CorrectionFill = Color(0xD9FFF7E6) // warm amber, still translucent
+private val CardCream = Color(0xF7FFFDF8)       // the reference's off-white card
 
 /** What the sphere is doing. It is the only thing on the screen that moves. */
 private enum class OrbMode { IDLE, LISTENING, SPEAKING, THINKING }
@@ -157,8 +161,6 @@ fun AiTutorScreen(
     callSummary: CallSummary?,
     currentScenario: String,
     studentName: String,
-    spokenMinutes: Int,
-    spokenCalls: Int,
     activeLessonId: String?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
@@ -244,8 +246,6 @@ fun AiTutorScreen(
 
             else -> IdleContent(
                 studentName = studentName,
-                spokenMinutes = spokenMinutes,
-                spokenCalls = spokenCalls,
                 scenario = currentScenario,
                 lesson = lesson,
                 status = hfStatusMessage,
@@ -353,8 +353,8 @@ private fun TutorBackdrop() {
  * starts the call, because on every voice assistant people try the orb first.
  *
  * Everything is drawn in one `Canvas`, masked to a circle: six drifting colour
- * fields, a halo that widens with the voice, ripple rings while listening, a
- * specular highlight and a rim.
+ * fields, a soft drop shadow underneath, a brand bloom that widens with the
+ * voice, a specular highlight and a double rim.
  */
 @Composable
 private fun IridescentOrb(
@@ -392,16 +392,6 @@ private fun IridescentOrb(
         targetValue = 0.72f,
         animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
         label = "orb_think"
-    )
-    // A ring leaves the sphere every two seconds while the call is live.
-    val ripple = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2_000, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "orb_ripple"
     )
 
     var pressed by remember { mutableStateOf(false) }
@@ -467,69 +457,74 @@ private fun IridescentOrb(
         // Read here, at draw time, so the sphere animates without re-composing.
         val energy = energyOf()
         val driftDeg = drift.value
-        val rippleT = ripple.value
         val pressLift = if (pressed) 1f else 0f
 
         // ── Shadow ───────────────────────────────────────────────────────────
-        // A soft ground shadow tucked under the sphere: this is what stops it
-        // looking pasted onto the page. It deepens a touch while it is speaking
-        // or being pressed, as if the sphere sat closer to the glass.
+        // The sphere is pastel on a pastel page, so it needs a real shadow to sit
+        // ON the page rather than dissolve into it. This is a stacked, offset
+        // shadow: a tight dark contact shadow right under the ball, then a wide
+        // soft one, then a brand-tinted bloom. All of it is un-clipped, and none
+        // of it animates as a ring — it only breathes with the voice.
+        val lift = energy * 0.5f + pressLift * 0.6f
+        // wide soft shadow
         scope.drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    Color(0xFF2F6F5C).copy(alpha = 0.20f + 0.08f * energy + 0.06f * pressLift),
-                    Color(0xFF2F6F5C).copy(alpha = 0.06f),
-                    Color.Transparent
+                colorStops = arrayOf(
+                    0.00f to Color(0xFF123A30).copy(alpha = 0.26f + 0.06f * lift),
+                    0.55f to Color(0xFF123A30).copy(alpha = 0.16f + 0.05f * lift),
+                    1.00f to Color.Transparent
                 ),
-                center = Offset(c.x, c.y + sr * 0.62f),
-                radius = sr * 0.98f
+                center = Offset(c.x, c.y + sr * 0.30f),
+                radius = r * 1.02f
             ),
-            radius = sr * 0.98f,
-            center = Offset(c.x, c.y + sr * 0.62f)
+            radius = r * 1.02f,
+            center = Offset(c.x, c.y + sr * 0.30f)
         )
-
-        // ── Bloom ────────────────────────────────────────────────────────────
-        // Brand light spilling out of the sphere, brightest at the bottom-right
-        // where the light would come from, and stronger when the voice is loud.
+        // tight contact shadow, offset down: this is the one that reads as "solid"
         scope.drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(
-                    Brand.copy(alpha = 0.16f + 0.22f * energy),
-                    Brand.copy(alpha = 0.05f),
-                    Color.Transparent
+                colorStops = arrayOf(
+                    0.00f to Color(0xFF0F2E26).copy(alpha = 0.34f),
+                    0.70f to Color(0xFF0F2E26).copy(alpha = 0.20f),
+                    1.00f to Color.Transparent
                 ),
-                center = Offset(c.x + sr * 0.10f, c.y + sr * 0.10f),
-                radius = r
+                center = Offset(c.x, c.y + sr * 0.42f),
+                radius = sr * 0.95f
             ),
-            radius = r,
-            center = Offset(c.x + sr * 0.10f, c.y + sr * 0.10f)
+            radius = sr * 0.95f,
+            center = Offset(c.x, c.y + sr * 0.42f)
         )
-
-        // Ripples while the call is live: the "it can hear me" cue.
-        if (mode != OrbMode.IDLE) {
-            repeat(2) { index ->
-                val t = (rippleT + index * 0.5f) % 1f
-                val alpha = ((1f - t) * (0.16f + 0.40f * energy)).coerceIn(0f, 0.5f)
-                scope.drawCircle(
-                    color = Brand.copy(alpha = alpha),
-                    radius = sr * (0.92f + 0.42f * t),
-                    center = c,
-                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.035f)
-                )
-            }
-        }
+        // brand bloom, so the light belongs to the app
+        scope.drawCircle(
+            brush = Brush.radialGradient(
+                colorStops = arrayOf(
+                    0.00f to Brand.copy(alpha = 0.20f + 0.24f * energy),
+                    0.60f to Brand.copy(alpha = 0.07f),
+                    1.00f to Color.Transparent
+                ),
+                center = Offset(c.x + sr * 0.06f, c.y + sr * 0.12f),
+                radius = r * 0.98f
+            ),
+            radius = r * 0.98f,
+            center = Offset(c.x + sr * 0.06f, c.y + sr * 0.12f)
+        )
 
         // ── The sphere itself, masked to its own circle ──────────────────────
         val oval = Path().apply {
             addOval(Rect(center = c, radius = sr))
         }
         scope.clipPath(oval) {
-            // body
+            // body: white at the top-left, deep sea-green at the far edge, so the
+            // ball has a lit side and a shaded side even before the colour moves
             drawCircle(
                 brush = Brush.radialGradient(
-                    colors = listOf(Color(0xFFF7FFFC), Color(0xFFDBEFE6)),
-                    center = Offset(c.x - sr * 0.35f, c.y - sr * 0.4f),
-                    radius = sr * 1.5f
+                    colorStops = arrayOf(
+                        0.00f to Color(0xFFFFFFFF),
+                        0.45f to Color(0xFFF0FBF6),
+                        1.00f to Color(0xFFB6DCCD)
+                    ),
+                    center = Offset(c.x - sr * 0.35f, c.y - sr * 0.42f),
+                    radius = sr * 1.65f
                 ),
                 radius = sr,
                 center = c
@@ -556,12 +551,28 @@ private fun IridescentOrb(
                 scope.orbBlob(Offset(x, y), radius * sr * (1f + 0.24f * energy), color)
             }
 
-            blob(300f, 0.35f, 0.75f, Color(0xCCBCEFD9))
-            blob(35f, 0.42f, 0.68f, Color(0xCCE8F7C0))
-            blob(95f, 0.48f, 0.60f, Color(0xCCB4EEE2))
-            blob(160f, 0.40f, 0.62f, Color(0xBFBBE4F2))
-            blob(235f, 0.44f, 0.55f, Color(0xBFCBEBB8))
-            blob(0f, 0f, 0.55f, Color(0xB3FFFFFF))
+            blob(300f, 0.35f, 0.72f, Color(0xE6A8EBCB))
+            blob(35f, 0.42f, 0.66f, Color(0xE6D6F1A8))
+            blob(95f, 0.48f, 0.58f, Color(0xE69FE4D6))
+            blob(160f, 0.40f, 0.60f, Color(0xD99FD2EC))
+            blob(235f, 0.44f, 0.52f, Color(0xD9B4E2A6))
+            blob(0f, 0f, 0.50f, Color(0xD9FFFFFF))
+
+            // inner shade: the underside of a glass sphere is darker than its rim,
+            // and that single gradient is what stops it reading as a flat disc
+            drawCircle(
+                brush = Brush.radialGradient(
+                    colorStops = arrayOf(
+                        0.00f to Color.Transparent,
+                        0.62f to Color.Transparent,
+                        1.00f to Color(0xFF2F6F5C).copy(alpha = 0.34f)
+                    ),
+                    center = Offset(c.x - sr * 0.10f, c.y - sr * 0.18f),
+                    radius = sr * 1.28f
+                ),
+                radius = sr * 1.28f,
+                center = Offset(c.x - sr * 0.10f, c.y - sr * 0.18f)
+            )
 
             // specular highlight
             drawCircle(
@@ -574,12 +585,19 @@ private fun IridescentOrb(
                 center = Offset(c.x - sr * 0.33f, c.y - sr * 0.42f)
             )
 
-            // rim, so the sphere keeps its edge against a light background
+            // rim: a bright inner edge plus a hairline outer edge, which is the
+            // cheapest way to make a light object read against a light page
             drawCircle(
-                color = Color.White.copy(alpha = 0.30f + 0.20f * energy),
-                radius = sr - sr * 0.015f,
+                color = Color.White.copy(alpha = 0.55f + 0.25f * energy),
+                radius = sr - sr * 0.018f,
                 center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.03f)
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.035f)
+            )
+            drawCircle(
+                color = Color(0xFF7FB6A4).copy(alpha = 0.45f),
+                radius = sr - sr * 0.004f,
+                center = c,
+                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.012f)
             )
         }
     }
@@ -725,8 +743,6 @@ private fun GlassCard(
 @Composable
 private fun IdleContent(
     studentName: String,
-    spokenMinutes: Int,
-    spokenCalls: Int,
     scenario: String,
     lesson: TutorLesson?,
     status: String,
@@ -747,80 +763,84 @@ private fun IdleContent(
             onMenu = onMenu
         )
 
-        Column(
+        // No scroll on this page. The sphere is measured from the room that is
+        // actually left and every gap is a weight, so the same layout sits whole
+        // on a 640 dp phone and on a tablet instead of being cut off at the mic.
+        BoxWithConstraints(
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-                .padding(horizontal = 24.dp),
-            horizontalAlignment = Alignment.CenterHorizontally
+                .padding(horizontal = 20.dp)
         ) {
-            Spacer(Modifier.height(10.dp))
-            IridescentOrb(
-                size = 236.dp,
-                mode = OrbMode.IDLE,
-                onTap = onMic
-            )
-            Spacer(Modifier.height(16.dp))
-            Text(
-                text = if (firstName.isBlank()) "Hello" else "Hello, $firstName",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 16.5.sp,
-                color = Muted,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                text = "Ready to speak English?",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 28.sp,
-                lineHeight = 34.sp,
-                fontWeight = FontWeight.ExtraBold,
-                color = Ink,
-                textAlign = TextAlign.Center
-            )
-            Spacer(Modifier.height(22.dp))
+            val orbSize = (minOf(maxWidth * 0.62f, maxHeight * 0.42f))
+                .coerceIn(120.dp, 250.dp)
 
-            // Two full-width tiles instead of the old pair of small squares: the
-            // card is now a row, so the title gets a whole line and the tap target
-            // is the full width of the page.
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                ModeTile(
-                    icon = Icons.Default.Mic,
-                    title = "Free conversation",
-                    subtitle = "Talk about anything — I correct as you go",
-                    meta = "A2 – B1",
-                    selected = lesson == null,
-                    onClick = onMic
+            Column(
+                modifier = Modifier.fillMaxSize(),
+                horizontalAlignment = Alignment.CenterHorizontally
+            ) {
+                Spacer(Modifier.weight(1f))
+                IridescentOrb(
+                    size = orbSize,
+                    mode = OrbMode.IDLE,
+                    onTap = onMic
                 )
-                ModeTile(
-                    icon = Icons.Default.PlayArrow,
-                    title = lesson?.title ?: "Guided lesson",
-                    subtitle = if (lesson != null) {
-                        "Following the plan · ${lesson.level}"
-                    } else {
-                        "Pick a lesson and I will teach it step by step"
-                    },
-                    meta = if (lesson != null) "${lesson.stepCount} steps" else "4 steps",
-                    selected = lesson != null,
-                    onClick = onPickLesson
+                Spacer(Modifier.weight(0.45f))
+                Text(
+                    text = if (firstName.isBlank()) "Hello" else "Hello, $firstName",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 16.sp,
+                    color = Muted,
+                    textAlign = TextAlign.Center
                 )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    text = "How can I help you?",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 25.sp,
+                    lineHeight = 31.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Ink,
+                    textAlign = TextAlign.Center
+                )
+                Spacer(Modifier.weight(0.55f))
+
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(11.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ModeCard(
+                        icon = Icons.Default.Mic,
+                        tint = Brand,
+                        title = "Free conversation",
+                        subtitle = "Speak freely and let Miss Emma correct you as you talk",
+                        onClick = onMic,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModeCard(
+                        icon = Icons.Default.PlayArrow,
+                        tint = Warm,
+                        title = lesson?.title ?: "Guided lesson",
+                        subtitle = lesson?.goal
+                            ?: "Pick a lesson and I will teach one point, step by step",
+                        onClick = onPickLesson,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+
+                Spacer(Modifier.weight(0.3f))
+                Text(
+                    text = status,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    color = Faint,
+                    textAlign = TextAlign.Center,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                Spacer(Modifier.height(6.dp))
             }
-
-            Spacer(Modifier.height(14.dp))
-            LevelStrip(spokenMinutes = spokenMinutes, spokenCalls = spokenCalls)
-            Spacer(Modifier.height(10.dp))
-            Text(
-                text = status,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
-                color = Faint,
-                textAlign = TextAlign.Center,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.fillMaxWidth()
-            )
-            Spacer(Modifier.height(16.dp))
         }
 
         MicDock(
@@ -835,178 +855,75 @@ private fun IdleContent(
 }
 
 /**
- * One way into the call, as a full-width glass row.
+ * One way into the call — two of these sit under the greeting.
  *
- * The previous pair of square cards forced two-line titles into half the page;
- * a row puts the icon, the promise and the badge on one baseline, which survives
- * long lesson titles and a 320 dp screen without ellipsing the part that matters.
+ * Taken from the reference the user supplied: a warm off-white card, a tinted
+ * icon chip, a small arrow in the corner, then a bold promise and one line of
+ * explanation. It is deliberately not glass: two translucent panels side by side
+ * on a pastel page read as one washed-out block.
  */
 @Composable
-private fun ModeTile(
+private fun ModeCard(
     icon: ImageVector,
+    tint: Color,
     title: String,
     subtitle: String,
-    meta: String,
-    selected: Boolean,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val accent = if (selected) Brand else Brand.copy(alpha = 0.55f)
-
-    Box(
+    Column(
         modifier = modifier
-            .fillMaxWidth()
             .clip(RoundedCornerShape(20.dp))
-            .background(if (selected) GlassFill else GlassFillSoft)
-            .border(
-                width = if (selected) 1.4.dp else 1.dp,
-                color = if (selected) Brand.copy(alpha = 0.45f) else GlassEdge,
-                shape = RoundedCornerShape(20.dp)
-            )
+            .background(CardCream)
+            .border(1.dp, Color(0xCCFFFFFF), RoundedCornerShape(20.dp))
             .clickable(onClick = onClick)
-            .padding(horizontal = 14.dp, vertical = 13.dp)
-            .testTag("tutor_mode_tile")
+            .padding(horizontal = 13.dp, vertical = 12.dp)
+            .testTag("tutor_mode_card")
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(
                 modifier = Modifier
-                    .size(44.dp)
-                    .clip(RoundedCornerShape(14.dp))
-                    .background(
-                        Brush.linearGradient(
-                            listOf(
-                                accent.copy(alpha = if (selected) 0.95f else 0.22f),
-                                Fresh.copy(alpha = if (selected) 0.75f else 0.16f)
-                            )
-                        )
-                    ),
+                    .size(32.dp)
+                    .clip(RoundedCornerShape(11.dp))
+                    .background(tint.copy(alpha = 0.15f)),
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = icon,
                     contentDescription = null,
-                    tint = if (selected) Color.White else BrandDeep,
-                    modifier = Modifier.size(21.dp)
+                    tint = tint,
+                    modifier = Modifier.size(18.dp)
                 )
             }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Ink,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(Modifier.height(2.dp))
-                Text(
-                    text = subtitle,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    color = Muted,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-            Spacer(Modifier.width(10.dp))
-            Column(
-                horizontalAlignment = Alignment.End,
-                verticalArrangement = Arrangement.Center
-            ) {
-                Text(
-                    text = meta,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = if (selected) BrandDeep else Faint,
-                    maxLines = 1
-                )
-                Spacer(Modifier.height(4.dp))
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowRight,
-                    contentDescription = null,
-                    tint = if (selected) Brand else Faint,
-                    modifier = Modifier.size(17.dp)
-                )
-            }
-        }
-    }
-}
-
-/**
- * A quiet progress line for speaking time.
- *
- * Deliberately not a streak or a score: minutes actually spoken is the one number
- * that improves speaking, and it is the only one that cannot be gamed by tapping.
- */
-@Composable
-private fun LevelStrip(spokenMinutes: Int, spokenCalls: Int) {
-    // Bands are minutes spoken, not grammar scores: the only thing that moves a
-    // speaking level is time spent speaking. Thresholds are deliberately close
-    // together at the start, where the first ten minutes feel like a lot.
-    val (label, floor, ceiling) = when {
-        spokenMinutes >= 240 -> Triple("B2", 240, 480)
-        spokenMinutes >= 90 -> Triple("B1+", 90, 240)
-        spokenMinutes >= 30 -> Triple("B1", 30, 90)
-        spokenMinutes >= 10 -> Triple("A2+", 10, 30)
-        else -> Triple("A2", 0, 10)
-    }
-    val progress = if (ceiling <= floor) {
-        1f
-    } else {
-        ((spokenMinutes - floor).toFloat() / (ceiling - floor)).coerceIn(0.04f, 1f)
-    }
-
-    GlassCard(modifier = Modifier.fillMaxWidth(), shape = RoundedCornerShape(18.dp)) {
-        Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 13.dp)) {
-            Text(
-                text = "Your speaking level",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
-                color = Muted
+            Spacer(Modifier.weight(1f))
+            Icon(
+                imageVector = Icons.Default.CallMade,
+                contentDescription = null,
+                tint = Faint,
+                modifier = Modifier.size(15.dp)
             )
-            Spacer(Modifier.height(6.dp))
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    text = "$label  ·  $spokenMinutes min spoken",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Ink,
-                    modifier = Modifier.weight(1f)
-                )
-                Text(
-                    text = if (spokenCalls == 0) {
-                        "First call"
-                    } else {
-                        "$spokenCalls ${if (spokenCalls == 1) "call" else "calls"}"
-                    },
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Fresh
-                )
-            }
-            Spacer(Modifier.height(9.dp))
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(4.dp)
-                    .clip(CircleShape)
-                    .background(Brand.copy(alpha = 0.16f))
-            ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(progress)
-                        .height(4.dp)
-                        .clip(CircleShape)
-                        .background(Brand)
-                )
-            }
         }
+        Spacer(Modifier.height(14.dp))
+        Text(
+            text = title,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 13.5.sp,
+            lineHeight = 17.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink,
+            maxLines = 2,
+            overflow = TextOverflow.Ellipsis
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = subtitle,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 11.sp,
+            lineHeight = 15.sp,
+            color = Muted,
+            maxLines = 3,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1443,19 +1360,10 @@ private fun MicDock(
 ) {
     val transition = rememberInfiniteTransition(label = "mic")
     val pulse by transition.animateFloat(
-        initialValue = if (state == AssistantVoiceState.SPEAKING) 1.05f else 1f,
-        targetValue = if (state == AssistantVoiceState.SPEAKING) 1.15f else 1.03f,
-        animationSpec = infiniteRepeatable(animation = tween(1200), repeatMode = RepeatMode.Reverse),
+        initialValue = 1f,
+        targetValue = if (state == AssistantVoiceState.SPEAKING) 1.06f else 1.025f,
+        animationSpec = infiniteRepeatable(animation = tween(1_500), repeatMode = RepeatMode.Reverse),
         label = "mic_pulse"
-    )
-    val ringT by transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(1_800, easing = androidx.compose.animation.core.LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "mic_ring"
     )
     val isLive = phase == CallPhase.LIVE || phase == CallPhase.CONNECTING
 
@@ -1467,12 +1375,22 @@ private fun MicDock(
         state == AssistantVoiceState.THINKING -> MicFace.THINKING
         else -> MicFace.IDLE
     }
-    val solid = when (face) {
-        MicFace.MUTED -> Faint
-        MicFace.SPEAKING -> BrandDeep
-        MicFace.THINKING -> Brand.copy(alpha = 0.55f)
+    // A squircle, not a circle: a solid brand gradient block with a coloured drop
+    // shadow reads as a button on this pastel page, where concentric rings read as
+    // a 2018 voice recorder.
+    val gradient = when (face) {
+        MicFace.MUTED -> listOf(Color(0xFFC3CBD5), Color(0xFF9AA6B2))
+        MicFace.SPEAKING -> listOf(Color(0xFF0FA97E), Color(0xFF0B6E5C))
+        MicFace.THINKING -> listOf(Color(0xFF3FC79A), Color(0xFF0F8A6B))
+        else -> listOf(Color(0xFF12B981), Color(0xFF047857))
+    }
+    val glow = when (face) {
+        MicFace.MUTED -> Color(0xFF94A3B8)
+        MicFace.SPEAKING -> Color(0xFF0B6E5C)
+        MicFace.THINKING -> Color(0xFF0F8A6B)
         else -> Brand
     }
+    val shape = RoundedCornerShape(26.dp)
     val iconLabel = when (face) {
         MicFace.MUTED -> "Unmute"
         MicFace.SPEAKING -> "Interrupt the tutor"
@@ -1485,46 +1403,33 @@ private fun MicDock(
         modifier = Modifier
             .fillMaxWidth()
             .navigationBarsPadding()
-            .padding(bottom = 18.dp),
+            .padding(bottom = 14.dp),
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         Box(contentAlignment = Alignment.Center) {
-            // Rings: they breathe while the tutor talks and send a ring out while
-            // it listens, so the state is legible before the icon is read.
+            // The bed: a wide, faint squircle that only exists to give the button
+            // a place to sit. It is not a ring and it never sweeps.
             Box(
                 modifier = Modifier
-                    .size(96.dp)
-                    .graphicsLayer { scaleX = pulse; scaleY = pulse }
-                    .clip(CircleShape)
-                    .background(solid.copy(alpha = 0.14f))
+                    .size(96.dp, 88.dp)
+                    .clip(RoundedCornerShape(32.dp))
+                    .background(glow.copy(alpha = 0.10f))
             )
-            if (face == MicFace.LISTENING) {
-                val alpha = ((1f - ringT) * 0.45f).coerceIn(0f, 0.45f)
-                Box(
-                    modifier = Modifier
-                        .size(96.dp)
-                        .graphicsLayer {
-                            val grow = 1f + 0.32f * ringT
-                            scaleX = grow
-                            scaleY = grow
-                            this.alpha = alpha
-                        }
-                        .border(2.dp, Brand.copy(alpha = 0.55f), CircleShape)
-                )
-            }
             Box(
                 modifier = Modifier
-                    .size(78.dp)
-                    .clip(CircleShape)
-                    .background(solid.copy(alpha = 0.22f))
-            )
-            // The button centres its own content: the icon used to be wrapped in a
-            // second, unsized Box, which parked it in the top-left of the circle.
-            Box(
-                modifier = Modifier
-                    .size(66.dp)
-                    .clip(CircleShape)
-                    .background(solid)
+                    .size(78.dp, 72.dp)
+                    .graphicsLayer {
+                        scaleX = pulse
+                        scaleY = pulse
+                    }
+                    .shadow(
+                        elevation = 16.dp,
+                        shape = shape,
+                        ambientColor = glow.copy(alpha = 0.75f),
+                        spotColor = glow.copy(alpha = 0.85f)
+                    )
+                    .clip(shape)
+                    .background(Brush.verticalGradient(gradient))
                     .combinedClickable(
                         onClick = onMic,
                         onLongClick = onLongPress
@@ -1532,8 +1437,19 @@ private fun MicDock(
                     .testTag("tutor_mic"),
                 contentAlignment = Alignment.Center
             ) {
-                // Crossfade, not a swap: the glyph the student is aiming at changes
-                // under their thumb, and a hard cut makes that feel like a glitch.
+                // gloss across the top half, the cheap trick that makes a flat
+                // gradient read as a physical key
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .height(30.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(Color.White.copy(alpha = 0.30f), Color.Transparent)
+                            )
+                        )
+                )
                 androidx.compose.animation.Crossfade(
                     targetState = face,
                     animationSpec = tween(220),
@@ -1548,19 +1464,20 @@ private fun MicDock(
                         },
                         contentDescription = iconLabel,
                         tint = Color.White,
-                        modifier = Modifier.size(if (current == MicFace.THINKING) 30.dp else 28.dp)
+                        modifier = Modifier.size(if (current == MicFace.THINKING) 30.dp else 27.dp)
                     )
                 }
             }
         }
-        Spacer(Modifier.height(10.dp))
+        Spacer(Modifier.height(9.dp))
         Text(
             text = caption,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = 12.sp,
             color = Muted,
             textAlign = TextAlign.Center,
-            maxLines = 2
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

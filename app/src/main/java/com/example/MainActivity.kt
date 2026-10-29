@@ -671,8 +671,6 @@ class MainActivity : ComponentActivity() {
                                                             callSummary = uiState.callSummary,
                                                             currentScenario = uiState.currentScenario,
                                                             studentName = viewModel.preferences.userName.orEmpty(),
-                                                            spokenMinutes = viewModel.preferences.speakingSeconds / 60,
-                                                            spokenCalls = viewModel.preferences.speakingCalls,
                                                             micLevel = viewModel.voiceLevel,
                                                             activeLessonId = uiState.activeLessonId,
                                                             lessonStepIndex = uiState.lessonStepIndex,
