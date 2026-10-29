@@ -313,3 +313,57 @@ call owns the whole screen.
 - **Free conversation card** uses a chat icon, not a microphone.
 - **The mic is a circle again** — 72 dp, brand gradient, coloured drop shadow,
   gloss — keeping the five `MicFace` glyphs.
+
+### 11.5 Round 19 — the cloud orb replaces the sphere
+
+The iridescent sphere is gone. `IridescentOrb`, `orbBand` and `OrbMode` were
+deleted; the screen now draws `CloudOrb` (`ui/components/CloudOrb.kt`), a port of
+the supplied WebGL "Cloud Orb" prototype. Nothing else on the screen changed.
+
+**Why a CPU port.** The prototype is a fragment shader. AGSL needs API 33 and this
+app ships to API 24, so the same maths runs on the CPU into a 96 px
+`ARGB_8888` bitmap that is drawn upscaled with `FilterQuality.High`. The field is
+smooth by construction, so 96 px is enough — the upscale softens it exactly the
+way the shader's own antialiasing does.
+
+**The shader, transcribed.** `hash → noise (smoothstep lerp) → fbm` (5 octaves,
+amplitude 0.52, rotated `mat2(0.80,0.60,-0.60,0.80)` and scaled 1.92 each octave),
+then: domain warp from two `fbm`s, a `curl` term from `sin`/`cos`, a broad field
+and a folded field mixed by activity, a horizon line, an `upper` half tinted deep
+emerald, a Gaussian milk band along the horizon, a lower mist, and a circle mask
+with a `0.488 → 0.5` soft edge. Palette: `#059669 / #10B981 / #A7F3D0 / #E6FBF1`.
+`uvY` is flipped (`1 - (y + 0.5) / res`) because GL counts y up and bitmaps count
+it down.
+
+**Motion, from the prototype's presets** (`speed` / `roughness`, roughness feeds
+the shader's `activity`):
+
+| state | speed | roughness | scale |
+|---|---|---|---|
+| listening | `0.72 + 0.78·vol` | `0.28 + 0.32·vol` | `1 − 0.13·vol` |
+| speaking | `1.65 + 1.55·vol` | `0.66 + 0.34·vol` | `1 + 0.09·vol` |
+| thinking | `0.24` | `0.18` | slow breath `±2 %` |
+| idle / connecting / muted | `0.30` | `0.12` | `1` |
+
+`vol` is the microphone level the call engine already produces. The tutor's own
+voice has no meter, so speaking runs at a fixed lively `0.85`. Thinking barely
+moves in the prototype, so a 5.5 s breath was added — otherwise "thinking" and
+"idle" look identical.
+
+**Entrance** (the prototype's expressive preset): held at `0.63` for 180 ms, grows
+to `1.178` in 300 ms with `CubicOut`, settles back to `1` over 1.35 s.
+
+**Extras that are not shader:** a two-layer soft shadow (the orb is pale and would
+dissolve on a pale page), a brand bloom, a static ring while connecting (the
+prototype's 15 px spinner, rotated by a `rememberInfiniteTransition`), and a pale
+veil over the whole ball when muted.
+
+**Cost.** One render loop at ~30 fps, one `withContext(Dispatchers.Default)` of
+~9 × 10³ pixels with ~80 hash evaluations each, and *no allocation per frame*:
+two pre-made bitmaps are swapped (write back, draw front, never tear) and the
+pixel array is reused. Every animated value is read inside `graphicsLayer` or the
+`Canvas` draw block, never in composition, so the screen above it does not
+recompose while the orb moves.
+
+Mockups: `designs/40a-tutor-idle-cloud-orb.png`,
+`designs/40b-tutor-live-cloud-orb.png`, `designs/40c-cloud-orb-states.png`.

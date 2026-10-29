@@ -17,7 +17,6 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,7 +43,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.Chat
 import androidx.compose.material.icons.filled.GraphicEq
@@ -69,17 +67,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
-import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
-import androidx.compose.ui.graphics.drawscope.clipPath
-import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -87,6 +79,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
@@ -97,6 +90,8 @@ import com.example.data.model.TutorCallEntry
 import com.example.data.model.TutorLesson
 import com.example.data.remote.TutorLessonCatalog
 import com.example.ui.components.AssistantVoiceState
+import com.example.ui.components.CloudOrb
+import com.example.ui.components.CloudOrbState
 import com.example.ui.theme.MaisonNeueFontFamily
 import kotlinx.coroutines.flow.StateFlow
 
@@ -130,9 +125,6 @@ private val BubbleTutor = Color(0xC2FFFFFF)
 private val BubbleStudent = Color(0xF2059696)
 private val CorrectionFill = Color(0xD9FFF7E6) // warm amber, still translucent
 private val CardCream = Color(0xF7FFFDF8)       // the reference's off-white card
-
-/** What the sphere is doing. It is the only thing on the screen that moves. */
-private enum class OrbMode { IDLE, LISTENING, SPEAKING, THINKING }
 
 /**
  * The English tutor screen — glass edition.
@@ -344,323 +336,6 @@ private fun TutorBackdrop() {
     }
 }
 
-/**
- * The iridescent sphere — the tutor's face, and the only thing here that behaves
- * like a living thing.
- *
- * It has to answer three questions a student asks silently before they speak:
- * *is it awake?*, *can it hear me?*, *is it my turn?* So the sphere does not idle
- * in a loop — it breathes while it waits, swells with the actual loudness of the
- * microphone while it listens, pulses in a speech-like rhythm while it talks,
- * and settles into a slow shimmer while it thinks. Touching it presses in and
- * starts the call, because on every voice assistant people try the orb first.
- *
- * Everything is drawn in one `Canvas`, masked to a circle: six drifting colour
- * fields, a soft drop shadow underneath, a brand bloom that widens with the
- * voice, a specular highlight and a double rim.
- */
-@Composable
-private fun IridescentOrb(
-    size: androidx.compose.ui.unit.Dp,
-    mode: OrbMode,
-    micLevel: Float = 0f,
-    modifier: Modifier = Modifier,
-    onTap: (() -> Unit)? = null
-) {
-    val transition = rememberInfiniteTransition(label = "orb")
-    val drift = transition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(animation = tween(26_000), repeatMode = RepeatMode.Restart),
-        label = "orb_drift"
-    )
-    // Waiting: a slow breath. Long enough that it never pulls the eye.
-    val breathe = transition.animateFloat(
-        initialValue = 0.98f,
-        targetValue = 1.03f,
-        animationSpec = infiniteRepeatable(animation = tween(4_200), repeatMode = RepeatMode.Reverse),
-        label = "orb_breathe"
-    )
-    // Talking: a ~600 ms swell, which is roughly the rhythm of a spoken phrase
-    // and reads as speech rather than as a loading spinner.
-    val speechPulse = transition.animateFloat(
-        initialValue = 0.45f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(animation = tween(620), repeatMode = RepeatMode.Reverse),
-        label = "orb_speech"
-    )
-    // Thinking: a tighter, faster shimmer.
-    val thinkPulse = transition.animateFloat(
-        initialValue = 0.30f,
-        targetValue = 0.72f,
-        animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
-        label = "orb_think"
-    )
-
-    var pressed by remember { mutableStateOf(false) }
-    // Springs rather than a tween: the sphere should lean into a loud word and
-    // settle back, the way a speaker's shoulders do.
-    val micEnergy = androidx.compose.animation.core.animateFloatAsState(
-        targetValue = micLevel.coerceIn(0f, 1f),
-        animationSpec = androidx.compose.animation.core.spring(
-            dampingRatio = 0.55f,
-            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
-        ),
-        label = "orb_mic"
-    )
-
-    // Every animated value above is a State that is *read inside the draw and
-    // layer blocks*, never in composition: the sphere then re-draws without
-    // re-composing, which is what keeps a 60fps orb cheap next to a scrolling
-    // thread. The helpers below are the single source of the "how alive is it"
-    // number, used by both blocks.
-    fun energyOf(): Float = when (mode) {
-        OrbMode.IDLE -> 0f
-        OrbMode.LISTENING -> micEnergy.value
-        OrbMode.SPEAKING -> speechPulse.value
-        OrbMode.THINKING -> thinkPulse.value
-    }
-
-    Canvas(
-        modifier = modifier
-            .size(size)
-            .graphicsLayer {
-                val energy = energyOf()
-                val swell = when (mode) {
-                    OrbMode.LISTENING -> 0.16f * energy
-                    OrbMode.SPEAKING -> 0.07f * energy
-                    OrbMode.THINKING -> 0.02f * energy
-                    OrbMode.IDLE -> 0f
-                }
-                val scale = breathe.value * (1f + swell) * (if (pressed) 0.93f else 1f)
-                scaleX = scale
-                scaleY = scale
-            }
-            .pointerInput(onTap) {
-                if (onTap == null) return@pointerInput
-                detectTapGestures(
-                    onPress = {
-                        pressed = true
-                        try {
-                            tryAwaitRelease()
-                        } finally {
-                            pressed = false
-                        }
-                    },
-                    onTap = { onTap() }
-                )
-            }
-    ) {
-        val scope = this
-        // The box is bigger than the sphere on purpose: the spare ring of space is
-        // where the glow and the drop shadow live.
-        val r = scope.size.minDimension / 2f
-        val sr = r * 0.84f
-        val c = Offset(scope.size.width / 2f, scope.size.height / 2f)
-        // Read here, at draw time, so the sphere animates without re-composing.
-        val energy = energyOf()
-        val driftDeg = drift.value
-        val pressLift = if (pressed) 1f else 0f
-
-        // ── Shadow ───────────────────────────────────────────────────────────
-        // The sphere is pastel on a pastel page, so it needs a real shadow to sit
-        // ON the page rather than dissolve into it. This is a stacked, offset
-        // shadow: a tight dark contact shadow right under the ball, then a wide
-        // soft one, then a brand-tinted bloom. All of it is un-clipped, and none
-        // of it animates as a ring — it only breathes with the voice.
-        val lift = energy * 0.5f + pressLift * 0.6f
-        // wide soft shadow
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0.00f to Color(0xFF123A30).copy(alpha = 0.26f + 0.06f * lift),
-                    0.55f to Color(0xFF123A30).copy(alpha = 0.16f + 0.05f * lift),
-                    1.00f to Color.Transparent
-                ),
-                center = Offset(c.x, c.y + sr * 0.30f),
-                radius = r * 1.02f
-            ),
-            radius = r * 1.02f,
-            center = Offset(c.x, c.y + sr * 0.30f)
-        )
-        // tight contact shadow, offset down: this is the one that reads as "solid"
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0.00f to Color(0xFF0F2E26).copy(alpha = 0.34f),
-                    0.70f to Color(0xFF0F2E26).copy(alpha = 0.20f),
-                    1.00f to Color.Transparent
-                ),
-                center = Offset(c.x, c.y + sr * 0.42f),
-                radius = sr * 0.95f
-            ),
-            radius = sr * 0.95f,
-            center = Offset(c.x, c.y + sr * 0.42f)
-        )
-        // brand bloom, so the light belongs to the app
-        scope.drawCircle(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0.00f to Brand.copy(alpha = 0.20f + 0.24f * energy),
-                    0.60f to Brand.copy(alpha = 0.07f),
-                    1.00f to Color.Transparent
-                ),
-                center = Offset(c.x + sr * 0.06f, c.y + sr * 0.12f),
-                radius = r * 0.98f
-            ),
-            radius = r * 0.98f,
-            center = Offset(c.x + sr * 0.06f, c.y + sr * 0.12f)
-        )
-
-        // ── The sphere itself, masked to its own circle ──────────────────────
-        // Modelled on the assistant-ui voice orb (assistant-ui.com/elements/orb):
-        // a saturated liquid sphere, not a pastel bubble. The flow is built from
-        // soft *elliptical* gradients — wide bands and thin streaks at different
-        // angles — each one turning at its own speed, which is what reads as
-        // liquid rather than as a handful of blobs. Compose has no shader here,
-        // but with the mask, the vignette and the rim it holds up.
-        val oval = Path().apply {
-            addOval(Rect(center = c, radius = sr))
-        }
-        scope.clipPath(oval) {
-            // base: lit from the top-left, deep sea-green at the far side
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color(0xFF7FE9C6),
-                        0.45f to Color(0xFF1FB28C),
-                        0.80f to Color(0xFF0A7A63),
-                        1.00f to Color(0xFF055146)
-                    ),
-                    center = Offset(c.x - sr * 0.40f, c.y - sr * 0.46f),
-                    radius = sr * 1.6f
-                ),
-                radius = sr,
-                center = c
-            )
-
-            // Wide bands
-            orbBand(c, sr, -0.35f, -0.48f, 0.95f, 0.55f, -30f + driftDeg * 0.35f, Color(0xFFE6FFF3), 0.85f)
-            orbBand(c, sr, 0.42f, -0.10f, 0.80f, 0.42f, 25f - driftDeg * 0.28f, Color(0xFFC9F96A), 0.55f)
-            orbBand(c, sr, 0.10f, 0.42f, 0.90f, 0.50f, -15f + driftDeg * 0.42f, Color(0xFF3FE0D0), 0.60f)
-            orbBand(c, sr, -0.55f, 0.30f, 0.70f, 0.40f, 40f - driftDeg * 0.30f, Color(0xFF5FD8F2), 0.50f)
-            orbBand(c, sr, 0.30f, 0.55f, 0.65f, 0.34f, -40f + driftDeg * 0.50f, Color(0xFF8BFFD0), 0.55f)
-            orbBand(c, sr, 0.60f, -0.45f, 0.55f, 0.30f, 15f - driftDeg * 0.45f, Color.White, 0.35f)
-
-            // Thin streaks: the marble lines that make it look liquid
-            orbBand(c, sr, -0.10f, -0.10f, 1.25f, 0.16f, -22f + driftDeg * 0.22f, Color.White, 0.42f)
-            orbBand(c, sr, -0.15f, 0.20f, 1.10f, 0.14f, -28f - driftDeg * 0.26f, Color(0xFFD9FFF0), 0.40f)
-            orbBand(c, sr, 0.05f, -0.30f, 1.05f, 0.10f, -20f + driftDeg * 0.34f, Color(0xFF0B4C41), 0.18f)
-
-            // depth: dark at the rim, clear in the middle
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color.Transparent,
-                        0.55f to Color.Transparent,
-                        1.00f to Color(0xFF043B32).copy(alpha = 0.30f)
-                    ),
-                    center = Offset(c.x - sr * 0.10f, c.y - sr * 0.14f),
-                    radius = sr * 1.28f
-                ),
-                radius = sr * 1.28f,
-                center = Offset(c.x - sr * 0.10f, c.y - sr * 0.14f)
-            )
-
-            // specular: the small hot spot that says "glass"
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color.White.copy(alpha = 0.95f),
-                        0.45f to Color.White.copy(alpha = 0.30f),
-                        1.00f to Color.Transparent
-                    ),
-                    center = Offset(c.x - sr * 0.34f, c.y - sr * 0.44f),
-                    radius = sr * 0.40f
-                ),
-                radius = sr * 0.40f,
-                center = Offset(c.x - sr * 0.34f, c.y - sr * 0.44f)
-            )
-
-            // rim light: bright toward the lower right, thin at the top left
-            drawCircle(
-                brush = Brush.sweepGradient(
-                    colorStops = arrayOf(
-                        0.00f to Color.White.copy(alpha = 0.55f),
-                        0.25f to Color.White.copy(alpha = 0.12f),
-                        0.55f to Color.White.copy(alpha = 0.70f),
-                        0.75f to Color.White.copy(alpha = 0.35f),
-                        1.00f to Color.White.copy(alpha = 0.55f)
-                    ),
-                    center = c
-                ),
-                radius = sr - sr * 0.010f,
-                center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.020f)
-            )
-        }
-
-        // hairline edge so the ball keeps its outline on a pale page
-        scope.drawCircle(
-            color = Color(0xFF0B7A60).copy(alpha = 0.30f),
-            radius = sr,
-            center = c,
-            style = androidx.compose.ui.graphics.drawscope.Stroke(width = sr * 0.010f)
-        )
-    }
-}
-
-/**
- * One flowing band inside the orb.
- *
- * A radial gradient drawn through a rotate + scale transform becomes an ellipse,
- * which is what turns "a few coloured balls" into flowing liquid. The rotation
- * carries the drift, so every band turns at its own speed.
- */
-private fun androidx.compose.ui.graphics.drawscope.DrawScope.orbBand(
-    center: Offset,
-    sphereRadius: Float,
-    offsetX: Float,
-    offsetY: Float,
-    radiusX: Float,
-    radiusY: Float,
-    rotation: Float,
-    color: Color,
-    alpha: Float
-) {
-    val bandCenter = Offset(
-        center.x + offsetX * sphereRadius,
-        center.y + offsetY * sphereRadius
-    )
-    withTransform({
-        rotate(rotation, bandCenter)
-        scale(radiusX, radiusY, bandCenter)
-    }) {
-        drawCircle(
-            brush = Brush.radialGradient(
-                colorStops = arrayOf(
-                    0.00f to color.copy(alpha = alpha),
-                    0.55f to color.copy(alpha = alpha * 0.45f),
-                    1.00f to Color.Transparent
-                ),
-                center = bandCenter,
-                radius = sphereRadius
-            ),
-            radius = sphereRadius,
-            center = bandCenter
-        )
-    }
-}
-
-/** The sphere follows the turn: it is the only "who is speaking" indicator on the screen. */
-private fun orbModeFor(voiceState: AssistantVoiceState, isMuted: Boolean): OrbMode = when {
-    isMuted -> OrbMode.IDLE
-    voiceState == AssistantVoiceState.LISTENING -> OrbMode.LISTENING
-    voiceState == AssistantVoiceState.SPEAKING -> OrbMode.SPEAKING
-    voiceState == AssistantVoiceState.THINKING -> OrbMode.THINKING
-    else -> OrbMode.IDLE
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 //  Chrome
 // ─────────────────────────────────────────────────────────────────────────────
@@ -806,9 +481,10 @@ private fun IdleContent(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Spacer(Modifier.weight(1f))
-                IridescentOrb(
+                CloudOrb(
+                    state = CloudOrbState.IDLE,
+                    activity = 0f,
                     size = orbSize,
-                    mode = OrbMode.IDLE,
                     onTap = onMic
                 )
                 Spacer(Modifier.weight(0.45f))
@@ -1011,9 +687,10 @@ private fun LiveContent(
         ) {
             LiveOrb(
                 voiceState = voiceState,
+                phase = callPhase,
                 isMuted = isMuted,
                 micLevel = micLevel,
-                size = 112.dp
+                size = 132.dp
             )
         }
 
@@ -1122,22 +799,43 @@ private fun LiveContent(
 }
 
 /**
- * The live sphere, wrapped so the microphone energy is read here rather than in
- * the screen: at ~12 updates a second it must repaint one 96 dp circle and
- * nothing else.
+ * The live orb.
+ *
+ * The microphone level is collected here rather than in the screen: it arrives
+ * ~14 times a second, and the only thing that should react to it is the sphere.
+ * The level the orb receives is the same [0..1] number the reference orb calls
+ * `volume`, and it decides both how fast the clouds move and whether the ball
+ * leans in (listening) or swells (speaking).
  */
 @Composable
 private fun LiveOrb(
     voiceState: AssistantVoiceState,
+    phase: CallPhase,
     isMuted: Boolean,
     micLevel: StateFlow<Float>,
-    size: androidx.compose.ui.unit.Dp
+    size: Dp
 ) {
     val level by micLevel.collectAsState()
-    IridescentOrb(
-        size = size,
-        mode = orbModeFor(voiceState, isMuted),
-        micLevel = level
+    val orbState = when {
+        phase == CallPhase.CONNECTING -> CloudOrbState.CONNECTING
+        isMuted -> CloudOrbState.MUTED
+        voiceState == AssistantVoiceState.LISTENING -> CloudOrbState.LISTENING
+        voiceState == AssistantVoiceState.SPEAKING -> CloudOrbState.SPEAKING
+        voiceState == AssistantVoiceState.THINKING -> CloudOrbState.THINKING
+        else -> CloudOrbState.IDLE
+    }
+    val activity = when (orbState) {
+        CloudOrbState.LISTENING -> level
+        // The tutor's own voice has no meter, so it runs at a steady, lively
+        // level: enough for the clouds to roll while it talks.
+        CloudOrbState.SPEAKING -> 0.85f
+        CloudOrbState.THINKING -> 0.20f
+        else -> 0f
+    }
+    CloudOrb(
+        state = orbState,
+        activity = activity,
+        size = size
     )
 }
 
