@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -200,6 +202,24 @@ private fun matchesQuery(entry: PaperEntry, query: String): Boolean {
     return tokens.all { token -> matchesToken(token, fields) }
 }
 
+/**
+ * The hints that cycle through the search field while it is empty.
+ *
+ * One placeholder can only teach one way of searching; the library answers to
+ * several (long name, short code, year, medium, "scheme"), so the field takes
+ * turns showing them.
+ */
+private val SEARCH_HINTS = listOf(
+    "Search Physics, PHY or 2020…",
+    "Combined Mathematics 2021…",
+    "Try a code: CM, CHEM, ICT…",
+    "Marking schemes: type “scheme”…",
+    "Any subject, any year, any medium"
+)
+
+/** How long each hint stays before the next one fades in. */
+private const val HINT_INTERVAL_MS = 3200L
+
 /** How the results are laid out. Both are lists; one is compact, one is roomy. */
 private enum class PaperLayout(val label: String) {
     LIST("Compact list"),
@@ -327,6 +347,18 @@ fun PapersScreen(
     // screen never jumps from one set of rows straight to another.
     var isSettling by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
+    var hintIndex by remember { mutableStateOf(0) }
+
+    // The hints only cycle while the field is empty — once there is a query to
+    // read, a moving placeholder would just be noise.
+    LaunchedEffect(queryInput.isEmpty()) {
+        if (queryInput.isEmpty()) {
+            while (true) {
+                delay(HINT_INTERVAL_MS)
+                hintIndex = (hintIndex + 1) % SEARCH_HINTS.size
+            }
+        }
+    }
 
     val focusManager = LocalFocusManager.current
     val keyboard = LocalSoftwareKeyboardController.current
@@ -689,12 +721,20 @@ fun PapersScreen(
                                     .height(50.dp)
                                     .testTag("papers_search_bar"),
                                 placeholder = {
-                                    Text(
-                                        text = "Physics, PHY, 2020 SFT…",
-                                        fontFamily = MaisonNeueFontFamily,
-                                        fontSize = PT.meta,
-                                        color = PaperFaint
-                                    )
+                                    Crossfade(
+                                        targetState = hintIndex,
+                                        animationSpec = tween(durationMillis = 600),
+                                        label = "papers_search_hint"
+                                    ) { index ->
+                                        Text(
+                                            text = SEARCH_HINTS[index % SEARCH_HINTS.size],
+                                            fontFamily = MaisonNeueFontFamily,
+                                            fontSize = PT.meta,
+                                            color = PaperFaint,
+                                            maxLines = 1,
+                                            overflow = TextOverflow.Ellipsis
+                                        )
+                                    }
                                 },
                                 leadingIcon = {
                                     Icon(
@@ -739,7 +779,8 @@ fun PapersScreen(
                             Surface(
                                 onClick = { submitSearch() },
                                 shape = RoundedCornerShape(16.dp),
-                                color = PaperGreen,
+                                color = Color.White,
+                                border = BorderStroke(1.dp, PaperHairline),
                                 modifier = Modifier
                                     .size(50.dp)
                                     .testTag("papers_search_submit")
@@ -748,7 +789,7 @@ fun PapersScreen(
                                     Icon(
                                         Icons.Default.Search,
                                         contentDescription = "Search papers",
-                                        tint = Color.White,
+                                        tint = PaperGreen,
                                         modifier = Modifier.size(21.dp)
                                     )
                                 }

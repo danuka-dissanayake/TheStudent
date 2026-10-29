@@ -60,6 +60,15 @@ start a word rather than appear anywhere, so `a` cannot match everything.
 Nothing else changes: clearing the field (the X, Back, "Clear") resets the input
 and the applied query together.
 
+The field and the search button beside it are both white with the same hairline
+border; only the magnifier inside the button is green, so the row reads as one
+control rather than a field plus a coloured blob.
+
+While the field is empty, its placeholder cycles through `SEARCH_HINTS` every
+3.2 s with a 600 ms `Crossfade` — one hint per way of searching (name, code,
+year, "scheme"). The cycle only runs while the field is empty; as soon as there
+is text to read it stops, so nothing moves under a student who is typing.
+
 ### Tapping outside the field ends the focus
 
 The screen's root `Column` observes the pointer **Initial** pass and, on any tap
@@ -176,6 +185,11 @@ start. Now `showSkeletons` is true when:
 - `isSettling` — 320 ms after a query settles, or any chip, filter, sort or page
   change, or
 - `isRefreshing` — the header refresh button was just tapped.
+
+A refresh that succeeds shows **no** message. The rows change, the subtitle
+updates ("741 papers · 244 marking schemes") and the shimmer ends — that is the
+answer. Only a refresh that fails speaks, via `TheStudentSnackbarHost`, because
+nothing else on screen would say so.
 
 The refresh shimmer caps itself after two seconds so a request that never
 reports back cannot leave the screen shimmering forever; the previous list

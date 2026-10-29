@@ -569,11 +569,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 }
                 _isLiveDatabaseConnected.value = isLive
                 _uiState.update { it.copy(isLoadingContent = false) }
-                when {
-                    isLive && forceRefresh ->
-                        showSnackbar("${fetched.size} papers available")
-                    !isLive && forceRefresh ->
-                        showSnackbar("Couldn't reach the paper library. Check your connection and try again.")
+                // A refresh that worked says nothing: the rows change and the
+                // subtitle updates, which is the whole answer. Only a refresh
+                // that failed needs words, because nothing else shows it.
+                if (!isLive && forceRefresh) {
+                    showSnackbar(
+                        "Couldn't reach the paper library. Check your connection and try again."
+                    )
                 }
             } catch (e: Exception) {
                 Log.e("TheStudentViewModel", "Safe error handling in loadDynamicPapers: ${e.message}", e)
