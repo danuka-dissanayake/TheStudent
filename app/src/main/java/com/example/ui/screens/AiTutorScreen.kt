@@ -350,22 +350,17 @@ private fun IridescentOrb(
             }
             .clip(CircleShape)
     ) {
-        val r = this.size.minDimension / 2f
-        val c = Offset(this.size.width / 2f, this.size.height / 2f)
+        // Held explicitly: a local function cannot lean on the lambda's implicit
+        // receiver, and these helpers are clearer with the scope named.
+        val scope = this
+        val r = scope.size.minDimension / 2f
+        val c = Offset(scope.size.width / 2f, scope.size.height / 2f)
 
         fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
             val a = Math.toRadians((angleDeg + drift).toDouble())
             val x = (c.x + (distance * r * Math.cos(a))).toFloat()
             val y = (c.y + (distance * r * Math.sin(a))).toFloat()
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(color, color.copy(alpha = 0f)),
-                    center = Offset(x, y),
-                    radius = radius * r
-                ),
-                radius = radius * r,
-                center = Offset(x, y)
-            )
+            scope.orbBlob(Offset(x, y), radius * r, color)
         }
 
         // sphere body
@@ -406,6 +401,29 @@ private fun IridescentOrb(
             )
         }
     }
+}
+
+/**
+ * One drifting colour field of the orb.
+ *
+ * A `DrawScope` extension rather than a local function so the alpha falloff and
+ * the centre are computed once, in one place, for every layer.
+ */
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.orbBlob(
+    center: Offset,
+    radius: Float,
+    color: Color
+) {
+    if (radius <= 0f) return
+    drawCircle(
+        brush = Brush.radialGradient(
+            colors = listOf(color, color.copy(alpha = 0f)),
+            center = center,
+            radius = radius
+        ),
+        radius = radius,
+        center = center
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
