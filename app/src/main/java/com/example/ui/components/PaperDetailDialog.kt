@@ -43,6 +43,7 @@ fun PaperDetailDialog(
     isDownloaded: Boolean = false,
     onToggleSave: () -> Unit = {},
     onDownload: () -> Unit = {},
+    onDownloadScheme: () -> Unit = {},
     onAskAi: () -> Unit = {},
     onDismiss: () -> Unit
 ) {
@@ -139,20 +140,25 @@ fun PaperDetailDialog(
                             modifier = Modifier.weight(1f),
                             verticalArrangement = Arrangement.spacedBy(2.dp)
                         ) {
+                            // The whole title, wrapped: a truncated title is the
+                            // one thing a student must never have to guess at.
                             Text(
                                 text = paper.title,
                                 fontSize = 16.5.sp,
+                                lineHeight = 21.sp,
                                 fontWeight = FontWeight.Bold,
-                                color = Color(0xFF0F172A),
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
+                                color = Color(0xFF0F172A)
                             )
 
                             Text(
-                                text = "Paper I · ${if (paper.hasMarkingScheme) "Marking scheme included" else "Answers included"}",
-                                fontSize = 13.5.sp,
+                                text = listOf(
+                                    paper.subject,
+                                    paper.year.toString(),
+                                    paper.medium
+                                ).filter { it.isNotBlank() }.joinToString(" · "),
+                                fontSize = 13.sp,
                                 color = Color(0xFF64748B),
-                                maxLines = 1,
+                                maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
                         }
@@ -233,6 +239,41 @@ fun PaperDetailDialog(
                                     color = Color(0xFF15803D),
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                    }
+
+                    // Marking scheme, when the database has one for this paper.
+                    // It is a separate file, so it is a separate button.
+                    if (paper.hasMarkingScheme) {
+                        Surface(
+                            onClick = onDownloadScheme,
+                            shape = RoundedCornerShape(16.dp),
+                            color = Color.White,
+                            border = BorderStroke(1.5.dp, Color(0xFF059669)),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(50.dp)
+                                .testTag("paper_detail_scheme")
+                        ) {
+                            Row(
+                                modifier = Modifier.fillMaxSize(),
+                                horizontalArrangement = Arrangement.Center,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Description,
+                                    contentDescription = null,
+                                    tint = Color(0xFF059669),
+                                    modifier = Modifier.size(19.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Download marking scheme",
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Color(0xFF059669)
                                 )
                             }
                         }

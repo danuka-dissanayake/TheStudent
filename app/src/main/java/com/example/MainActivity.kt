@@ -758,6 +758,7 @@ class MainActivity : ComponentActivity() {
                                         isDownloaded = isDownloaded,
                                         onToggleSave = { viewModel.toggleSavePaper(paper) },
                                         onDownload = { viewModel.downloadPaperOffline(paper) },
+                                        onDownloadScheme = { viewModel.downloadSchemeOffline(paper) },
                                         onAskAi = {
                                             viewModel.closePaperDetail()
                                             viewModel.openAiAssistant()

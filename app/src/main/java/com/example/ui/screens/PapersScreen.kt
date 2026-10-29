@@ -47,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -59,6 +60,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import com.example.data.local.SavedPaperEntity
 import com.example.data.model.EducationLevel
 import com.example.data.model.PastPaper
@@ -92,15 +94,17 @@ private enum class PaperSort(val label: String) {
  * a medium, or an exam name. All of it is matched, case-insensitively, with
  * spaces and punctuation ignored so "combinedmaths" still finds Combined Maths.
  */
-private fun matchesQuery(paper: PastPaper, query: String): Boolean {
+private fun matchesQuery(entry: PaperEntry, query: String): Boolean {
     if (query.isBlank()) return true
+    val paper = entry.paper
     val needle = query.trim()
     val squeezed = needle.filter { it.isLetterOrDigit() }.lowercase()
     // "PAPER" is SubjectCodes' fallback for a name it cannot place; matching it
     // would quietly make every paper answer the word "paper".
     val code = SubjectCodes.of(paper.subject).takeIf { it != "PAPER" }.orEmpty()
     val fields = listOf(
-        paper.title,
+        entry.title,
+        if (entry.isScheme) "marking scheme answers" else "",
         paper.subject,
         code,
         paper.grade,
@@ -118,14 +122,35 @@ private fun matchesQuery(paper: PastPaper, query: String): Boolean {
     }
 }
 
-/** The subject codes worth a one-tap shortcut; the rest are still searchable. */
-private val SUBJECT_CODE_CHIPS = listOf("PHY", "CM", "CHEM", "BIO", "ICT")
-
 /** How the results are laid out. Both are lists; one is compact, one is roomy. */
 private enum class PaperLayout(val label: String) {
     LIST("Compact list"),
     CARDS("Card list")
 }
+
+/**
+ * One row in the library. A paper and its marking scheme are two files, so they
+ * are two entries: a student looking for "physics marking scheme" should find it
+ * the same way they find the question paper, without opening anything first.
+ */
+private data class PaperEntry(val paper: PastPaper, val isScheme: Boolean = false) {
+    val id: String get() = if (isScheme) "${paper.id}#scheme" else paper.id
+    val title: String
+        get() = if (isScheme) "${paper.title} — Marking scheme" else paper.title
+}
+
+/** Expand papers into paper rows plus one scheme row per available scheme. */
+private fun buildPaperEntries(papers: List<PastPaper>): List<PaperEntry> {
+    val entries = ArrayList<PaperEntry>(papers.size + papers.size / 2)
+    papers.forEach { paper ->
+        entries += PaperEntry(paper)
+        if (paper.hasMarkingScheme) entries += PaperEntry(paper, isScheme = true)
+    }
+    return entries
+}
+
+/** How long typing must pause before the library is re-filtered. */
+private const val SEARCH_SETTLE_MS = 400L
 
 /** Fixed page size: the library is read best in small, finishable pages. */
 private const val PAPERS_PER_PAGE = 15
@@ -192,6 +217,10 @@ fun PapersScreen(
     onRefreshQuizzes: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
+    // What the field shows, and what the list actually filters on. Filtering on
+    // every keystroke made a 1,200-row library re-sort while the student was
+    // still typing; the applied query now waits for a pause.
+    var queryInput by remember { mutableStateOf("") }
     var query by remember { mutableStateOf("") }
     var quickChip by remember { mutableStateOf("All") }
     var savedOnly by remember { mutableStateOf(false) }
@@ -205,6 +234,11 @@ fun PapersScreen(
     // screen never jumps from one set of rows straight to another.
     var isSettling by remember { mutableStateOf(false) }
     var isRefreshing by remember { mutableStateOf(false) }
+
+    LaunchedEffect(queryInput) {
+        delay(SEARCH_SETTLE_MS)
+        query = queryInput
+    }
 
     LaunchedEffect(query, quickChip, savedOnly, filters, sort) {
         isSettling = true
@@ -235,7 +269,8 @@ fun PapersScreen(
         savedPapers.filter { it.isDownloaded }.map { it.id }.toSet()
     }
 
-    BackHandler(enabled = query.isNotBlank() || filters.count > 0 || savedOnly) {
+    BackHandler(enabled = queryInput.isNotBlank() || filters.count > 0 || savedOnly) {
+        queryInput = ""
         query = ""
         filters = PaperFilters()
         savedOnly = false
@@ -264,26 +299,46 @@ fun PapersScreen(
         else -> true
     }
 
-    val visible = remember(papers, query, quickChip, savedOnly, sort, filters, savedIds) {
-        papers
+    val entries = remember(papers) { buildPaperEntries(papers) }
+
+    val visible = remember(entries, query, quickChip, savedOnly, sort, filters, savedIds) {
+        entries
             .asSequence()
-            .filter { paper ->
-                matchesChip(paper, QUICK_CHIPS.firstOrNull { it.first == quickChip }?.second.orEmpty())
+            .filter { entry ->
+                matchesChip(
+                    entry.paper,
+                    QUICK_CHIPS.firstOrNull { it.first == quickChip }?.second.orEmpty()
+                )
             }
-            .filter { paper -> !savedOnly || savedIds.contains(paper.id) }
-            .filter { paper -> filters.medium == "Any medium" || paper.medium.equals(filters.medium, true) }
-            .filter { paper -> filters.year == "Any year" || paper.year.toString() == filters.year }
-            .filter { paper -> filters.subject == "Any subject" || paper.subject.equals(filters.subject, true) }
-            .filter { paper -> !filters.markingSchemeOnly || paper.hasMarkingScheme }
-            .filter { paper -> matchesQuery(paper, query) }
+            .filter { entry -> !savedOnly || savedIds.contains(entry.id) }
+            .filter { entry ->
+                filters.medium == "Any medium" ||
+                    entry.paper.medium.equals(filters.medium, true)
+            }
+            .filter { entry ->
+                filters.year == "Any year" || entry.paper.year.toString() == filters.year
+            }
+            .filter { entry ->
+                filters.subject == "Any subject" ||
+                    entry.paper.subject.equals(filters.subject, true)
+            }
+            .filter { entry -> !filters.markingSchemeOnly || entry.paper.hasMarkingScheme }
+            .filter { entry -> matchesQuery(entry, query) }
             .sortedWith(
                 when (sort) {
-                    PaperSort.NEWEST -> compareByDescending<PastPaper> { it.year }
-                        .thenBy { it.subject }
-                    PaperSort.OLDEST -> compareBy<PastPaper> { it.year }
-                        .thenBy { it.subject }
-                    PaperSort.MOST_DOWNLOADED -> compareByDescending { it.downloadCount }
-                    PaperSort.A_TO_Z -> compareBy { it.subject }
+                    // Within a year the question paper leads its own scheme.
+                    PaperSort.NEWEST -> compareByDescending<PaperEntry> { it.paper.year }
+                        .thenBy { it.paper.subject }
+                        .thenBy { it.isScheme }
+                    PaperSort.OLDEST -> compareBy<PaperEntry> { it.paper.year }
+                        .thenBy { it.paper.subject }
+                        .thenBy { it.isScheme }
+                    PaperSort.MOST_DOWNLOADED ->
+                        compareByDescending<PaperEntry> { it.paper.downloadCount }
+                            .thenBy { it.isScheme }
+                    PaperSort.A_TO_Z -> compareBy<PaperEntry> { it.paper.subject }
+                        .thenByDescending { it.paper.year }
+                        .thenBy { it.isScheme }
                 }
             )
             .toList()
@@ -296,6 +351,10 @@ fun PapersScreen(
     val pageItems = visible.drop(pageStart).take(PAPERS_PER_PAGE)
 
     val listState = rememberLazyListState()
+    val settleScope = rememberCoroutineScope()
+
+    // Turning a page is a change of scene: the list returns to the top of the
+    // results under a short shimmer, exactly like a filter change.
     LaunchedEffect(safePage) {
         if (safePage > 0) listState.scrollToItem(0)
     }
@@ -310,7 +369,7 @@ fun PapersScreen(
             .fillMaxSize()
             .background(PaperBg)
     ) {
-        // ── pinned header ───────────────────────────────────────────────────
+        // ── top bar: the only thing that stays put ──────────────────────────
         Column(
             modifier = Modifier
                 .fillMaxWidth()
@@ -378,7 +437,9 @@ fun PapersScreen(
                     )
                 }
             }
+        }
 
+        if (segment == 1) {
             // ── segment pills: papers | quizzes ────────────────────────────
             Row(
                 modifier = Modifier
@@ -400,237 +461,6 @@ fun PapersScreen(
                 )
             }
 
-            if (segment == 0) {
-            // search
-            OutlinedTextField(
-                value = query,
-                onValueChange = { query = it },
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp)
-                    .height(50.dp)
-                    .testTag("papers_search_bar"),
-                placeholder = {
-                    Text(
-                        text = "Search papers, subjects, years",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
-                        color = PaperFaint
-                    )
-                },
-                leadingIcon = {
-                    Icon(
-                        Icons.Default.Search,
-                        contentDescription = null,
-                        tint = PaperMuted,
-                        modifier = Modifier.size(19.dp)
-                    )
-                },
-                trailingIcon = {
-                    if (query.isNotEmpty()) {
-                        Icon(
-                            Icons.Default.Close,
-                            contentDescription = "Clear search",
-                            tint = PaperMuted,
-                            modifier = Modifier
-                                .size(18.dp)
-                                .clickable { query = "" }
-                        )
-                    }
-                },
-                singleLine = true,
-                shape = RoundedCornerShape(26.dp),
-                textStyle = androidx.compose.ui.text.TextStyle(
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.sp,
-                    color = PaperInk
-                ),
-                colors = OutlinedTextFieldDefaults.colors(
-                    focusedBorderColor = PaperGreen,
-                    unfocusedBorderColor = PaperHairline,
-                    focusedContainerColor = Color.White,
-                    unfocusedContainerColor = Color.White
-                )
-            )
-
-            // Subject codes are how students actually name a paper. Offering the
-            // common ones turns the promise of "search by code" into one tap.
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp)
-                    .padding(top = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Codes",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = PaperFaint,
-                    letterSpacing = 0.4.sp
-                )
-                SUBJECT_CODE_CHIPS.forEach { code ->
-                    val active = query.trim().equals(code, ignoreCase = true)
-                    Surface(
-                        onClick = { query = if (active) "" else code },
-                        shape = RoundedCornerShape(50),
-                        color = if (active) PaperGreenSoft else Color.White,
-                        border = BorderStroke(1.dp, if (active) PaperGreen else PaperHairline),
-                        modifier = Modifier
-                            .height(26.dp)
-                            .testTag("papers_code_chip_$code")
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(horizontal = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = code,
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.ExtraBold,
-                                color = if (active) PaperGreen else PaperMuted,
-                                letterSpacing = 0.4.sp
-                            )
-                        }
-                    }
-                }
-            }
-
-            // quick chips + saved
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .horizontalScroll(rememberScrollState())
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                QUICK_CHIPS.forEach { (label, value) ->
-                    PillChip(
-                        label = label,
-                        selected = !savedOnly && quickChip == label,
-                        tag = "papers_chip_" + label.lowercase().replace(Regex("[^a-z0-9]"), "_"),
-                        onClick = {
-                            savedOnly = false
-                            quickChip = label
-                        }
-                    )
-                }
-                PillChip(
-                    label = "Saved",
-                    selected = savedOnly,
-                    tag = "papers_chip_saved",
-                    onClick = { savedOnly = !savedOnly }
-                )
-            }
-
-            // result line + sort
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(start = 18.dp, end = 10.dp, bottom = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = when {
-                        isLoading && papers.isEmpty() -> "Loading…"
-                        isFiltering -> "${visible.size} of ${papers.size} papers"
-                        visible.size > PAPERS_PER_PAGE ->
-                            "${pageStart + 1}–${pageStart + pageItems.size} of ${visible.size}"
-                        else -> "${visible.size} papers"
-                    },
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = PaperMuted,
-                    modifier = Modifier.weight(1f)
-                )
-                if (isFiltering) {
-                    Text(
-                        text = "Clear",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PaperGreen,
-                        modifier = Modifier
-                            .clickable {
-                                query = ""
-                                quickChip = "All"
-                                savedOnly = false
-                                filters = PaperFilters()
-                            }
-                            .padding(horizontal = 8.dp, vertical = 6.dp)
-                            .testTag("papers_clear_filters")
-                    )
-                }
-                Box(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable {
-                            layout = if (layout == PaperLayout.LIST) {
-                                PaperLayout.CARDS
-                            } else {
-                                PaperLayout.LIST
-                            }
-                        }
-                        .padding(horizontal = 8.dp, vertical = 6.dp)
-                        .testTag("papers_layout_toggle")
-                ) {
-                    Icon(
-                        imageVector = if (layout == PaperLayout.LIST) {
-                            Icons.Default.GridView
-                        } else {
-                            Icons.Default.ViewList
-                        },
-                        contentDescription = "Switch to " +
-                            if (layout == PaperLayout.LIST) {
-                                PaperLayout.CARDS.label
-                            } else {
-                                PaperLayout.LIST.label
-                            },
-                        tint = PaperInk,
-                        modifier = Modifier.size(17.dp)
-                    )
-                }
-                Row(
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(50))
-                        .clickable { showSort = !showSort }
-                        .padding(horizontal = 10.dp, vertical = 6.dp)
-                        .testTag("papers_sort_button"),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.Sort,
-                        contentDescription = null,
-                        tint = PaperInk,
-                        modifier = Modifier.size(15.dp)
-                    )
-                    Spacer(Modifier.width(5.dp))
-                    Text(
-                        text = sort.label,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.SemiBold,
-                        color = PaperInk
-                    )
-                }
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(1.dp)
-                    .background(PaperHairline)
-            )
-            }
-        }
-
-        // ── body ────────────────────────────────────────────────────────────
-        if (segment == 1) {
             QuizzesSegment(
                 quizzes = quizzes,
                 isLoading = isQuizLoading,
@@ -642,85 +472,303 @@ fun PapersScreen(
                 modifier = Modifier.fillMaxSize()
             )
         } else {
-        when {
-            showSkeletons -> LazyColumn(
-                modifier = Modifier.fillMaxSize(),
-                contentPadding = PaddingValues(16.dp),
+            // Tabs, search, chips and the sort row scroll with the results; the
+            // page bar sits at the end of the list, never over it.
+            LazyColumn(
+                state = listState,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .testTag("papers_screen_content"),
+                contentPadding = PaddingValues(bottom = 28.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                items(7) { PaperTileSkeleton() }
-            }
-
-            papers.isEmpty() -> LibraryOfflineState(
-                serverUrl = serverUrl,
-                isLiveDatabase = isLiveDatabase,
-                onRefresh = onRefreshPapers,
-                onUpdateServerUrl = onUpdateServerUrl
-            )
-
-            visible.isEmpty() -> EmptyResultsState(
-                onClear = {
-                    query = ""
-                    quickChip = "All"
-                    savedOnly = false
-                    filters = PaperFilters()
-                }
-            )
-
-            else -> Column(modifier = Modifier.fillMaxSize()) {
-                LazyColumn(
-                    state = listState,
-                    modifier = Modifier
-                        .weight(1f)
-                        .testTag("papers_screen_content"),
-                    contentPadding = PaddingValues(
-                        start = 16.dp, end = 16.dp, top = 12.dp, bottom = 16.dp
-                    ),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    if (!isLiveDatabase) {
-                        item(key = "offline") {
-                            OfflineNotice(onRefresh = onRefreshPapers)
-                        }
-                    }
-                    items(pageItems, key = { it.id }) { paper ->
-                        if (layout == PaperLayout.LIST) {
-                            PaperRow(
-                                paper = paper,
-                                isSaved = savedIds.contains(paper.id),
-                                isDownloaded = downloadedIds.contains(paper.id),
-                                onClick = { onPaperClick(paper) },
-                                onToggleSave = { onToggleSavePaper(paper) },
-                                onDownloadPaper = { onDownloadPaper(paper) },
-                                onDownloadScheme = { onDownloadScheme(paper) }
+                item(key = "controls") {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(PaperBg)
+                    ) {
+                        // ── segment pills: papers | quizzes ────────────────────────────
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            SegmentPill(
+                                label = "Papers",
+                                selected = segment == 0,
+                                tag = "segment_papers",
+                                onClick = { onSegmentChange(0) }
                             )
-                        } else {
-                            PaperCardRow(
-                                paper = paper,
-                                isSaved = savedIds.contains(paper.id),
-                                isDownloaded = downloadedIds.contains(paper.id),
-                                onClick = { onPaperClick(paper) },
-                                onToggleSave = { onToggleSavePaper(paper) },
-                                onDownloadPaper = { onDownloadPaper(paper) },
-                                onDownloadScheme = { onDownloadScheme(paper) }
+                            SegmentPill(
+                                label = "Quizzes",
+                                selected = segment == 1,
+                                tag = "segment_quizzes",
+                                onClick = { onSegmentChange(1) }
                             )
                         }
+                        // search
+                        OutlinedTextField(
+                            value = queryInput,
+                            onValueChange = { queryInput = it },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 16.dp, vertical = 6.dp)
+                                .height(50.dp)
+                                .testTag("papers_search_bar"),
+                            placeholder = {
+                                Text(
+                                    text = "Search papers, subjects, years",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 13.5.sp,
+                                    color = PaperFaint
+                                )
+                            },
+                            leadingIcon = {
+                                Icon(
+                                    Icons.Default.Search,
+                                    contentDescription = null,
+                                    tint = PaperMuted,
+                                    modifier = Modifier.size(19.dp)
+                                )
+                            },
+                            trailingIcon = {
+                                if (queryInput.isNotEmpty()) {
+                                    Icon(
+                                        Icons.Default.Close,
+                                        contentDescription = "Clear search",
+                                        tint = PaperMuted,
+                                        modifier = Modifier
+                                            .size(18.dp)
+                                            .clickable {
+                                                queryInput = ""
+                                                query = ""
+                                            }
+                                    )
+                                }
+                            },
+                            singleLine = true,
+                            shape = RoundedCornerShape(26.dp),
+                            textStyle = androidx.compose.ui.text.TextStyle(
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 14.sp,
+                                color = PaperInk
+                            ),
+                            colors = OutlinedTextFieldDefaults.colors(
+                                focusedBorderColor = PaperGreen,
+                                unfocusedBorderColor = PaperHairline,
+                                focusedContainerColor = Color.White,
+                                unfocusedContainerColor = Color.White
+                            )
+                        )
+
+                        // quick chips + saved
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState())
+                                .padding(horizontal = 16.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            QUICK_CHIPS.forEach { (label, value) ->
+                                PillChip(
+                                    label = label,
+                                    selected = !savedOnly && quickChip == label,
+                                    tag = "papers_chip_" + label.lowercase().replace(Regex("[^a-z0-9]"), "_"),
+                                    onClick = {
+                                        savedOnly = false
+                                        quickChip = label
+                                    }
+                                )
+                        }
+                        PillChip(
+                            label = "Saved",
+                            selected = savedOnly,
+                            tag = "papers_chip_saved",
+                            onClick = { savedOnly = !savedOnly }
+                        )
+                    }
+
+                    // result line + sort
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(start = 18.dp, end = 10.dp, bottom = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = when {
+                                isLoading && papers.isEmpty() -> "Loading…"
+                                isFiltering -> "${visible.size} of ${papers.size} papers"
+                                visible.size > PAPERS_PER_PAGE ->
+                                    "${pageStart + 1}–${pageStart + pageItems.size} of ${visible.size}"
+                                else -> "${visible.size} papers"
+                            },
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.5.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            color = PaperMuted,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (isFiltering) {
+                            Text(
+                                text = "Clear",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = PaperGreen,
+                                modifier = Modifier
+                                    .clickable {
+                                        queryInput = ""
+                                        query = ""
+                                        quickChip = "All"
+                                        savedOnly = false
+                                        filters = PaperFilters()
+                                    }
+                                    .padding(horizontal = 8.dp, vertical = 6.dp)
+                                    .testTag("papers_clear_filters")
+                            )
+                        }
+                        Box(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable {
+                                    layout = if (layout == PaperLayout.LIST) {
+                                        PaperLayout.CARDS
+                                    } else {
+                                        PaperLayout.LIST
+                                    }
+                                }
+                                .padding(horizontal = 8.dp, vertical = 6.dp)
+                                .testTag("papers_layout_toggle")
+                        ) {
+                            Icon(
+                                imageVector = if (layout == PaperLayout.LIST) {
+                                    Icons.Default.GridView
+                                } else {
+                                    Icons.Default.ViewList
+                                },
+                                contentDescription = "Switch to " +
+                                    if (layout == PaperLayout.LIST) {
+                                        PaperLayout.CARDS.label
+                                    } else {
+                                        PaperLayout.LIST.label
+                                    },
+                                tint = PaperInk,
+                                modifier = Modifier.size(17.dp)
+                            )
+                        }
+                        Row(
+                            modifier = Modifier
+                                .clip(RoundedCornerShape(50))
+                                .clickable { showSort = !showSort }
+                                .padding(horizontal = 10.dp, vertical = 6.dp)
+                                .testTag("papers_sort_button"),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.AutoMirrored.Filled.Sort,
+                                contentDescription = null,
+                                tint = PaperInk,
+                                modifier = Modifier.size(15.dp)
+                            )
+                            Spacer(Modifier.width(5.dp))
+                            Text(
+                                text = sort.label,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.5.sp,
+                                fontWeight = FontWeight.SemiBold,
+                                color = PaperInk
+                            )
+                        }
+                    }
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(1.dp)
+                                .background(PaperHairline)
+                        )
                     }
                 }
 
-                // Pagination stays visible: a page is a place, not a surprise.
-                if (pageCount > 1) {
-                    PaginationBar(
-                        page = safePage,
-                        pageCount = pageCount,
-                        total = visible.size,
-                        onPage = { target ->
-                            page = target
+                when {
+                    showSkeletons -> items(7) {
+                        Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                            PaperTileSkeleton()
                         }
-                    )
+                    }
+
+                    papers.isEmpty() -> item(key = "offline") {
+                        Box(modifier = Modifier.fillParentMaxHeight(0.75f)) {
+                            LibraryOfflineState(
+                                serverUrl = serverUrl,
+                                isLiveDatabase = isLiveDatabase,
+                                onRefresh = onRefreshPapers,
+                                onUpdateServerUrl = onUpdateServerUrl
+                            )
+                        }
+                    }
+
+                    visible.isEmpty() -> item(key = "empty") {
+                        Box(modifier = Modifier.fillParentMaxHeight(0.75f)) {
+                            EmptyResultsState(
+                                onClear = {
+                                    queryInput = ""
+                                    query = ""
+                                    quickChip = "All"
+                                    savedOnly = false
+                                    filters = PaperFilters()
+                                }
+                            )
+                        }
+                    }
+
+                    else -> {
+                        if (!isLiveDatabase) {
+                            item(key = "notice") {
+                                Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                    OfflineNotice(onRefresh = onRefreshPapers)
+                                }
+                            }
+                        }
+                        items(pageItems, key = { it.id }) { entry ->
+                            val paper = entry.paper
+                            Box(modifier = Modifier.padding(horizontal = 16.dp)) {
+                                if (layout == PaperLayout.LIST) {
+                                    PaperRow(
+                                        paper = paper,
+                                        title = entry.title,
+                                        isSaved = savedIds.contains(paper.id),
+                                        isDownloaded = downloadedIds.contains(paper.id),
+                                        onClick = { onPaperClick(paper) },
+                                        onToggleSave = { onToggleSavePaper(paper) }
+                                    )
+                                } else {
+                                    PaperCardRow(
+                                        paper = paper,
+                                        title = entry.title,
+                                        isSaved = savedIds.contains(paper.id),
+                                        isDownloaded = downloadedIds.contains(paper.id),
+                                        onClick = { onPaperClick(paper) },
+                                        onToggleSave = { onToggleSavePaper(paper) }
+                                    )
+                                }
+                            }
+                        }
+                        if (pageCount > 1) {
+                            item(key = "pagination") {
+                                PaginationBar(
+                                    page = safePage,
+                                    pageCount = pageCount,
+                                    total = visible.size,
+                                    onPage = { target -> page = target }
+                                )
+                            }
+                        }
+                    }
                 }
             }
-        }
         }
     }
 
@@ -921,12 +969,11 @@ private fun SegmentPill(label: String, selected: Boolean, tag: String, onClick: 
 @Composable
 private fun PaperRow(
     paper: PastPaper,
+    title: String,
     isSaved: Boolean,
     isDownloaded: Boolean,
     onClick: () -> Unit,
-    onToggleSave: () -> Unit,
-    onDownloadPaper: () -> Unit,
-    onDownloadScheme: () -> Unit
+    onToggleSave: () -> Unit
 ) {
     Surface(
         onClick = onClick,
@@ -950,7 +997,7 @@ private fun PaperRow(
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
-                    text = paper.title,
+                    text = title,
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
@@ -960,10 +1007,7 @@ private fun PaperRow(
                 )
                 Spacer(Modifier.height(3.dp))
                 Text(
-                    text = "${SubjectCodes.of(paper.subject)} · " +
-                        listOf(paper.subject, paper.year.toString(), paper.medium)
-                            .filter { it.isNotBlank() }
-                            .joinToString(" · "),
+                    text = paper.subtitleLine(),
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 12.sp,
                     color = PaperMuted,
@@ -973,7 +1017,7 @@ private fun PaperRow(
                 Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (paper.hasMarkingScheme) {
-                        MiniBadge("Scheme", PaperGreen, PaperGreenSoft)
+                        MiniBadge("Marking scheme", PaperGreen, PaperGreenSoft)
                     }
                     if (isDownloaded) {
                         MiniBadge("Offline", Color(0xFF2563EB), Color(0xFFEFF6FF))
@@ -984,46 +1028,28 @@ private fun PaperRow(
                 }
             }
             Spacer(Modifier.width(8.dp))
-            Column(horizontalAlignment = Alignment.End) {
-                IconAction(
-                    icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                    description = if (isSaved) "Remove from saved" else "Save paper",
-                    tint = if (isSaved) PaperGreen else PaperMuted,
-                    onClick = onToggleSave,
-                    tag = "papers_save_${paper.id}"
-                )
-                Spacer(Modifier.height(6.dp))
-                // The paper and its marking scheme download independently.
-                DownloadPill(
-                    label = "Paper",
-                    filled = true,
-                    enabled = true,
-                    tag = "papers_download_${paper.id}",
-                    onClick = onDownloadPaper
-                )
-                Spacer(Modifier.height(5.dp))
-                DownloadPill(
-                    label = if (paper.hasMarkingScheme) "Scheme" else "No scheme",
-                    filled = false,
-                    enabled = paper.hasMarkingScheme,
-                    tag = "papers_download_scheme_${paper.id}",
-                    onClick = onDownloadScheme
-                )
-            }
+            // Downloading lives one tap away, in the detail sheet: two download
+            // pills on every row turned the list into a button grid.
+            IconAction(
+                icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                description = if (isSaved) "Remove from saved" else "Save paper",
+                tint = if (isSaved) PaperGreen else PaperMuted,
+                onClick = onToggleSave,
+                tag = "papers_save_${paper.id}"
+            )
         }
     }
 }
 
-/** The roomy layout: a large cover, the full title, and both downloads. */
+/** The roomy layout: a large cover and the title given room to breathe. */
 @Composable
 private fun PaperCardRow(
     paper: PastPaper,
+    title: String,
     isSaved: Boolean,
     isDownloaded: Boolean,
     onClick: () -> Unit,
-    onToggleSave: () -> Unit,
-    onDownloadPaper: () -> Unit,
-    onDownloadScheme: () -> Unit
+    onToggleSave: () -> Unit
 ) {
     Surface(
         onClick = onClick,
@@ -1033,183 +1059,72 @@ private fun PaperCardRow(
             .fillMaxWidth()
             .testTag("papers_card_${paper.id}")
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            Row(verticalAlignment = Alignment.Top) {
-                PaperCover(
-                    paper = paper,
-                    modifier = Modifier.size(width = 74.dp, height = 94.dp),
-                    corner = 14.dp
-                )
-                Spacer(Modifier.width(14.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        text = SubjectCodes.of(paper.subject),
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.ExtraBold,
-                        color = PaperGreen,
-                        letterSpacing = 0.6.sp
-                    )
-                    Spacer(Modifier.height(2.dp))
-                    Text(
-                        text = paper.title,
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 15.sp,
-                        lineHeight = 19.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = PaperInk,
-                        maxLines = 3,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(6.dp))
-                    Text(
-                        text = listOf(paper.subject, paper.year.toString(), paper.medium)
-                            .filter { it.isNotBlank() }
-                            .joinToString(" · "),
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
-                        color = PaperMuted,
-                        maxLines = 2,
-                        overflow = TextOverflow.Ellipsis
-                    )
-                    Spacer(Modifier.height(8.dp))
-                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                        if (isDownloaded) {
-                            MiniBadge("Offline", Color(0xFF2563EB), Color(0xFFEFF6FF))
-                        }
-                        if (paper.examType.isNotBlank()) {
-                            MiniBadge(paper.examType, PaperMuted, Color(0xFFF1F5F9))
-                        }
-                    }
-                }
-                IconAction(
-                    icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
-                    description = if (isSaved) "Remove from saved" else "Save paper",
-                    tint = if (isSaved) PaperGreen else PaperMuted,
-                    onClick = onToggleSave,
-                    tag = "papers_card_save_${paper.id}"
-                )
-            }
-            Spacer(Modifier.height(12.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                DownloadButton(
-                    label = "Download paper",
-                    filled = true,
-                    enabled = true,
-                    modifier = Modifier.weight(1f),
-                    tag = "papers_card_download_${paper.id}",
-                    onClick = onDownloadPaper
-                )
-                DownloadButton(
-                    label = if (paper.hasMarkingScheme) "Marking scheme" else "No scheme",
-                    filled = false,
-                    enabled = paper.hasMarkingScheme,
-                    modifier = Modifier.weight(1f),
-                    tag = "papers_card_scheme_${paper.id}",
-                    onClick = onDownloadScheme
-                )
-            }
-        }
-    }
-}
-
-/** Small two-line pill used in the compact row. */
-@Composable
-private fun DownloadPill(
-    label: String,
-    filled: Boolean,
-    enabled: Boolean,
-    tag: String,
-    onClick: () -> Unit
-) {
-    val ink = when {
-        !enabled -> PaperFaint
-        filled -> Color.White
-        else -> PaperGreen
-    }
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = when {
-            !enabled -> Color(0xFFF1F5F9)
-            filled -> PaperGreen
-            else -> Color.White
-        },
-        border = if (!enabled || filled) null else BorderStroke(1.dp, PaperGreen),
-        modifier = Modifier
-            .height(26.dp)
-            .testTag(tag)
-            .let { if (enabled) it.clickable(onClick = onClick) else it }
-    ) {
         Row(
-            modifier = Modifier.padding(horizontal = 9.dp),
+            modifier = Modifier.padding(14.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Text(
-                text = label,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
-                fontWeight = FontWeight.Bold,
-                color = ink,
-                maxLines = 1
+            PaperCover(
+                paper = paper,
+                modifier = Modifier.size(width = 74.dp, height = 94.dp),
+                corner = 14.dp
+            )
+            Spacer(Modifier.width(14.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = SubjectCodes.of(paper.subject),
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = PaperGreen,
+                    letterSpacing = 0.6.sp
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = title,
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 15.sp,
+                    lineHeight = 19.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = PaperInk,
+                    maxLines = 3,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = paper.subtitleLine(),
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    color = PaperMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Spacer(Modifier.height(8.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    if (paper.hasMarkingScheme) {
+                        MiniBadge("Marking scheme", PaperGreen, PaperGreenSoft)
+                    }
+                    if (isDownloaded) {
+                        MiniBadge("Offline", Color(0xFF2563EB), Color(0xFFEFF6FF))
+                    }
+                }
+            }
+            Spacer(Modifier.width(8.dp))
+            IconAction(
+                icon = if (isSaved) Icons.Default.Bookmark else Icons.Default.BookmarkBorder,
+                description = if (isSaved) "Remove from saved" else "Save paper",
+                tint = if (isSaved) PaperGreen else PaperMuted,
+                onClick = onToggleSave,
+                tag = "papers_card_save_${paper.id}"
             )
         }
     }
 }
 
-/** Wide button used in the card layout. */
-@Composable
-private fun DownloadButton(
-    label: String,
-    filled: Boolean,
-    enabled: Boolean,
-    modifier: Modifier = Modifier,
-    tag: String,
-    onClick: () -> Unit
-) {
-    Surface(
-        shape = RoundedCornerShape(50),
-        color = when {
-            !enabled -> Color(0xFFF1F5F9)
-            filled -> PaperGreen
-            else -> Color.White
-        },
-        border = if (!enabled || filled) null else BorderStroke(1.dp, PaperGreen),
-        modifier = modifier
-            .height(38.dp)
-            .testTag(tag)
-            .let { if (enabled) it.clickable(onClick = onClick) else it }
-    ) {
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.Center
-        ) {
-            Icon(
-                imageVector = if (filled) Icons.Default.Download else Icons.Default.Description,
-                contentDescription = null,
-                tint = when {
-                    !enabled -> PaperFaint
-                    filled -> Color.White
-                    else -> PaperGreen
-                },
-                modifier = Modifier.size(15.dp)
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = label,
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.Bold,
-                color = when {
-                    !enabled -> PaperFaint
-                    filled -> Color.White
-                    else -> PaperGreen
-                },
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-    }
+/** "PHY · Physics · 2024 · Sinhala", with empty pieces dropped. */
+private fun PastPaper.subtitleLine(): String {
+    val code = SubjectCodes.of(subject).takeIf { it != "PAPER" }
+    return listOfNotNull(code, subject.takeIf { it.isNotBlank() }, year.toString(), medium.takeIf { it.isNotBlank() })
+        .joinToString(" · ")
 }
 
 /**
@@ -1233,15 +1148,17 @@ private fun PaginationBar(
         pages.distinct().sorted()
     }
 
+    // No background and no elevation: the bar is the list's last item, so it
+    // scrolls up and comes to rest under the final paper like a printed footer.
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .background(PaperBg)
-            .padding(top = 4.dp)
+            .padding(top = 6.dp)
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
+                .padding(horizontal = 16.dp)
                 .height(1.dp)
                 .background(PaperHairline)
         )
