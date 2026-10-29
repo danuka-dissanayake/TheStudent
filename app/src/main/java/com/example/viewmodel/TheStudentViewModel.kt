@@ -317,6 +317,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /** How much of the call stays on screen; a long call scrolls, it does not grow forever. */
     private val MAX_TRANSCRIPT_LINES = 40
 
+    // ── Live microphone energy ───────────────────────────────────────────────
+    // Deliberately *not* part of UiState: it changes ten times a second, and the
+    // only thing on the tutor screen that reacts to it is the orb, which collects
+    // this flow on its own. Putting it in UiState would recompose the whole page
+    // (thread, scroll position, mic) for a circle that is already animating.
+    private val _voiceLevel = MutableStateFlow(0f)
+    val voiceLevel: StateFlow<Float> = _voiceLevel.asStateFlow()
+    private var lastVoiceLevelAt = 0L
+
     /**
      * Remember a turn for the model, and forget the oldest once the call gets long.
      *
@@ -501,7 +510,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         }
 
                         override fun onRmsChanged(rmsdB: Float) {
-                            // Suppress high-frequency decibel state flow emissions that cause 60fps Compose recomposition lag
+                            // Still not written to UiState — that caused the 60fps
+                            // recomposition lag this comment was written to prevent —
+                            // but the orb needs *something* live to react to, so the
+                            // level goes to its own small flow, throttled to ~14Hz.
+                            val now = System.currentTimeMillis()
+                            if (now - lastVoiceLevelAt < 70L) return
+                            lastVoiceLevelAt = now
+                            // RMS arrives in roughly -2..10 dBFS; anything under
+                            // about 0.06 is room noise and must not make the sphere
+                            // twitch while the student is thinking.
+                            val raw = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                            val shaped = if (raw < 0.06f) 0f else raw
+                            _voiceLevel.value =
+                                if (shaped > _voiceLevel.value) shaped else _voiceLevel.value * 0.9f
                         }
 
                         override fun onBufferReceived(buffer: ByteArray?) {}
@@ -3983,6 +4005,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Hang up, keep the results, and show the summary. */
     fun endTutorCall(reason: String? = null) {
+        _voiceLevel.value = 0f
         val state = _uiState.value
         if (state.callPhase == CallPhase.IDLE) return
 
@@ -4509,6 +4532,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun stopVoiceListening() {
+        _voiceLevel.value = 0f
         try {
             // stopListening (unlike cancel) still hands over what was heard, which
             // is what "I've finished speaking" means on a call.

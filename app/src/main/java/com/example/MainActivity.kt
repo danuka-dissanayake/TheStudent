@@ -673,6 +673,7 @@ class MainActivity : ComponentActivity() {
                                                             studentName = viewModel.preferences.userName.orEmpty(),
                                                             spokenMinutes = viewModel.preferences.speakingSeconds / 60,
                                                             spokenCalls = viewModel.preferences.speakingCalls,
+                                                            micLevel = viewModel.voiceLevel,
                                                             activeLessonId = uiState.activeLessonId,
                                                             lessonStepIndex = uiState.lessonStepIndex,
                                                             isLessonComplete = uiState.isLessonComplete,

@@ -240,3 +240,20 @@ call owns the whole screen.
 - **Level strip** is minutes actually spoken, read from
   `TheStudentPreferences.speakingSeconds` / `speakingCalls`, which
   `endTutorCall` increments — the number cannot be gamed by tapping.
+
+### 11.1 Round 18, second pass
+
+- **Palette is the app's**, not violet: emerald/teal/lime from `ui/theme/Color.kt`
+  worn as glass, with amber reserved for corrections. Mockup:
+  `designs/36-ai-tutor-emerald.png`.
+- **The orb reacts.** `IridescentOrb` takes an `OrbMode`: it breathes when idle,
+  swells with the real microphone loudness while listening (throttled RMS on
+  `TheStudentViewModel.voiceLevel`, a flow kept out of UiState), pulses in a
+  ~600 ms speech rhythm while the tutor talks, shimmers while it thinks, and
+  presses in on touch. Tapping the idle orb starts the call. All animated values
+  are read inside the draw/layer blocks, so the sphere redraws without
+  recomposing the thread.
+- **Type is bigger**: bubbles 14.5sp, correction 15sp, header 18/12.5sp,
+  headline 28sp, mic caption 12.5sp.
+- **The mic glyph is centred** — it was wrapped in a second, unsized `Box` that
+  pinned it to the top-left corner of the button.

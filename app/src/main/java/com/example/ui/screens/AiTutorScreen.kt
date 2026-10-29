@@ -17,6 +17,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -64,6 +66,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
@@ -83,30 +86,40 @@ import com.example.data.remote.HuggingFaceSpaceClient
 import com.example.data.remote.TutorLessonCatalog
 import com.example.ui.components.AssistantVoiceState
 import com.example.ui.theme.MaisonNeueFontFamily
+import kotlinx.coroutines.flow.StateFlow
 
 // ─────────────────────────────────────────────────────────────────────────────
-//  Palette — the pastel / glass language of the approved mockup
-//  (designs/35-ai-tutor-glass.png)
+//  Palette — the app's own colours, worn as pastel glass
+//
+//  Emerald and teal, not lilac: the tutor is a page of TheStudent, and a student
+//  who taps into it should not feel they left the app. The values below are the
+//  brand tokens (ui/theme/Color.kt) softened into translucent glass.
 // ─────────────────────────────────────────────────────────────────────────────
 
-private val Ink = Color(0xFF1F2430)
-private val Muted = Color(0xFF6B7280)
-private val Faint = Color(0xFF9AA3AF)
-private val Violet = Color(0xFF7C6CF6)
-private val VioletDeep = Color(0xFF5B4BD6)
-private val Coral = Color(0xFFF2836B)
-private val Mint = Color(0xFF3FBF9A)
+private val Ink = Color(0xFF0F172A)          // TextPrimaryLight
+private val Muted = Color(0xFF64748B)        // TextSecondaryLight
+private val Faint = Color(0xFF94A3B8)
 
-private val CanvasTop = Color(0xFFDCE6FB)
-private val CanvasMid = Color(0xFFEFE7F5)
-private val CanvasBottom = Color(0xFFFBEFE6)
+private val Brand = Color(0xFF059669)        // EmeraldPrimary
+private val BrandDeep = Color(0xFF047857)    // EmeraldDark
+private val TealDeep = Color(0xFF0F766E)     // TealSecondary
+private val Fresh = Color(0xFF10B981)        // EmeraldLight
+private val Lime = Color(0xFF84CC16)         // LimeAccent
+private val Warm = Color(0xFFF59E0B)         // AmberWarning — corrections
 
-private val GlassFill = Color(0xB3FFFFFF)      // 70% white
-private val GlassFillSoft = Color(0x8CFFFFFF)   // 55%
-private val GlassEdge = Color(0xE6FFFFFF)       // 90% white hairline
-private val BubbleTutor = Color(0xB8FFFFFF)
-private val BubbleStudent = Color(0xE67C6CF6)
-private val CorrectionFill = Color(0xD1FFEEE4)  // warm, still translucent
+private val CanvasTop = Color(0xFFE2F2EB)    // mint
+private val CanvasMid = Color(0xFFEFF9F5)    // foam
+private val CanvasBottom = Color(0xFFE3F0F7) // cool aqua
+
+private val GlassFill = Color(0xB8FFFFFF)      // 72% white
+private val GlassFillSoft = Color(0x96FFFFFF)  // 59%
+private val GlassEdge = Color(0xE6FFFFFF)      // 90% hairline
+private val BubbleTutor = Color(0xC2FFFFFF)
+private val BubbleStudent = Color(0xF2059696)
+private val CorrectionFill = Color(0xD9FFF7E6) // warm amber, still translucent
+
+/** What the sphere is doing. It is the only thing on the screen that moves. */
+private enum class OrbMode { IDLE, LISTENING, SPEAKING, THINKING }
 
 /**
  * The English tutor screen — glass edition.
@@ -131,6 +144,7 @@ fun AiTutorScreen(
     callPhase: CallPhase,
     callSeconds: Int,
     isMuted: Boolean,
+    micLevel: StateFlow<Float>,
     transcript: List<TutorCallEntry>,
     currentFix: GrammarFix?,
     callSummary: CallSummary?,
@@ -138,6 +152,8 @@ fun AiTutorScreen(
     studentName: String,
     spokenMinutes: Int,
     spokenCalls: Int,
+    /** Live microphone energy (0..1). Kept out of UiState so it only redraws the orb. */
+    micLevel: StateFlow<Float>,
     activeLessonId: String?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
@@ -202,6 +218,7 @@ fun AiTutorScreen(
                 callPhase = callPhase,
                 callSeconds = callSeconds,
                 isMuted = isMuted,
+                micLevel = micLevel,
                 transcript = transcript,
                 currentFix = currentFix,
                 lesson = lesson,
@@ -280,7 +297,7 @@ private fun TutorBackdrop() {
                 .offset(x = (-140).dp, y = (-120).dp)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0x99C6CEFF), Color.Transparent)
+                        colors = listOf(Color(0x99A7EFD3), Color.Transparent)
                     )
                 )
         )
@@ -291,7 +308,7 @@ private fun TutorBackdrop() {
                 .offset(x = 110.dp, y = 90.dp)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0x8CFFD6C4), Color.Transparent)
+                        colors = listOf(Color(0x8CBFE7F5), Color.Transparent)
                     )
                 )
         )
@@ -302,7 +319,7 @@ private fun TutorBackdrop() {
                 .offset(x = (-120).dp, y = 60.dp)
                 .background(
                     Brush.radialGradient(
-                        colors = listOf(Color(0x66FFCEE8), Color.Transparent)
+                        colors = listOf(Color(0x66D9F2C4), Color.Transparent)
                     )
                 )
         )
@@ -310,43 +327,120 @@ private fun TutorBackdrop() {
 }
 
 /**
- * The iridescent sphere — the tutor's face.
+ * The iridescent sphere — the tutor's face, and the only thing here that behaves
+ * like a living thing.
  *
- * Six soft colour fields blended inside a circle, with a specular highlight and
- * a slow drift, drawn on a Canvas so it costs one composable rather than a
- * dozen stacked gradients. The drift is deliberately slow: this sits on screen
- * for minutes at a time, and anything faster becomes something to stare at
- * instead of something to talk to.
+ * It has to answer three questions a student asks silently before they speak:
+ * *is it awake?*, *can it hear me?*, *is it my turn?* So the sphere does not idle
+ * in a loop — it breathes while it waits, swells with the actual loudness of the
+ * microphone while it listens, pulses in a speech-like rhythm while it talks,
+ * and settles into a slow shimmer while it thinks. Touching it presses in and
+ * starts the call, because on every voice assistant people try the orb first.
+ *
+ * Everything is drawn in one `Canvas`, masked to a circle: six drifting colour
+ * fields, a halo that widens with the voice, ripple rings while listening, a
+ * specular highlight and a rim.
  */
 @Composable
 private fun IridescentOrb(
     size: androidx.compose.ui.unit.Dp,
-    isLive: Boolean,
-    modifier: Modifier = Modifier
+    mode: OrbMode,
+    micLevel: Float = 0f,
+    modifier: Modifier = Modifier,
+    onTap: (() -> Unit)? = null
 ) {
     val transition = rememberInfiniteTransition(label = "orb")
-    val drift by transition.animateFloat(
+    val drift = transition.animateFloat(
         initialValue = 0f,
         targetValue = 360f,
         animationSpec = infiniteRepeatable(animation = tween(26_000), repeatMode = RepeatMode.Restart),
         label = "orb_drift"
     )
-    val breathe by transition.animateFloat(
+    // Waiting: a slow breath. Long enough that it never pulls the eye.
+    val breathe = transition.animateFloat(
         initialValue = 0.98f,
         targetValue = 1.03f,
-        animationSpec = infiniteRepeatable(animation = tween(4200), repeatMode = RepeatMode.Reverse),
+        animationSpec = infiniteRepeatable(animation = tween(4_200), repeatMode = RepeatMode.Reverse),
         label = "orb_breathe"
     )
+    // Talking: a ~600 ms swell, which is roughly the rhythm of a spoken phrase
+    // and reads as speech rather than as a loading spinner.
+    val speechPulse = transition.animateFloat(
+        initialValue = 0.45f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(620), repeatMode = RepeatMode.Reverse),
+        label = "orb_speech"
+    )
+    // Thinking: a tighter, faster shimmer.
+    val thinkPulse = transition.animateFloat(
+        initialValue = 0.30f,
+        targetValue = 0.72f,
+        animationSpec = infiniteRepeatable(animation = tween(900), repeatMode = RepeatMode.Reverse),
+        label = "orb_think"
+    )
+    // A ring leaves the sphere every two seconds while the call is live.
+    val ripple = transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(2_000, easing = androidx.compose.animation.core.LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "orb_ripple"
+    )
+
+    var pressed by remember { mutableStateOf(false) }
+    // Springs rather than a tween: the sphere should lean into a loud word and
+    // settle back, the way a speaker's shoulders do.
+    val micEnergy = androidx.compose.animation.core.animateFloatAsState(
+        targetValue = micLevel.coerceIn(0f, 1f),
+        animationSpec = androidx.compose.animation.core.spring(
+            dampingRatio = 0.55f,
+            stiffness = androidx.compose.animation.core.Spring.StiffnessMediumLow
+        ),
+        label = "orb_mic"
+    )
+
+    // Every animated value above is a State that is *read inside the draw and
+    // layer blocks*, never in composition: the sphere then re-draws without
+    // re-composing, which is what keeps a 60fps orb cheap next to a scrolling
+    // thread. The helpers below are the single source of the "how alive is it"
+    // number, used by both blocks.
+    fun energyOf(): Float = when (mode) {
+        OrbMode.IDLE -> 0f
+        OrbMode.LISTENING -> micEnergy.value
+        OrbMode.SPEAKING -> speechPulse.value
+        OrbMode.THINKING -> thinkPulse.value
+    }
 
     Canvas(
-        // The blobs are painted wider than the sphere and clipped back to it: a
-        // hard circular mask is what makes it read as a ball of liquid glass
-        // instead of six overlapping smudges.
         modifier = modifier
             .size(size)
             .graphicsLayer {
-                scaleX = breathe
-                scaleY = breathe
+                val energy = energyOf()
+                val swell = when (mode) {
+                    OrbMode.LISTENING -> 0.16f * energy
+                    OrbMode.SPEAKING -> 0.07f * energy
+                    OrbMode.THINKING -> 0.02f * energy
+                    OrbMode.IDLE -> 0f
+                }
+                val scale = breathe.value * (1f + swell) * (if (pressed) 0.93f else 1f)
+                scaleX = scale
+                scaleY = scale
+            }
+            .pointerInput(onTap) {
+                if (onTap == null) return@pointerInput
+                detectTapGestures(
+                    onPress = {
+                        pressed = true
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            pressed = false
+                        }
+                    },
+                    onTap = { onTap() }
+                )
             }
             .clip(CircleShape)
     ) {
@@ -355,18 +449,43 @@ private fun IridescentOrb(
         val scope = this
         val r = scope.size.minDimension / 2f
         val c = Offset(scope.size.width / 2f, scope.size.height / 2f)
+        // Read here, at draw time, so the sphere animates without re-composing.
+        val energy = energyOf()
+        val driftDeg = drift.value
+        val rippleT = ripple.value
 
-        fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
-            val a = Math.toRadians((angleDeg + drift).toDouble())
-            val x = (c.x + (distance * r * Math.cos(a))).toFloat()
-            val y = (c.y + (distance * r * Math.sin(a))).toFloat()
-            scope.orbBlob(Offset(x, y), radius * r, color)
+        // Halo. Outside the clip on a Box this would need a second layer; drawn
+        // here it is simply cut to the circle, so the light reads as the sphere
+        // glowing rather than as a blur behind it.
+        val haloAlpha = (0.18f + 0.55f * energy + if (pressed) 0.18f else 0f).coerceAtMost(0.8f)
+        scope.drawCircle(
+            brush = Brush.radialGradient(
+                colors = listOf(Color.White.copy(alpha = haloAlpha), Color.Transparent),
+                center = c,
+                radius = r
+            ),
+            radius = r,
+            center = c
+        )
+
+        // Ripples while the call is live: the "it can hear me" cue.
+        if (mode != OrbMode.IDLE) {
+            repeat(2) { index ->
+                val t = (rippleT + index * 0.5f) % 1f
+                val alpha = ((1f - t) * (0.10f + 0.34f * energy)).coerceIn(0f, 0.44f)
+                scope.drawCircle(
+                    color = Color.White.copy(alpha = alpha),
+                    radius = r * (0.82f + 0.36f * t),
+                    center = c,
+                    style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.03f)
+                )
+            }
         }
 
-        // sphere body
-        drawCircle(
+        // body
+        scope.drawCircle(
             brush = Brush.radialGradient(
-                colors = listOf(Color(0xFFF4F7FF), Color(0xFFE7EDFD)),
+                colors = listOf(Color(0xFFF7FFFC), Color(0xFFDBEFE6)),
                 center = Offset(c.x - r * 0.35f, c.y - r * 0.4f),
                 radius = r * 1.5f
             ),
@@ -374,15 +493,23 @@ private fun IridescentOrb(
             center = c
         )
 
-        blob(300f, 0.35f, 0.75f, Color(0xCCBFD3FF))
-        blob(35f, 0.42f, 0.68f, Color(0xCCFFD8C2))
-        blob(95f, 0.48f, 0.60f, Color(0xCCFFC9E4))
-        blob(160f, 0.40f, 0.62f, Color(0xBFC9C4FF))
-        blob(235f, 0.44f, 0.55f, Color(0xBFB8EDE9))
+        fun blob(angleDeg: Float, distance: Float, radius: Float, color: Color) {
+            val a = Math.toRadians((angleDeg + driftDeg + energy * 40f).toDouble())
+            val push = distance * r * (1f + 0.34f * energy)
+            val x = (c.x + push * Math.cos(a)).toFloat()
+            val y = (c.y + push * Math.sin(a)).toFloat()
+            scope.orbBlob(Offset(x, y), radius * r * (1f + 0.24f * energy), color)
+        }
+
+        blob(300f, 0.35f, 0.75f, Color(0xCCBCEFD9))
+        blob(35f, 0.42f, 0.68f, Color(0xCCE8F7C0))
+        blob(95f, 0.48f, 0.60f, Color(0xCCB4EEE2))
+        blob(160f, 0.40f, 0.62f, Color(0xBFBBE4F2))
+        blob(235f, 0.44f, 0.55f, Color(0xBFCBEBB8))
         blob(0f, 0f, 0.55f, Color(0xB3FFFFFF))
 
         // specular highlight
-        drawCircle(
+        scope.drawCircle(
             brush = Brush.radialGradient(
                 colors = listOf(Color(0xF2FFFFFF), Color(0x00FFFFFF)),
                 center = Offset(c.x - r * 0.33f, c.y - r * 0.42f),
@@ -392,15 +519,23 @@ private fun IridescentOrb(
             center = Offset(c.x - r * 0.33f, c.y - r * 0.42f)
         )
 
-        if (isLive) {
-            drawCircle(
-                color = Color(0x33FFFFFF),
-                radius = r,
-                center = c,
-                style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.02f)
-            )
-        }
+        // rim, so the sphere keeps its edge against a light background
+        scope.drawCircle(
+            color = Color.White.copy(alpha = 0.26f + 0.20f * energy),
+            radius = r,
+            center = c,
+            style = androidx.compose.ui.graphics.drawscope.Stroke(width = r * 0.03f)
+        )
     }
+}
+
+/** The sphere follows the turn: it is the only "who is speaking" indicator on the screen. */
+private fun orbModeFor(voiceState: AssistantVoiceState, isMuted: Boolean): OrbMode = when {
+    isMuted -> OrbMode.IDLE
+    voiceState == AssistantVoiceState.LISTENING -> OrbMode.LISTENING
+    voiceState == AssistantVoiceState.SPEAKING -> OrbMode.SPEAKING
+    voiceState == AssistantVoiceState.THINKING -> OrbMode.THINKING
+    else -> OrbMode.IDLE
 }
 
 /**
@@ -462,14 +597,14 @@ private fun GlassHeader(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = 18.sp,
                     fontWeight = FontWeight.ExtraBold,
                     color = Ink
                 )
                 Text(
                     text = subtitle,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.5.sp,
                     color = Muted
                 )
             }
@@ -565,12 +700,16 @@ private fun IdleContent(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(Modifier.height(18.dp))
-            IridescentOrb(size = 218.dp, isLive = false)
+            IridescentOrb(
+                size = 224.dp,
+                mode = OrbMode.IDLE,
+                onTap = onMic
+            )
             Spacer(Modifier.height(26.dp))
             Text(
                 text = if (firstName.isBlank()) "Hello" else "Hello, $firstName",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 14.5.sp,
+                fontSize = 16.5.sp,
                 color = Muted,
                 textAlign = TextAlign.Center
             )
@@ -578,8 +717,8 @@ private fun IdleContent(
             Text(
                 text = "Ready to speak English?",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 24.sp,
-                lineHeight = 30.sp,
+                fontSize = 28.sp,
+                lineHeight = 34.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Ink,
                 textAlign = TextAlign.Center
@@ -589,7 +728,7 @@ private fun IdleContent(
             Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 ModeCard(
                     icon = Icons.Default.Mic,
-                    tint = Violet,
+                    tint = Brand,
                     title = "Free talk",
                     subtitle = "Talk freely · I fix as you go",
                     selected = lesson == null,
@@ -598,7 +737,7 @@ private fun IdleContent(
                 )
                 ModeCard(
                     icon = Icons.Default.PlayArrow,
-                    tint = Mint,
+                    tint = Fresh,
                     title = lesson?.title ?: "Guided lesson",
                     subtitle = if (lesson != null) {
                         "Lesson · ${lesson.stepCount} steps · ${lesson.level}"
@@ -617,7 +756,7 @@ private fun IdleContent(
             Text(
                 text = status,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 color = Faint,
                 textAlign = TextAlign.Center,
                 maxLines = 1,
@@ -667,7 +806,7 @@ private fun ModeCard(
             Text(
                 text = title,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Bold,
                 color = Ink,
                 maxLines = 1,
@@ -677,8 +816,8 @@ private fun ModeCard(
             Text(
                 text = subtitle,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 9.5.sp,
-                lineHeight = 13.sp,
+                fontSize = 11.5.sp,
+                lineHeight = 16.sp,
                 color = Muted,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis
@@ -716,7 +855,7 @@ private fun LevelStrip(spokenMinutes: Int, spokenCalls: Int) {
             Text(
                 text = "Your speaking level",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 13.sp,
                 color = Muted
             )
             Spacer(Modifier.height(6.dp))
@@ -724,7 +863,7 @@ private fun LevelStrip(spokenMinutes: Int, spokenCalls: Int) {
                 Text(
                     text = "$label  ·  $spokenMinutes min spoken",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 14.5.sp,
                     fontWeight = FontWeight.Bold,
                     color = Ink,
                     modifier = Modifier.weight(1f)
@@ -736,9 +875,9 @@ private fun LevelStrip(spokenMinutes: Int, spokenCalls: Int) {
                         "$spokenCalls ${if (spokenCalls == 1) "call" else "calls"}"
                     },
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.5.sp,
+                    fontSize = 12.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Mint
+                    color = Fresh
                 )
             }
             Spacer(Modifier.height(9.dp))
@@ -747,14 +886,14 @@ private fun LevelStrip(spokenMinutes: Int, spokenCalls: Int) {
                     .fillMaxWidth()
                     .height(4.dp)
                     .clip(CircleShape)
-                    .background(Violet.copy(alpha = 0.16f))
+                    .background(Brand.copy(alpha = 0.16f))
             ) {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth(progress)
                         .height(4.dp)
                         .clip(CircleShape)
-                        .background(Violet)
+                        .background(Brand)
                 )
             }
         }
@@ -816,7 +955,12 @@ private fun LiveContent(
             horizontalArrangement = Arrangement.Center,
             modifier = Modifier.fillMaxWidth().padding(top = 12.dp)
         ) {
-            IridescentOrb(size = 84.dp, isLive = true)
+            LiveOrb(
+                voiceState = voiceState,
+                isMuted = isMuted,
+                micLevel = micLevel,
+                size = 96.dp
+            )
         }
 
         Row(
@@ -834,16 +978,11 @@ private fun LiveContent(
             Text(
                 text = statusLabel(voiceState, callPhase, isMuted),
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
+                fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
-                color = if (isMuted) Muted else VioletDeep
-            )
-            Spacer(Modifier.width(6.dp))
-            Text(
-                text = "·  tap the mic to reply",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.sp,
-                color = Muted
+                color = if (isMuted) Muted else BrandDeep,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
             )
         }
 
@@ -865,7 +1004,7 @@ private fun LiveContent(
                 Text(
                     text = "Connecting you to Miss Emma…",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.5.sp,
+                    fontSize = 14.5.sp,
                     color = Muted,
                     modifier = Modifier.padding(top = 20.dp)
                 )
@@ -922,11 +1061,31 @@ private fun LiveContent(
     }
 }
 
+/**
+ * The live sphere, wrapped so the microphone energy is read here rather than in
+ * the screen: at ~12 updates a second it must repaint one 96 dp circle and
+ * nothing else.
+ */
+@Composable
+private fun LiveOrb(
+    voiceState: AssistantVoiceState,
+    isMuted: Boolean,
+    micLevel: StateFlow<Float>,
+    size: androidx.compose.ui.unit.Dp
+) {
+    val level by micLevel.collectAsState()
+    IridescentOrb(
+        size = size,
+        mode = orbModeFor(voiceState, isMuted),
+        micLevel = level
+    )
+}
+
 private fun statusColor(state: AssistantVoiceState, isMuted: Boolean): Color = when {
     isMuted -> Faint
-    state == AssistantVoiceState.LISTENING -> Coral
+    state == AssistantVoiceState.LISTENING -> Warm
     state == AssistantVoiceState.THINKING -> Color(0xFFE0A83C)
-    else -> Violet
+    else -> Brand
 }
 
 private fun statusLabel(state: AssistantVoiceState, phase: CallPhase, isMuted: Boolean): String = when {
@@ -956,9 +1115,9 @@ private fun LessonChip(lesson: TutorLesson, stepIndex: Int, isComplete: Boolean)
                         "${lesson.step(stepIndex)?.name ?: lesson.title}"
                 },
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 10.sp,
+                fontSize = 12.sp,
                 fontWeight = FontWeight.Bold,
-                color = VioletDeep,
+                color = BrandDeep,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis
             )
@@ -983,8 +1142,8 @@ private fun TutorBubble(text: String) {
             Text(
                 text = text,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
-                lineHeight = 18.sp,
+                fontSize = 14.5.sp,
+                lineHeight = 21.sp,
                 color = Ink
             )
         }
@@ -1007,8 +1166,8 @@ private fun StudentBubble(text: String) {
             Text(
                 text = text,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.5.sp,
-                lineHeight = 18.sp,
+                fontSize = 14.5.sp,
+                lineHeight = 21.sp,
                 color = Color.White
             )
         }
@@ -1037,31 +1196,31 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
     ) {
         Column {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Box(Modifier.size(6.dp).clip(CircleShape).background(Coral))
+                Box(Modifier.size(6.dp).clip(CircleShape).background(Warm))
                 Spacer(Modifier.width(7.dp))
                 Text(
                     text = "BETTER",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.sp,
+                    fontSize = 11.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.9.sp,
-                    color = Coral
+                    color = Warm
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
                     text = "Hear it  ▸",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Coral
+                    color = Warm
                 )
             }
             Spacer(Modifier.height(7.dp))
             Text(
                 text = "“${fix.corrected}”",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
-                lineHeight = 18.sp,
+                fontSize = 15.sp,
+                lineHeight = 21.sp,
                 fontWeight = FontWeight.Bold,
                 color = Ink
             )
@@ -1070,8 +1229,8 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
                 Text(
                     text = fix.rule,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
-                    color = Color(0xFF9A6B55)
+                    fontSize = 12.sp,
+                    color = Color(0xFF8A6A2F)
                 )
             }
         }
@@ -1107,7 +1266,7 @@ private fun ThinkingBubble() {
                         Modifier
                             .size(5.dp)
                             .clip(CircleShape)
-                            .background(Violet.copy(alpha = alpha))
+                            .background(Brand.copy(alpha = alpha))
                     )
                 }
             }
@@ -1159,7 +1318,7 @@ private fun MicDock(
                     .graphicsLayer { scaleX = pulse; scaleY = pulse }
                     .clip(CircleShape)
                     .background(
-                        if (isMuted) Faint.copy(alpha = 0.10f) else Violet.copy(alpha = 0.14f)
+                        if (isMuted) Faint.copy(alpha = 0.10f) else Brand.copy(alpha = 0.14f)
                     )
             )
             Box(
@@ -1167,38 +1326,39 @@ private fun MicDock(
                     .size(78.dp)
                     .clip(CircleShape)
                     .background(
-                        if (isMuted) Faint.copy(alpha = 0.16f) else Violet.copy(alpha = 0.22f)
+                        if (isMuted) Faint.copy(alpha = 0.16f) else Brand.copy(alpha = 0.22f)
                     )
             )
+            // The button centres its own content: the icon used to be wrapped in a
+            // second, unsized Box, which parked it in the top-left of the circle.
             Box(
                 modifier = Modifier
-                    .size(62.dp)
+                    .size(66.dp)
                     .clip(CircleShape)
-                    .background(if (isMuted) Faint else Violet)
+                    .background(if (isMuted) Faint else Brand)
                     .combinedClickable(
                         onClick = onMic,
                         onLongClick = onLongPress
                     )
-                    .testTag("tutor_mic")
+                    .testTag("tutor_mic"),
+                contentAlignment = Alignment.Center
             ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
-                        contentDescription = if (isMuted) "Unmute" else "Speak",
-                        tint = Color.White,
-                        modifier = Modifier.size(24.dp)
-                    )
-                }
+                Icon(
+                    imageVector = if (isMuted) Icons.Default.MicOff else Icons.Default.Mic,
+                    contentDescription = if (isMuted) "Unmute" else "Speak",
+                    tint = Color.White,
+                    modifier = Modifier.size(28.dp)
+                )
             }
         }
         Spacer(Modifier.height(10.dp))
         Text(
             text = caption,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.5.sp,
             color = Muted,
             textAlign = TextAlign.Center,
-            maxLines = 1
+            maxLines = 2
         )
     }
 }
@@ -1233,7 +1393,7 @@ private fun SummaryContent(
             Text(
                 text = summary.durationLabel,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 36.sp,
+                fontSize = 40.sp,
                 fontWeight = FontWeight.ExtraBold,
                 letterSpacing = (-1).sp,
                 color = Ink
@@ -1241,7 +1401,7 @@ private fun SummaryContent(
             Text(
                 text = summary.lessonTitle ?: summary.scenario,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 12.sp,
+                fontSize = 14.sp,
                 color = Muted
             )
 
@@ -1262,7 +1422,7 @@ private fun SummaryContent(
                 Text(
                     text = "GRAMMAR FIXES",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.9.sp,
                     color = Muted
@@ -1277,7 +1437,7 @@ private fun SummaryContent(
                             Text(
                                 text = "“${fix.original}”",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 11.5.sp,
+                                fontSize = 13.5.sp,
                                 color = Muted,
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
@@ -1286,7 +1446,7 @@ private fun SummaryContent(
                             Text(
                                 text = "“${fix.corrected}”",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = 14.5.sp,
                                 fontWeight = FontWeight.Bold,
                                 color = Ink
                             )
@@ -1295,8 +1455,8 @@ private fun SummaryContent(
                                 Text(
                                     text = fix.rule,
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 10.sp,
-                                    color = Coral
+                                    fontSize = 12.sp,
+                                    color = Warm
                                 )
                             }
                         }
@@ -1309,7 +1469,7 @@ private fun SummaryContent(
                 Text(
                     text = "NEW WORDS",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 9.5.sp,
+                    fontSize = 11.5.sp,
                     fontWeight = FontWeight.ExtraBold,
                     letterSpacing = 0.9.sp,
                     color = Muted
@@ -1327,9 +1487,9 @@ private fun SummaryContent(
                         Text(
                             text = word,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 11.sp,
+                            fontSize = 13.sp,
                             fontWeight = FontWeight.SemiBold,
-                            color = VioletDeep
+                            color = BrandDeep
                         )
                     }
                 }
@@ -1347,7 +1507,7 @@ private fun SummaryContent(
                             "Next time"
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
+                        fontSize = 14.5.sp,
                         fontWeight = FontWeight.ExtraBold,
                         color = Ink
                     )
@@ -1364,8 +1524,8 @@ private fun SummaryContent(
                                     "Say the corrections below out loud once before your next call."
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
-                        lineHeight = 16.sp,
+                        fontSize = 13.sp,
+                        lineHeight = 19.sp,
                         color = Muted
                     )
                 }
@@ -1383,14 +1543,14 @@ private fun SummaryContent(
             Surface(
                 onClick = onCallAgain,
                 shape = RoundedCornerShape(18.dp),
-                color = Violet,
+                color = Brand,
                 modifier = Modifier.fillMaxWidth().height(52.dp).testTag("tutor_call_again")
             ) {
                 Box(contentAlignment = Alignment.Center) {
                     Text(
                         text = "Practise again",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 14.sp,
+                        fontSize = 16.sp,
                         fontWeight = FontWeight.Bold,
                         color = Color.White
                     )
@@ -1408,7 +1568,7 @@ private fun SummaryContent(
                     Text(
                         text = "Change topic or lesson",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.sp,
+                        fontSize = 15.sp,
                         fontWeight = FontWeight.Bold,
                         color = Ink
                     )
@@ -1424,14 +1584,14 @@ private fun SummaryStat(value: String, label: String) {
         Text(
             text = value,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 20.sp,
+            fontSize = 24.sp,
             fontWeight = FontWeight.ExtraBold,
             color = Ink
         )
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = 12.5.sp,
             color = Muted
         )
     }
@@ -1470,7 +1630,7 @@ private fun TutorMenuSheet(
             Text(
                 text = "What shall we practise?",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 17.sp,
+                fontSize = 20.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Ink
             )
@@ -1479,8 +1639,8 @@ private fun TutorMenuSheet(
                 text = "A topic is a conversation. A lesson has steps, so the tutor " +
                     "teaches one grammar point properly.",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 11.5.sp,
-                lineHeight = 16.sp,
+                fontSize = 13.5.sp,
+                lineHeight = 19.sp,
                 color = Muted
             )
             Spacer(Modifier.height(12.dp))
@@ -1530,12 +1690,12 @@ private fun TutorMenuSheet(
             Spacer(Modifier.height(12.dp))
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 TextButton(onClick = onOpenSettings) {
-                    Text("Model settings", color = VioletDeep, fontSize = 12.5.sp)
+                    Text("Model settings", color = BrandDeep, fontSize = 14.5.sp)
                 }
                 Spacer(Modifier.weight(1f))
                 if (onCall) {
                     TextButton(onClick = onEndCall) {
-                        Text("End call", color = Coral, fontSize = 12.5.sp, fontWeight = FontWeight.Bold)
+                        Text("End call", color = Warm, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                     }
                 }
             }
@@ -1548,7 +1708,7 @@ private fun MenuTab(label: String, selected: Boolean, onClick: () -> Unit) {
     Box(
         modifier = Modifier
             .clip(CircleShape)
-            .background(if (selected) Violet else Color(0x66FFFFFF))
+            .background(if (selected) Brand else Color(0x66FFFFFF))
             .border(1.dp, if (selected) Color.Transparent else GlassEdge, CircleShape)
             .clickable(onClick = onClick)
             .padding(horizontal = 14.dp, vertical = 8.dp)
@@ -1556,7 +1716,7 @@ private fun MenuTab(label: String, selected: Boolean, onClick: () -> Unit) {
         Text(
             text = label,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = 13.5.sp,
             fontWeight = FontWeight.Bold,
             color = if (selected) Color.White else Muted
         )
@@ -1575,8 +1735,8 @@ private fun MenuRow(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(14.dp))
-            .background(if (selected) Violet.copy(alpha = 0.12f) else Color(0x99FFFFFF))
-            .border(1.dp, if (selected) Violet.copy(alpha = 0.35f) else GlassEdge, RoundedCornerShape(14.dp))
+            .background(if (selected) Brand.copy(alpha = 0.12f) else Color(0x99FFFFFF))
+            .border(1.dp, if (selected) Brand.copy(alpha = 0.35f) else GlassEdge, RoundedCornerShape(14.dp))
             .clickable(onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 11.dp)
     ) {
@@ -1585,7 +1745,7 @@ private fun MenuRow(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
+                    fontSize = 15.sp,
                     fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
                     color = Ink
                 )
@@ -1594,8 +1754,8 @@ private fun MenuRow(
                     Text(
                         text = subtitle,
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.sp,
-                        lineHeight = 15.sp,
+                        fontSize = 13.sp,
+                        lineHeight = 18.sp,
                         color = Muted,
                         maxLines = 2,
                         overflow = TextOverflow.Ellipsis
@@ -1607,9 +1767,9 @@ private fun MenuRow(
                 Text(
                     text = badge,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 10.sp,
+                    fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = VioletDeep
+                    color = BrandDeep
                 )
             }
         }
@@ -1635,7 +1795,7 @@ private fun ModelSettingsDialog(
             Text(
                 text = "Tutor model",
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 16.sp,
+                fontSize = 19.sp,
                 fontWeight = FontWeight.ExtraBold,
                 color = Ink
             )
@@ -1645,16 +1805,16 @@ private fun ModelSettingsDialog(
                 Text(
                     text = status,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.5.sp,
-                    color = VioletDeep
+                    fontSize = 13.5.sp,
+                    color = BrandDeep
                 )
                 Text(
                     text = "The call works without a model: Miss Emma falls back to a local " +
                         "script and the grammar rules on this phone. A token is only needed " +
                         "if the Space is private.",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
-                    lineHeight = 15.sp,
+                    fontSize = 13.sp,
+                    lineHeight = 18.sp,
                     color = Muted
                 )
                 androidx.compose.material3.OutlinedTextField(
@@ -1676,13 +1836,13 @@ private fun ModelSettingsDialog(
                     modifier = Modifier.fillMaxWidth()
                 )
                 TextButton(onClick = onTest) {
-                    Text("Test connection", color = VioletDeep, fontSize = 12.sp)
+                    Text("Test connection", color = BrandDeep, fontSize = 14.sp)
                 }
             }
         },
         confirmButton = {
             TextButton(onClick = { onSave(tokenInput.trim(), urlInput.trim()) }) {
-                Text("Save", color = VioletDeep, fontWeight = FontWeight.Bold)
+                Text("Save", color = BrandDeep, fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {
