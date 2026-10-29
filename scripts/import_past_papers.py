@@ -546,6 +546,16 @@ def print_plan(papers: list[Item], orphans: list[Item], issues: list[dict]) -> N
         for paper in no_year[:10]:
             print(f"    {paper.rel_path}")
 
+    tiny = [
+        p for p in papers
+        if p.size_bytes and (p.size_bytes < 900_000 or (0 < p.pages < 6))
+    ]
+    if tiny:
+        print(f"\n  ⚠ {len(tiny)} paper(s) look unusually small for an exam paper "
+              f"(under 900 KB or under 6 pages) — check they downloaded fully:")
+        for paper in tiny[:10]:
+            print(f"    {human_size(paper.size_bytes):>9} {paper.pages:>3}p  {paper.rel_path}")
+
     oversize = [p for p in papers if p.size_bytes > MAX_PDF_BYTES]
     if oversize:
         print(f"\n  ⚠ {len(oversize)} file(s) over the upload limit — skipped:")
@@ -813,6 +823,13 @@ def upload_all(
         and not (skip_existing and paper.key in existing)
         and paper.size_bytes <= MAX_PDF_BYTES
     ]
+    skipped_limit = [p for p in papers if p.size_bytes > MAX_PDF_BYTES]
+    if skipped_limit:
+        print(f"  {len(skipped_limit)} paper(s) skipped — over the "
+              f"{MAX_PDF_BYTES // 1048576} MB limit:")
+        for paper in skipped_limit:
+            print(f"    {human_size(paper.size_bytes):>9}  {paper.rel_path}")
+
     if limit:
         queue = queue[:limit]
 
