@@ -64,6 +64,15 @@ PAPERS_PATH = "api/get_papers.php"
 AUTH_PATH = "api/auth.php"
 MAX_PDF_BYTES = 26_214_400          # ts_validate_uploaded_pdf() hard limit (25 MB)
 
+# The live host sits behind Cloudflare, whose bot protection answers urllib's
+# default "Python-urllib/3.x" agent with HTTP 403 and a non-JSON body
+# ("error code: 1010"). Presenting an ordinary browser identity is what makes
+# the API reachable from a script; no other Cloudflare handling is needed.
+USER_AGENT = (
+    "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
 GRADE = "Grade 13"
 CATEGORY = "A/L"
 EXAM_TYPE = "G.C.E. Advanced Level"
@@ -628,9 +637,22 @@ def write_issues(path: Path, issues: list[dict]) -> None:
 
 
 class Backend:
-    def __init__(self, base_url: str, token: str | None = None, insecure: bool = False):
+    def __init__(
+        self,
+        base_url: str,
+        token: str | None = None,
+        insecure: bool = False,
+        user_agent: str = USER_AGENT,
+    ):
         self.base_url = base_url.rstrip("/") + "/"
         self.token = token
+        self.headers = {
+            "User-Agent": user_agent,
+            "Accept": "application/json, text/plain, */*",
+            "Accept-Language": "en-US,en;q=0.9",
+            "X-Requested-With": "XMLHttpRequest",
+            "Connection": "close",
+        }
         self.context = ssl.create_default_context()
         if insecure:
             self.context.check_hostname = False
@@ -640,9 +662,9 @@ class Backend:
     def _request(self, url: str, *, data: bytes | None = None,
                  headers: dict | None = None, method: str | None = None,
                  timeout: int = 300) -> tuple[int, bytes]:
-        request = urllib.request.Request(
-            url, data=data, headers=headers or {}, method=method
-        )
+        merged = dict(self.headers)
+        merged.update(headers or {})
+        request = urllib.request.Request(url, data=data, headers=merged, method=method)
         try:
             with urllib.request.urlopen(request, context=self.context, timeout=timeout) as reply:
                 return reply.status, reply.read()
@@ -662,9 +684,7 @@ class Backend:
         try:
             return json.loads(raw.decode("utf-8", "replace") or "{}")
         except json.JSONDecodeError:
-            raise RuntimeError(
-                f"{url} answered {status} with non-JSON: {raw[:200]!r}"
-            ) from None
+            raise RuntimeError(_describe_non_json(url, status, raw)) from None
 
     def _auth_headers(self) -> dict:
         if not self.token:
@@ -718,7 +738,7 @@ class Backend:
         try:
             reply = json.loads(raw.decode("utf-8", "replace") or "{}")
         except json.JSONDecodeError:
-            raise RuntimeError(f"{PAPERS_PATH} answered {status} with non-JSON.") from None
+            raise RuntimeError(_describe_non_json(url, status, raw)) from None
         keys: set[tuple] = set()
         for row in reply.get("data") or []:
             try:
@@ -764,7 +784,9 @@ class Backend:
         try:
             reply = json.loads(raw.decode("utf-8", "replace") or "{}")
         except json.JSONDecodeError:
-            raise RuntimeError(f"HTTP {status_code}: {raw[:160]!r}") from None
+            raise RuntimeError(
+                _describe_non_json(self.base_url + UPLOAD_PATH, status_code, raw)
+            ) from None
         if status_code == 413:
             raise RuntimeError(
                 "The server refused the request as too large (HTTP 413) — check "
@@ -773,6 +795,28 @@ class Backend:
         if reply.get("status") != "success":
             raise RuntimeError(reply.get("message") or f"HTTP {status_code}")
         return reply
+
+
+def _describe_non_json(url: str, status: int, raw: bytes) -> str:
+    """Turn a proxy/CDN rejection into something actionable."""
+    body = raw[:200].decode("utf-8", "replace").strip()
+    host = urllib.parse.urlparse(url).netloc
+    if "1010" in body or "Cloudflare" in body or "cloudflare" in body:
+        return (
+            f"{url} was blocked by Cloudflare ({body!r}), so the request never "
+            f"reached PHP. Retry with a different --user-agent, and if it "
+            f"persists ask the host to allow this IP: Security → WAF → "
+            f"Bot Fight Mode on {host}."
+        )
+    if status == 403 and body.startswith("<"):
+        return (
+            f"{url} answered 403 with an HTML page instead of JSON — usually a "
+            f"WAF/CDN rule on {host}, not an authentication failure. Retry with "
+            f"--user-agent set to a browser string."
+        )
+    if status == 429:
+        return f"{url} rate-limited this machine (HTTP 429). Wait a minute and re-run."
+    return f"{url} answered {status} with non-JSON: {body[:160]!r}"
 
 
 def _multipart(fields: dict[str, str], files: dict[str, Path]) -> tuple[bytes, str]:
@@ -979,6 +1023,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--email", help="admin email — signs in for a fresh token")
     parser.add_argument("--password", help="admin password (prompted if omitted)")
     parser.add_argument("--otp", help="email verification code, when the server asks")
+    parser.add_argument("--user-agent", default=USER_AGENT,
+                        help="User-Agent to send (a CDN may reject the default)")
     parser.add_argument("--insecure", action="store_true",
                         help="skip TLS verification (self-signed test hosts only)")
     args = parser.parse_args(argv)
@@ -1030,7 +1076,12 @@ def main(argv: list[str] | None = None) -> int:
         return 2
 
     # 3. upload
-    backend = Backend(args.base_url, token=args.token, insecure=args.insecure)
+    backend = Backend(
+        args.base_url,
+        token=args.token,
+        insecure=args.insecure,
+        user_agent=args.user_agent,
+    )
     try:
         if not backend.token:
             if not args.email:

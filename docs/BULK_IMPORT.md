@@ -74,6 +74,13 @@ Use `--token` (or `TS_ADMIN_TOKEN`) instead of an email/password if you already
 have a session token. If the server emails a verification code because the
 machine is on a new network, re-run with `--otp <code>`.
 
+The API sits behind Cloudflare, whose bot protection rejects a script's default
+`Python-urllib/3.x` agent with `HTTP 403 · error code: 1010`. The script
+therefore identifies itself as a normal browser (`--user-agent` overrides it).
+A 1010 at sign-in means the request never reached PHP — it is not a wrong
+password. If it happens anyway, allow the machine's IP under Cloudflare →
+Security → WAF, or upload from the server itself.
+
 Useful flags: `--limit N` (first N papers), `--status draft`, `--delay 1`,
 `--retries 3`, `--languages-medium english`, `--no-pages`, `--base-url`.
 
