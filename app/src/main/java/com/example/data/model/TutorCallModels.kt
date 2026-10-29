@@ -16,6 +16,22 @@ package com.example.data.model
 enum class CallPhase { IDLE, CONNECTING, LIVE, ENDED }
 
 /**
+ * One line of the call, in the order it happened.
+ *
+ * The screen draws a thread, not a transcript dump: a student line, the
+ * correction it earned, then the tutor's answer. Keeping the order in the data
+ * means the correction sits *between* the two replies it belongs to instead of
+ * floating at the bottom of the page.
+ */
+data class TutorCallEntry(
+    val role: Role,
+    val text: String,
+    val fix: GrammarFix? = null
+) {
+    enum class Role { STUDENT, TUTOR, FIX }
+}
+
+/**
  * One correction, kept exactly as the student said it.
  *
  * [original] is what the microphone heard (or what was typed), so the student can

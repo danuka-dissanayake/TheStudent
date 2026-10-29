@@ -216,3 +216,27 @@ degrades to captions only, which still exercises the reading and the corrections
    says so; the call keeps running.
 6. Hang up → the summary lists the corrections and words, and the activity log
    gains a `AI Call (…)` row.
+
+---
+
+## 11. The screen (glass edition, round 18)
+
+Approved mockup: `designs/35-ai-tutor-glass.png`. The tutor tab is a full-bleed
+page — no app bar, no tab bar — because the reference design is a call, and a
+call owns the whole screen.
+
+- **One control.** `MicDock` is the only button, before and during the call. Its
+  meaning changes with the turn (start → stop → interrupt → replay) and the
+  caption under it says which one it is. There is no keyboard, no reply chips
+  and no text field anywhere in the tutor UI.
+- **The orb** (`IridescentOrb`) is the animation directly under the status bar:
+  218 dp before the call, 84 dp during it, drawn in one `Canvas` and clipped to
+  a circle so it reads as a ball of liquid glass.
+- **The thread** is `uiState.callTranscript`: a student line, the correction it
+  earned (`Role.FIX`, drawn as the warm `CorrectionCard`), then the tutor's
+  answer. Capped at 40 lines on screen and 8 turns in the model's context.
+- **Chrome** is in the header: back leaves the tab, `⋯` opens the menu sheet
+  (conversation topics, lessons, model settings, end call).
+- **Level strip** is minutes actually spoken, read from
+  `TheStudentPreferences.speakingSeconds` / `speakingCalls`, which
+  `endTutorCall` increments — the number cannot be gamed by tapping.

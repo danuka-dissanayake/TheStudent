@@ -145,6 +145,22 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getLong(KEY_CELEBRATED_RATING, 0L)
         set(value) = prefs.edit().putLong(KEY_CELEBRATED_RATING, value).apply()
 
+    /**
+     * Seconds actually spent talking to the AI tutor, across every call.
+     *
+     * Stored on the device because it is the one honest measure of speaking
+     * practice — the server has no idea a microphone was ever open, and a
+     * number the student can watch grow is what makes a shy learner come back.
+     */
+    var speakingSeconds: Int
+        get() = prefs.getInt(KEY_SPEAKING_SECONDS, 0)
+        set(value) = prefs.edit().putInt(KEY_SPEAKING_SECONDS, value).apply()
+
+    /** How many calls have been finished, so the screen can say "3 calls so far". */
+    var speakingCalls: Int
+        get() = prefs.getInt(KEY_SPEAKING_CALLS, 0)
+        set(value) = prefs.edit().putInt(KEY_SPEAKING_CALLS, value).apply()
+
     fun hasUsableSession(): Boolean {
         val token = sessionToken
         return !token.isNullOrBlank() && isLoggedIn
@@ -182,6 +198,8 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_USER_NAME = "user_name"
         private const val KEY_QUESTION_DISMISSALS = "question_offer_dismissals"
         private const val KEY_CELEBRATED_RATING = "celebrated_rating_id"
+        private const val KEY_SPEAKING_SECONDS = "tutor_speaking_seconds"
+        private const val KEY_SPEAKING_CALLS = "tutor_speaking_calls"
         private const val LAST_DISMISSALS_KEPT = 40
 
         const val ROLE_STUDENT = "student"

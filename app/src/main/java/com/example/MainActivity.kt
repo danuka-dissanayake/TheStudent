@@ -445,8 +445,7 @@ class MainActivity : ComponentActivity() {
                                     drawerState = drawerState,
                                     // Reachable from every tab that shows the app bar; the
                                     // screens with their own header keep the edge to themselves.
-                                    gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME ||
-                                        uiState.currentTab == TheStudentNavTab.AI_TUTOR,
+                                    gesturesEnabled = uiState.currentTab == TheStudentNavTab.HOME,
                                     drawerContent = {
                                         val isAdmin by viewModel.isAdmin.collectAsStateWithLifecycle()
                                         val drawerProgress by viewModel.quizProgress.collectAsStateWithLifecycle()
@@ -513,9 +512,13 @@ class MainActivity : ComponentActivity() {
                                              // "Profile / Your studies" header, Papers has the
                                              // library header with search and filters, and EXP
                                              // and Account are pages with their own back button.
+                                             // The tutor is a full-bleed glass page: it draws
+                                             // its own header, and the animation has to sit
+                                             // directly under the status bar.
                                              if (uiState.currentTab != TheStudentNavTab.CHAT &&
                                                  uiState.currentTab != TheStudentNavTab.PROFILE &&
                                                  uiState.currentTab != TheStudentNavTab.PAPERS &&
+                                                 uiState.currentTab != TheStudentNavTab.AI_TUTOR &&
                                                  !uiState.isExpOpen &&
                                                  !uiState.isCourseCollectionOpen &&
                                                  !uiState.isProgressOpen &&
@@ -531,7 +534,12 @@ class MainActivity : ComponentActivity() {
                                              }
                                          },
                                             bottomBar = {
-                                                if (!uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)) {
+                                                // No tab bar during a call, and none before it:
+                                                // the mic is the only control on that page.
+                                                if (!uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen &&
+                                                    uiState.currentTab != TheStudentNavTab.AI_TUTOR &&
+                                                    (uiState.currentTab != TheStudentNavTab.CHAT || !uiState.isChatConversationOpen)
+                                                ) {
                                                     TheStudentBottomNavigationBar(
                                                         currentTab = uiState.currentTab,
                                                         onTabSelected = { viewModel.setTab(it) }
@@ -649,40 +657,39 @@ class MainActivity : ComponentActivity() {
                                                         )
                                                     }
                                                     TheStudentNavTab.AI_TUTOR -> {
-                                                        // The English tutor is a call: it has a
-                                                        // clock, a mute, a hang-up and a summary,
-                                                        // and it keeps talking while the student
-                                                        // is elsewhere in the app only if the
-                                                        // ViewModel keeps the loop alive.
+                                                        // The English tutor is a call: an
+                                                        // iridescent orb, a bubble thread and a
+                                                        // single mic. Leaving, changing topic
+                                                        // and model settings live in the menu.
                                                         AiTutorScreen(
                                                             voiceState = uiState.voiceAssistantState,
                                                             callPhase = uiState.callPhase,
                                                             callSeconds = uiState.callSeconds,
                                                             isMuted = uiState.isCallMuted,
-                                                            tutorLine = uiState.callTutorLine,
-                                                            studentLine = uiState.callStudentLine,
+                                                            transcript = uiState.callTranscript,
                                                             currentFix = uiState.callFix,
                                                             callSummary = uiState.callSummary,
-                                                            quickReplies = uiState.suggestedVoicePills,
                                                             currentScenario = uiState.currentScenario,
+                                                            studentName = viewModel.preferences.userName.orEmpty(),
+                                                            spokenMinutes = viewModel.preferences.speakingSeconds / 60,
+                                                            spokenCalls = viewModel.preferences.speakingCalls,
                                                             activeLessonId = uiState.activeLessonId,
                                                             lessonStepIndex = uiState.lessonStepIndex,
                                                             isLessonComplete = uiState.isLessonComplete,
                                                             hfStatusMessage = uiState.hfStatusMessage,
-                                                            isTypingOpen = uiState.isKeyboardInputOpen,
                                                             isHfSettingsOpen = uiState.isHfSettingsOpen,
                                                             customHfToken = uiState.customHfToken,
                                                             customHfBaseUrl = uiState.customHfBaseUrl,
                                                             onStartCall = { viewModel.startTutorCall() },
                                                             onEndCall = { viewModel.endTutorCall() },
+                                                            onExit = { viewModel.setTab(TheStudentNavTab.HOME) },
                                                             onToggleMute = { viewModel.toggleCallMute() },
                                                             onInterrupt = { viewModel.interruptTutor() },
+                                                            onFinishTurn = { viewModel.stopVoiceListening() },
                                                             onReplay = { viewModel.replayCurrentAiResponse() },
                                                             onHearFix = { viewModel.speakGrammarFix() },
-                                                            onSendText = { viewModel.processUserVoiceInput(it) },
                                                             onSelectScenario = { viewModel.selectVoiceScenario(it) },
                                                             onSelectLesson = { viewModel.selectTutorLesson(it) },
-                                                            onOpenTyping = { viewModel.toggleKeyboardInput(it) },
                                                             onOpenHfSettings = { viewModel.toggleHfSettings(it) },
                                                             onUpdateHfCredentials = { token, url ->
                                                                 viewModel.updateHfCredentials(token, url)

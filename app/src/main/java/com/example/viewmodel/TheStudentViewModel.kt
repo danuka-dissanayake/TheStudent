@@ -165,6 +165,8 @@ data class TheStudentUiState(
     val callFixes: List<GrammarFix> = emptyList(),
     val callWords: List<String> = emptyList(),
     val callTurns: Int = 0,
+    /** The visible thread: student line, its correction, the tutor's reply. */
+    val callTranscript: List<TutorCallEntry> = emptyList(),
     val callSummary: CallSummary? = null,
     /** The lesson being taught, if this call is a lesson rather than free talk. */
     val activeLessonId: String? = null,
@@ -312,6 +314,25 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var tts: TextToSpeech? = null
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
+    /** How much of the call stays on screen; a long call scrolls, it does not grow forever. */
+    private val MAX_TRANSCRIPT_LINES = 40
+
+    /**
+     * Remember a turn for the model, and forget the oldest once the call gets long.
+     *
+     * A ten-minute call can run to twenty exchanges; sending all of them back on
+     * every request slows the reply down and buries the current lesson step. The
+     * last eight turns are enough for the tutor to sound like it remembers.
+     */
+    private fun appendConversationTurn(userText: String, assistantText: String) {
+        conversationTurns.add("user" to userText)
+        conversationTurns.add("assistant" to assistantText)
+        while (conversationTurns.size > 16) {
+            conversationTurns.removeAt(0)
+            conversationTurns.removeAt(0)
+        }
+    }
+
     private val conversationTurns = mutableListOf<Pair<String, String>>()
 
     // English tutor call state. Declared with the audio fields (not further down
@@ -3929,6 +3950,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 callFixes = emptyList(),
                 callWords = emptyList(),
                 callTurns = 0,
+                callTranscript = emptyList(),
                 callSummary = null,
                 lessonStepIndex = 0,
                 isLessonComplete = false,
@@ -4001,6 +4023,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         if (state.callTurns > 0) {
+            // Local tally first: it drives the "spoken this week" line on the
+            // tutor screen and must survive the app being closed.
+            preferences.speakingSeconds += state.callSeconds
+            preferences.speakingCalls += 1
             viewModelScope.launch {
                 repository.recordLanguagePractice(
                     mode = "AI Call (${state.currentScenario})",
@@ -4165,7 +4191,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 suggestedVoicePills = starters.ifEmpty { state.suggestedVoicePills },
                 hfStatusMessage = status,
                 voiceAssistantState = AssistantVoiceState.SPEAKING,
-                isTtsSpeaking = true
+                isTtsSpeaking = true,
+                callTranscript = (state.callTranscript +
+                    TutorCallEntry(TutorCallEntry.Role.TUTOR, say)).takeLast(MAX_TRANSCRIPT_LINES)
             )
         }
         speakTutorSentences(say)
@@ -4290,7 +4318,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 // it arrives, and a null from the model means the sentence was fine.
                 callFix = localFix,
                 voiceAssistantState = AssistantVoiceState.THINKING,
-                micRmsDb = 0f
+                micRmsDb = 0f,
+                callTranscript = (it.callTranscript +
+                    TutorCallEntry(TutorCallEntry.Role.STUDENT, trimmed) +
+                    listOfNotNull(
+                        localFix?.let { fix ->
+                            TutorCallEntry(TutorCallEntry.Role.FIX, fix.corrected, fix)
+                        }
+                    )).takeLast(MAX_TRANSCRIPT_LINES)
             )
         }
 
@@ -4327,8 +4362,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                             turnIndex = turnIndex
                         ).takeIf { it.isUseful }
                     }
-                    conversationTurns.add("user" to trimmed)
-                    conversationTurns.add("assistant" to turn.say)
+                    appendConversationTurn(trimmed, turn.say)
                     deliverTutorTurn(
                         say = turn.say,
                         // A model that echoed the sentence back is agreeing with it,
@@ -4348,8 +4382,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                             "Let's keep talking freely. What else would you like to practise?"
                         else -> fallback.spokenText
                     }
-                    conversationTurns.add("user" to trimmed)
-                    conversationTurns.add("assistant" to say)
+                    appendConversationTurn(trimmed, say)
                     deliverTutorTurn(
                         say = say,
                         fix = localFix,
@@ -4542,8 +4575,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
             when (response) {
                 is HfApiResponse.Success -> {
-                    conversationTurns.add("user" to trimmed)
-                    conversationTurns.add("assistant" to response.text)
+                    appendConversationTurn(trimmed, response.text)
                     
                     val localAnalysis = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
                     _uiState.update {
@@ -4561,8 +4593,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 is HfApiResponse.Error -> {
                     // Fallback to high quality educational engine
                     val fallback = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
-                    conversationTurns.add("user" to trimmed)
-                    conversationTurns.add("assistant" to fallback.spokenText)
+                    appendConversationTurn(trimmed, fallback.spokenText)
 
                     _uiState.update {
                         it.copy(
