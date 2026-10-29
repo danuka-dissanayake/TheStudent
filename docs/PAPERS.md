@@ -63,11 +63,20 @@ and the applied query together.
 ### Tapping outside the field ends the focus
 
 The screen's root `Column` observes the pointer **Initial** pass and, on any tap
-that is not inside the search row, calls `focusManager.clearFocus()`. Both boxes
-are measured with `positionInRoot()` (a member of `LayoutCoordinates`, no
-extension import needed) and the field's `size`; the tap arrives in the Column's
-own coordinates, so the Column's root origin is added before the comparison.
-Tapping the field itself therefore never dismisses it.
+that is not inside the search row, calls `focusManager.clearFocus()`.
+
+Both boxes are measured with `LayoutCoordinates` **members** only —
+`localToRoot(Offset.Zero)` and `size`. Their `positionInRoot()` / `boundsInRoot()`
+equivalents are *extension functions* (package `androidx.compose.ui.layout`) that
+need their own import, which is exactly what broke two builds; the members can
+never be "unresolved" for that reason. See the androidx source:
+`compose/ui/ui/src/commonMain/kotlin/androidx/compose/ui/layout/LayoutCoordinates.kt`
+— `localToRoot` and `size` are declared in the interface, `positionInRoot` is a
+top-level `public fun LayoutCoordinates.positionInRoot()` beside it.
+
+The tap arrives in the Column's own coordinates, so the Column's root origin is
+added before the comparison. Tapping the field (or the search button in the same
+row) therefore never dismisses it. The observer consumes nothing.
 The observer consumes nothing, so scrolling, row taps, chips and the keyboard all
 behave exactly as before. Submitting also clears focus and hides the keyboard.
 

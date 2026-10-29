@@ -55,7 +55,6 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.PointerEventPass
-import androidx.compose.ui.input.pointer.changedToDownIgnoreConsumed
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalFocusManager
@@ -500,29 +499,29 @@ fun PapersScreen(
         modifier = modifier
             .fillMaxSize()
             .background(PaperBg)
-            .onGloballyPositioned { screenOrigin = it.positionInRoot() }
+            .onGloballyPositioned { screenOrigin = it.localToRoot(Offset.Zero) }
             // Tapping anywhere that is not the search field ends the focus, the
-            // way every other search box on the phone behaves. This observes the
+            // way every other search box on the phone behaves. This watches the
             // Initial pass and consumes nothing, so scrolling, row taps, chips
-            // and the keyboard itself keep working exactly as before.
+            // and the keyboard itself all keep working as before.
             .pointerInput(Unit) {
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
-                        val down = event.changes.firstOrNull {
-                            it.changedToDownIgnoreConsumed()
-                        } ?: continue
-                        // The tap arrives in this Column's coordinates; the field
-                        // was measured in root coordinates. Adding the Column's
-                        // own root origin puts both in the same space.
-                        val x = down.position.x + screenOrigin.x
-                        val y = down.position.y + screenOrigin.y
-                        val tappedTheField = searchFieldSize.width > 0 &&
+                        val touch = event.changes.firstOrNull()?.position ?: continue
+                        // The touch arrives in this Column's coordinates and the
+                        // field was measured in root coordinates, so the Column's
+                        // own root origin puts both in the same space. Both
+                        // measurements use LayoutCoordinates members (localToRoot,
+                        // size), never the extension functions.
+                        val x = touch.x + screenOrigin.x
+                        val y = touch.y + screenOrigin.y
+                        val insideField = searchFieldSize.width > 0 &&
                             x >= searchFieldOrigin.x &&
                             y >= searchFieldOrigin.y &&
                             x <= searchFieldOrigin.x + searchFieldSize.width &&
                             y <= searchFieldOrigin.y + searchFieldSize.height
-                        if (!tappedTheField) focusManager.clearFocus()
+                        if (!insideField) focusManager.clearFocus()
                     }
                 }
             }
@@ -672,7 +671,11 @@ fun PapersScreen(
                                 .fillMaxWidth()
                                 .padding(start = 16.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
                                 .onGloballyPositioned {
-                                    searchFieldOrigin = it.positionInRoot()
+                                    // localToRoot() and size are members of
+                                    // LayoutCoordinates, unlike positionInRoot()
+                                    // and boundsInRoot(), which are extensions
+                                    // that need their own import.
+                                    searchFieldOrigin = it.localToRoot(Offset.Zero)
                                     searchFieldSize = it.size
                                 },
                             verticalAlignment = Alignment.CenterVertically,
