@@ -639,3 +639,29 @@ limits, EXP and the runner behave exactly as they do from the hub.
 
 Re-upload `backend/api/quizzes.php` (`1.2.0`). No schema change — the table
 already records everything the page needs.
+
+## Validating generated quiz SQL
+
+A model can write questions that are factually right and still produce a quiz
+students never see: `grade` = `A/L` and `category` = `Practice` match none of the
+chips in `QuizzesScreen.matchesChip()`, so the quiz belongs to no filter. Run the
+generated file through the checker before importing it:
+
+```bash
+python3 scripts/validate_quiz_sql.py quizzes.sql --fix fixes.sql
+```
+
+It reports blocking problems (unmatched grade/category/medium, a question with
+zero or two correct answers, duplicate prompts, malformed rows) and writes the
+`UPDATE` statements that repair the metadata. Exit code is 1 when anything is
+blocking, so it can gate a scripted import.
+
+Accepted values — the same ones the app and the schema use:
+
+| Field | Values |
+|---|---|
+| `grade` | `Grade 6` … `Grade 13`, `Undergraduate` |
+| `category` | `A/L`, `O/L`, `Junior`, `Provincial`, `University` |
+| `medium` | `English`, `Sinhala`, `Tamil` |
+| `status` | `draft`, `published`, `archived` |
+
