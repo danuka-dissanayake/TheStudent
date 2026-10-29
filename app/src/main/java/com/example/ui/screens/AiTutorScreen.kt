@@ -76,6 +76,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.drawscope.clipPath
+import androidx.compose.ui.graphics.drawscope.withTransform
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
@@ -631,7 +632,7 @@ private fun androidx.compose.ui.graphics.drawscope.DrawScope.orbBand(
         center.x + offsetX * sphereRadius,
         center.y + offsetY * sphereRadius
     )
-    androidx.compose.ui.graphics.drawscope.withTransform({
+    withTransform({
         rotate(rotation, bandCenter)
         scale(radiusX, radiusY, bandCenter)
     }) {
