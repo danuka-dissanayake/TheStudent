@@ -143,7 +143,13 @@ fun QuizHeroArt(
     modifier: Modifier = Modifier
 ) {
     val look = remember(quiz.id, quiz.subject, quiz.title) { quizHeroLook(quiz) }
-    var isLoaded by remember(quiz.id) { mutableStateOf(false) }
+    var isLoaded by remember(quiz.id, quiz.heroImageUrl) { mutableStateOf(false) }
+
+    // An image the admin uploaded wins; the curated photo is the fallback. The
+    // key includes the uploaded URL, so swapping it in the admin panel replaces
+    // the picture immediately instead of showing a cached old one.
+    val uploaded = quiz.heroImageUrl
+    val model: Any = uploaded?.takeIf { it.isNotBlank() } ?: heroUrl(look.photoId)
 
     Box(
         modifier = modifier
@@ -164,7 +170,7 @@ fun QuizHeroArt(
         }
 
         AsyncImage(
-            model = heroUrl(look.photoId),
+            model = model,
             contentDescription = null,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize(),

@@ -547,14 +547,14 @@ default 3) and the **server** enforces it:
 - `submit` returns `attempts_left` and `max_attempts` with the graded result, so
   the result page knows whether "Try again" is still meaningful.
 
-In the app, an **enrolled** quiz (`attempts_left == 0`):
+In the app, an **enrolled** quiz (`attempts_left == 0`) is no longer disabled —
+the student keeps their results, so the card keeps working:
 
-- is listed under the `Enrolled (n)` chip and sorts to the bottom of the hub;
-- renders dimmed with a lock and the "Enrolled · N of N attempts used" badges;
-- is not tappable (the `Surface` is disabled, and `openQuiz` refuses it as a
-  second guard);
+- it is listed under the `Enrolled (n)` chip and sorts to the bottom of the hub;
+- it keeps a "Progress" chip instead of the old lock and opens normally;
+- tapping it opens **the progress page** (see §17), never another attempt;
 - on the result page, "Try again" is disabled and replaced with "No attempts
-  left", with the note "All N attempts used · added to your enrolled quizzes".
+  left", with the note that the results stay in the quiz.
 
 EXP is unaffected: a pass pays once per quiz whatever the attempt number, and
 retakes never pay again.
@@ -727,17 +727,58 @@ navigation bar.
 
 ## Where the hero image comes from
 
-The hero is a **real photograph from Pexels**, loaded with Coil
-(`app/src/main/java/com/example/ui/components/QuizHeroArt.kt`). Pexels' CDN needs
-no API key, allows commercial use without attribution, and serves a pre-cropped
-size, so one URL is enough:
+Two sources, in this order:
+
+1. **The image the admin uploaded** for the quiz — `quizzes.hero_image_url`,
+   a path under `/uploads/quizzes/`.
+2. **A curated Pexels photograph**, chosen from the quiz's own text, when no
+   image has been uploaded.
+
+### 1. Uploading a hero (admin panel)
+
+The quiz editor has a **Cover image** card: *Upload image* / *Replace image* /
+*Remove*. It opens the Android photo picker, reads the bytes, and posts them as
+`multipart/form-data` to `api/quiz_image.php`. **There is no link field** — an
+URL pointing at someone else's site can disappear or silently start showing a
+different picture, and nobody notices until a student does.
+
+What the server does (`backend/api/quiz_image.php`):
+
+| Step | Detail |
+|---|---|
+| Guard | `ts_require_admin_api()` — a student cannot upload artwork |
+| Size | 5 MB cap, checked before anything is written |
+| Type | `finfo` MIME **and** `getimagesize()`; only JPEG, PNG, WebP |
+| Name | `quiz-<8 hex>.<jpg\|png\|webp>` — no user-supplied name reaches disk |
+| Store | `backend/uploads/quizzes/`, `0644` |
+| Reply | `{ "status": "success", "hero_image_url": "/uploads/quizzes/quiz-….jpg" }` |
+
+`admin_save` refuses any value that is not `#^/uploads/quizzes/[A-Za-z0-9._-]+$#`,
+so the column can only ever hold a path this server produced. An empty string
+clears it (`NULL`) and the quiz falls back to Pexels.
+
+The app stores the **path**, and `QuizzesRepository` turns it into a full URL
+against the configured backend (`absoluteHero`), so changing servers does not
+require rewriting rows. When saving, the base URL is stripped again
+(`storedHero`) so the column keeps its portable form.
+
+**Deploying:** import `backend/database_quizzes_v3.sql` (idempotent — it checks
+`information_schema` first), upload `api/quiz_image.php`, re-upload
+`api/quizzes.php`, and make sure `uploads/quizzes/` is writable. Until the
+migration runs, quizzes still save; they just cannot keep a hero
+(`ts_quiz_has_hero_image`).
+
+### 2. The Pexels fallback
+
+Pexels' CDN needs no API key, allows commercial use without attribution, and
+serves a pre-cropped size, so one URL is enough:
 
 ```
 https://images.pexels.com/photos/<id>/pexels-photo-<id>.jpeg?auto=compress&cs=tinysrgb&w=1200&h=675&fit=crop
 ```
 
-The photo is chosen by keyword over the quiz's own text (`subject`, `title`,
-`description`), first match wins:
+The photo is chosen by keyword over the quiz's own text (`subject`, `title`),
+first match wins:
 
 | Topic | Keywords | Photo |
 |---|---|---|
@@ -751,18 +792,20 @@ The photo is chosen by keyword over the quiz's own text (`subject`, `title`,
 | Languages | english, sinhala, tamil, literature, grammar, poem | open books `7935224` |
 | Everything else | — | study `8199558` |
 
-Three rules keep this honest:
+Keyword matching is a guess, not a match: it is why the upload exists. The
+Pexels path is only a safety net for quizzes that have no picture yet.
+
+Three rules keep it honest:
 
 1. **Nothing is ever blank.** A gradient in the topic's colour (emerald for
    physics, cyan for chemistry, violet for ICT, amber for commerce…) sits
    underneath, with the shimmer while the photo is in flight. If the request
    fails, the gradient stays and the subject's short code sits on it — the card
    still looks finished.
-2. **Deterministic.** `quizHeroLook()` has no randomness, so the same quiz always
-   gets the same photo.
-3. **Swappable.** If the database ever gains a `hero_image_url`, pass it into
-   `QuizHeroArt` and keep the map as the fallback; call sites don't change.
-   The same map is where per-topic artwork from another source would go.
+2. **Updates are immediate.** The load gate is keyed on the URL, so replacing a
+   hero in the admin panel shows the new picture without reinstalling.
+3. **Swappable.** `QuizHeroArt` takes `quiz.heroImageUrl` first and only calls
+   `quizHeroLook()` when it is null; call sites do not change.
 
 ### Loading skeleton
 
@@ -779,3 +822,44 @@ Four tiles across a phone leaves ~78 dp of text each, which clipped "15 min" and
 each tile (icon disc, then value over label), so every string fits at body size
 with no `Visible` overflow. Labels are short: "one answer each", "to finish",
 "on a pass", "of 3".
+
+---
+
+## 17. The progress page — a quiz you have already sat
+
+Once a student has at least one submitted attempt, opening that quiz **no longer
+shows the sales pitch**. The same route shows their progress, because the rules,
+the EXP promise and the Start button are all things they have already answered
+for themselves. All of it lives in `QuizDetailScreen`
+(`quiz.attempts > 0` → `QuizProgressBody`), fed by
+`TheStudentViewModel.quizDetailAttempts`, which loads `action=history` the moment
+the page opens and keeps only that quiz's rows, newest first.
+
+What it shows:
+
+| Block | Content |
+|---|---|
+| Breadcrumb | `Quizzes › CODE › Progress` |
+| Title | quiz title, subject · grade · medium overline |
+| Score card | **best %** (large), `PASSED` / `NOT PASSED YET` pill, `pass mark N%` |
+| Attempt dots | one per allowed attempt — filled for used, coloured amber until passed, green after |
+| Summary line | `n of N attempts used · X left · average P%` |
+| Attempt history | one row per attempt: percentage disc, `Attempt N · passed/not passed`, `x of y marks · Mm Ss · date`, `+EXP` chip |
+| Closing card | "Ready when you are" (attempts left) or "All attempts used" |
+
+The primary action is **Retry** — the footer button reads
+`Retry quiz · attempt N` whenever `attempts_left > 0` and starts a fresh attempt.
+With every attempt used the footer states
+`All N attempts used · results kept below` and the history stays readable.
+
+Two guards make the promise real:
+
+- the quiz card is never disabled (`QuizzesScreen.QuizCard`) — the tap always
+  opens the page;
+- the board still refuses the extra attempt server-side (`409`), so the button
+  being visible can never mean an attempt that grading will reject.
+
+Failure handling: if `history` cannot be fetched, the score card still renders
+from the list payload's `best_percent` / `attempts` / `attempts_left`, and the
+history area says so plainly rather than showing an empty list.
+

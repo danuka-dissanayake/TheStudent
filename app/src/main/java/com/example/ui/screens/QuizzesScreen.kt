@@ -34,7 +34,6 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudOff
 import androidx.compose.material.icons.filled.Insights
-import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Quiz
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
@@ -594,11 +593,9 @@ fun QuizzesSegment(
                         Box(modifier = Modifier.padding(horizontal = 16.dp)) {
                             QuizCard(
                                 quiz = quiz,
-                                onClick = {
-                                    // Enrolled cards are not tappable; this is the
-                                    // guard in case a stale list is on screen.
-                                    if (!quiz.isEnrolled) onOpenQuiz(quiz)
-                                }
+                                // Every card opens. A quiz with attempts used opens
+                                // its progress page rather than another attempt.
+                                onClick = { onOpenQuiz(quiz) }
                             )
                         }
                     }
@@ -836,11 +833,11 @@ private fun QuizPageArrow(
 private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
     val enrolled = quiz.isEnrolled
 
+    // Never disabled: a used-up quiz still opens, to show the student's results.
     Surface(
         onClick = onClick,
-        enabled = !enrolled,
         shape = RoundedCornerShape(18.dp),
-        color = if (enrolled) Color(0xFFF4F6FA) else Color.White,
+        color = Color.White,
         modifier = Modifier
             .fillMaxWidth()
             .testTag(
@@ -850,8 +847,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
         Row(modifier = Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             QuizCover(
                 quiz = quiz,
-                modifier = Modifier.size(width = 40.dp, height = 50.dp),
-                dimmed = enrolled
+                modifier = Modifier.size(width = 40.dp, height = 50.dp)
             )
             Spacer(Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
@@ -860,7 +856,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 13.5.sp,
                     fontWeight = FontWeight.Bold,
-                    color = if (enrolled) QuizMuted else QuizInk,
+                    color = QuizInk,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -878,7 +874,7 @@ private fun QuizCard(quiz: QuizSummary, onClick: () -> Unit) {
                 Spacer(Modifier.height(7.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     if (enrolled) {
-                        QuizBadge("Enrolled", QuizMuted, Color(0xFFE8EDF3))
+                        QuizBadge("All attempts used", QuizMuted, Color(0xFFF1F5F9))
                         QuizBadge(quiz.attemptsLabel, QuizMuted, Color(0xFFF1F5F9))
                     } else {
                         QuizBadge("${quiz.questionCount} questions", QuizMuted, Color(0xFFF1F5F9))
@@ -909,19 +905,19 @@ private fun EnrolledChip() {
             modifier = Modifier
                 .size(34.dp)
                 .clip(CircleShape)
-                .background(Color(0xFFE8EDF3)),
+                .background(QuizGreenSoft),
             contentAlignment = Alignment.Center
         ) {
             Icon(
-                Icons.Default.Lock,
-                contentDescription = "Enrolled — no attempts left",
-                tint = QuizMuted,
+                Icons.Default.Insights,
+                contentDescription = "View your progress",
+                tint = QuizGreen,
                 modifier = Modifier.size(16.dp)
             )
         }
         Spacer(Modifier.height(3.dp))
         Text(
-            text = "Enrolled",
+            text = "Progress",
             fontFamily = MaisonNeueFontFamily,
             fontSize = 10.5.sp,
             fontWeight = FontWeight.Bold,

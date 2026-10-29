@@ -347,6 +347,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private val _quizDetail = MutableStateFlow<QuizSummary?>(null)
     val quizDetail: StateFlow<QuizSummary?> = _quizDetail.asStateFlow()
 
+    /**
+     * This student's submitted attempts at the quiz whose page is open, newest
+     * first. Loaded with the page so it can show progress instead of a pitch the
+     * student has already read once.
+     */
+    private val _quizDetailAttempts = MutableStateFlow<List<QuizHistoryItem>>(emptyList())
+    val quizDetailAttempts: StateFlow<List<QuizHistoryItem>> =
+        _quizDetailAttempts.asStateFlow()
+
     private val _quizAttempt = MutableStateFlow<QuizAttempt?>(null)
     val quizAttempt: StateFlow<QuizAttempt?> = _quizAttempt.asStateFlow()
 
@@ -700,17 +709,33 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    /** Open the quiz's detail page — the description, rules and Start button. */
+    /**
+     * Open the quiz's page.
+     *
+     * A quiz with no attempts shows the description and rules; a quiz the student
+     * has already sat shows their progress instead — and a quiz with every
+     * attempt used still opens, because reading your own results is not the same
+     * as taking another attempt.
+     */
     fun openQuizDetail(quiz: QuizSummary) {
-        if (quiz.isEnrolled) {
-            showSnackbar("You've used all ${quiz.maxAttempts} attempts for this quiz.")
-            return
-        }
         _quizDetail.value = quiz
+        _quizDetailAttempts.value = emptyList()
+        if (quiz.attempts > 0) {
+            viewModelScope.launch {
+                when (val outcome = quizzesRepository.history()) {
+                    is QuizOutcome.Ok ->
+                        _quizDetailAttempts.value = outcome.value
+                            .filter { it.quizId == quiz.id }
+                            .sortedByDescending { it.attemptId }
+                    is QuizOutcome.Err -> Unit // The page still shows the summary's figures.
+                }
+            }
+        }
     }
 
     fun closeQuizDetail() {
         _quizDetail.value = null
+        _quizDetailAttempts.value = emptyList()
     }
 
     /** "Start quiz" on the detail page: leave the page, then begin the attempt. */
@@ -852,6 +877,24 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 _quizSaveError.value = outcome.errorOrNull ?: "The quiz could not be saved."
             }
             _isQuizSaving.value = false
+        }
+    }
+
+    /**
+     * Send a picked image to the server and return the path it stored.
+     *
+     * The editor holds the draft, so it applies the returned path itself; this
+     * only reports success or a message fit for the screen.
+     */
+    suspend fun uploadQuizHeroImage(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String
+    ): Result<String> {
+        val outcome = quizzesRepository.uploadHeroImage(bytes, fileName, mimeType)
+        return when (outcome) {
+            is QuizOutcome.Ok -> Result.success(outcome.value)
+            is QuizOutcome.Err -> Result.failure(IllegalStateException(outcome.message))
         }
     }
 

@@ -236,6 +236,8 @@ class MainActivity : ComponentActivity() {
                             val quizSaveError by viewModel.quizSaveError.collectAsStateWithLifecycle()
                             val activeQuiz by viewModel.activeQuiz.collectAsStateWithLifecycle()
                             val quizDetail by viewModel.quizDetail.collectAsStateWithLifecycle()
+                            val quizDetailAttempts by
+                                viewModel.quizDetailAttempts.collectAsStateWithLifecycle()
                             val quizAttempt by viewModel.quizAttempt.collectAsStateWithLifecycle()
                             val quizAnswers by viewModel.quizAnswers.collectAsStateWithLifecycle()
                             val quizResult by viewModel.quizResult.collectAsStateWithLifecycle()
@@ -296,6 +298,9 @@ class MainActivity : ComponentActivity() {
                                     saveError = quizSaveError,
                                     onSave = { draft, publish -> viewModel.saveQuiz(draft, publish) },
                                     onClose = { viewModel.closeQuizEditor() },
+                                    onUploadHero = { bytes, fileName, mime ->
+                                        viewModel.uploadQuizHeroImage(bytes, fileName, mime)
+                                    },
                                     loadExisting = { id ->
                                         viewModel.quizForEditing(id)?.let { (quiz, questions) ->
                                             quizDraftOf(quiz, questions)
@@ -309,6 +314,7 @@ class MainActivity : ComponentActivity() {
                                 quizDetail?.let { quiz ->
                                     QuizDetailScreen(
                                         quiz = quiz,
+                                        attempts = quizDetailAttempts,
                                         isStarting = isQuizStarting,
                                         onStart = { viewModel.startQuizFromDetail() },
                                         onBack = { viewModel.closeQuizDetail() }

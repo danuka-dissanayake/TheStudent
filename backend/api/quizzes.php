@@ -142,6 +142,9 @@ function ts_quiz_public(array $row, int $best = -1, bool $passed = false, int $a
         'code' => (string) $row['code'],
         'title' => (string) $row['title'],
         'description' => (string) ($row['description'] ?? ''),
+        // An image the admin uploaded for this quiz, or null to let the app fall
+        // back to its curated photo for the subject.
+        'hero_image_url' => trim((string) ($row['hero_image_url'] ?? '')) ?: null,
         'subject' => (string) $row['subject'],
         'grade' => (string) $row['grade'],
         'category' => (string) $row['category'],
@@ -158,14 +161,41 @@ function ts_quiz_public(array $row, int $best = -1, bool $passed = false, int $a
         'best_percent' => $best >= 0 ? $best : null,
         'passed' => $passed,
         'attempts' => $used,
-        // A quiz is "enrolled" (and disabled in the app) once every attempt has
-        // been used. The server owns this: the card can never disagree with what
+        // A quiz is "enrolled" once every attempt has been used. The app no
+        // longer disables the card: it opens the student's progress instead. The
+        // server still owns the number, so the card can never disagree with what
         // `start` will allow.
         'max_attempts' => $maxAttempts,
         'attempts_used' => $used,
         'attempts_left' => $left,
         'enrolled' => $left <= 0,
     ];
+}
+
+/**
+ * Does this database have `quizzes.hero_image_url` yet? Cached per request.
+ *
+ * Same reasoning as [ts_quiz_has_max_attempts]: a write must not name a column
+ * that is not there, so a server that has not run `database_quizzes_v3.sql`
+ * keeps working — it just cannot store a hero image until it does.
+ */
+function ts_quiz_has_hero_image(PDO $pdo): bool
+{
+    static $has = null;
+    if ($has !== null) {
+        return $has;
+    }
+    try {
+        $stmt = $pdo->prepare(
+            'SELECT COUNT(*) FROM information_schema.COLUMNS
+             WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = :tbl AND COLUMN_NAME = :col'
+        );
+        $stmt->execute(['tbl' => 'quizzes', 'col' => 'hero_image_url']);
+        $has = (int) $stmt->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        $has = false;
+    }
+    return $has;
 }
 
 /**
@@ -1112,6 +1142,25 @@ try {
 
             if (ts_quiz_has_max_attempts($pdo)) {
                 $payload['max_attempts'] = max(1, min(10, (int) ($body['max_attempts'] ?? 3)));
+            }
+
+            if (ts_quiz_has_hero_image($pdo)) {
+                // Only a path this server produced, or an explicit null to clear
+                // it. A full URL from another site is rejected: the picture is
+                // uploaded through `api/quiz_image.php`, not linked.
+                $hero = trim((string) ($body['hero_image_url'] ?? ''));
+                if ($hero === '') {
+                    $payload['hero_image_url'] = null;
+                } elseif (preg_match('#^/uploads/quizzes/[A-Za-z0-9._-]+$#', $hero)) {
+                    $payload['hero_image_url'] = $hero;
+                } else {
+                    ts_quiz_json(
+                        'error',
+                        'The hero image must be uploaded through the admin panel, not linked.',
+                        [],
+                        400
+                    );
+                }
             }
 
             $pdo->beginTransaction();

@@ -12,6 +12,12 @@ data class QuizSummary(
     val code: String = "",
     val title: String,
     val description: String = "",
+    /**
+     * The hero picture the admin uploaded for this quiz, or null to let the app
+     * pick a curated photo from the subject. Stored as a server path
+     * (`/uploads/quizzes/…`); the repository turns it into a full URL.
+     */
+    val heroImageUrl: String? = null,
     val subject: String,
     val grade: String,
     val category: String,
@@ -165,6 +171,8 @@ data class QuizDraftQuestion(
 data class QuizDraft(
     val id: Int = 0,
     val title: String = "",
+    /** Server path of an uploaded hero image; blank means "use the fallback". */
+    val heroImageUrl: String = "",
     val description: String = "",
     val subject: String = "",
     val grade: String = "",

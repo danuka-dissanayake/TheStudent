@@ -51,6 +51,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.model.QuizHistoryItem
 import com.example.data.model.QuizSummary
 import com.example.ui.components.QuizHeroArt
 import com.example.ui.components.shimmerEffect
@@ -76,6 +77,7 @@ private object DQ {
     val overline: TextUnit = 11.sp
 
     val titleHeight: TextUnit = 34.sp
+    val score: TextUnit = 44.sp
     val bodyHeight: TextUnit = 20.sp
 }
 
@@ -91,6 +93,7 @@ private object DQ {
 @Composable
 fun QuizDetailScreen(
     quiz: QuizSummary,
+    attempts: List<QuizHistoryItem> = emptyList(),
     isStarting: Boolean = false,
     onStart: () -> Unit,
     onBack: () -> Unit,
@@ -148,7 +151,8 @@ fun QuizDetailScreen(
                 }
                 Spacer(Modifier.width(12.dp))
                 Text(
-                    text = "Quizzes  ›  " + (quiz.code.ifBlank { "Details" }),
+                    text = "Quizzes  ›  " + (quiz.code.ifBlank { "Quiz" }) +
+                        if (quiz.attempts > 0) "  ›  Progress" else "",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = DQ.meta,
                     fontWeight = FontWeight.SemiBold,
@@ -170,6 +174,14 @@ fun QuizDetailScreen(
                 modifier = Modifier
                     .weight(1f)
                     .testTag("quiz_detail_skeleton")
+            )
+        } else if (quiz.attempts > 0) {
+            QuizProgressBody(
+                quiz = quiz,
+                attempts = attempts,
+                modifier = Modifier
+                    .weight(1f)
+                    .testTag("quiz_detail_progress")
             )
         } else {
             // ── everything else scrolls ─────────────────────────────────────────
@@ -316,7 +328,7 @@ fun QuizDetailScreen(
                 ) {
                     Box(contentAlignment = Alignment.Center) {
                         Text(
-                            text = "No attempts left — this quiz is in your collection",
+                            text = "All ${quiz.maxAttempts} attempts used · results kept below",
                             fontFamily = MaisonNeueFontFamily,
                             fontSize = DQ.body,
                             fontWeight = FontWeight.Bold,
@@ -345,7 +357,7 @@ fun QuizDetailScreen(
                         Text(
                             text = when {
                                 isStarting -> "Preparing your questions…"
-                                quiz.attemptsLeft < quiz.maxAttempts -> "Start attempt ${quiz.attempts + 1}"
+                                quiz.attempts > 0 -> "Retry quiz · attempt ${quiz.attempts + 1}"
                                 else -> "Start quiz"
                             },
                             fontFamily = MaisonNeueFontFamily,
@@ -570,6 +582,306 @@ private fun DetailBullet(text: String, leading: Boolean) {
             lineHeight = DQ.bodyHeight,
             color = DetailMuted
         )
+    }
+}
+
+/**
+ * What a student sees when they open a quiz they have already sat.
+ *
+ * The page stops selling the quiz and starts reporting on it: best score,
+ * whether it was passed, how many of the attempts are spent, the average, and one
+ * row per attempt with its date, score, time taken and EXP. A retry is offered
+ * only while attempts remain — with none left the page still opens, because
+ * reading your own results is not the same as taking another attempt.
+ */
+@Composable
+private fun QuizProgressBody(
+    quiz: QuizSummary,
+    attempts: List<QuizHistoryItem>,
+    modifier: Modifier = Modifier
+) {
+    val best = quiz.bestPercent ?: attempts.maxOfOrNull { it.percent } ?: 0
+    val average = if (attempts.isEmpty()) {
+        quiz.averagePercent
+    } else {
+        attempts.map { it.percent }.average().toInt()
+    }
+    val spent = quiz.attempts.coerceIn(0, quiz.maxAttempts)
+
+    Column(
+        modifier = modifier
+            .verticalScroll(rememberScrollState())
+            .padding(horizontal = 16.dp)
+            .padding(top = 18.dp, bottom = 16.dp)
+    ) {
+        Text(
+            text = listOf(quiz.subject, quiz.grade, "${quiz.medium} medium")
+                .filter { it.isNotBlank() }
+                .joinToString("  ·  ")
+                .uppercase(),
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = DQ.overline,
+            fontWeight = FontWeight.Bold,
+            color = DetailGreen,
+            letterSpacing = 0.8.sp
+        )
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = quiz.title,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = DQ.title,
+            lineHeight = DQ.titleHeight,
+            fontWeight = FontWeight.ExtraBold,
+            color = DetailInk,
+            letterSpacing = (-0.4).sp
+        )
+        Spacer(Modifier.height(4.dp))
+        Text(
+            text = if (quiz.passed) "Passed · your progress" else "Your progress so far",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = DQ.cardTitle,
+            color = DetailMuted
+        )
+
+        Spacer(Modifier.height(16.dp))
+        // ── the score card ────────────────────────────────────────────────
+        Surface(
+            shape = RoundedCornerShape(20.dp),
+            color = Color.White,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(16.dp)) {
+                Row(verticalAlignment = Alignment.Bottom) {
+                    Text(
+                        text = "$best",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = DQ.score,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (quiz.passed) DetailGreen else DetailInk,
+                        letterSpacing = (-1).sp
+                    )
+                    Text(
+                        text = "%",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = DQ.cardTitle,
+                        fontWeight = FontWeight.Bold,
+                        color = DetailMuted,
+                        modifier = Modifier.padding(bottom = 8.dp, start = 2.dp)
+                    )
+                    Spacer(Modifier.weight(1f))
+                    Surface(
+                        shape = RoundedCornerShape(50),
+                        color = if (quiz.passed) DetailGreenSoft else Color(0xFFFFFBEB)
+                    ) {
+                        Text(
+                            text = if (quiz.passed) "PASSED" else "NOT PASSED YET",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = DQ.overline,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (quiz.passed) DetailGreen else Color(0xFFB45309),
+                            letterSpacing = 0.6.sp,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+                Text(
+                    text = "best score · pass mark ${quiz.passPercent}%",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.micro,
+                    color = DetailFaint
+                )
+
+                Spacer(Modifier.height(14.dp))
+                // Attempts as filled dots: how much of the quiz is left at a glance.
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    repeat(quiz.maxAttempts) { index ->
+                        Box(
+                            modifier = Modifier
+                                .height(6.dp)
+                                .weight(1f)
+                                .clip(RoundedCornerShape(50))
+                                .background(
+                                    if (index < spent) {
+                                        if (quiz.passed) DetailGreen else Color(0xFFF59E0B)
+                                    } else {
+                                        DetailHairline
+                                    }
+                                )
+                        )
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    text = "$spent of ${quiz.maxAttempts} attempts used · " +
+                        if (quiz.attemptsLeft > 0) {
+                            "${quiz.attemptsLeft} left · average $average%"
+                        } else {
+                            "no attempts left · average $average%"
+                        },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.micro,
+                    color = DetailMuted
+                )
+            }
+        }
+
+        // ── every attempt on its own row ──────────────────────────────────
+        if (attempts.isNotEmpty()) {
+            Spacer(Modifier.height(18.dp))
+            Text(
+                text = "Attempt history",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = DQ.cardTitle,
+                fontWeight = FontWeight.ExtraBold,
+                color = DetailInk
+            )
+            Spacer(Modifier.height(8.dp))
+            attempts.forEachIndexed { index, attempt ->
+                AttemptRow(
+                    number = attempts.size - index,
+                    percent = attempt.percent,
+                    passed = attempt.passed,
+                    score = attempt.score,
+                    maxScore = attempt.maxScore,
+                    durationSeconds = attempt.durationSeconds,
+                    expAwarded = attempt.expAwarded,
+                    submittedAt = attempt.submittedAt
+                )
+                Spacer(Modifier.height(8.dp))
+            }
+        } else if (quiz.attempts > 0) {
+            // The attempt rows could not be fetched; the summary still tells the
+            // truth, so say so plainly instead of showing an empty list.
+            Spacer(Modifier.height(16.dp))
+            Text(
+                text = "Attempt details could not be loaded. Pull the quiz list down to refresh.",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = DQ.meta,
+                color = DetailMuted
+            )
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Surface(
+            shape = RoundedCornerShape(18.dp),
+            color = Color.White,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(modifier = Modifier.padding(14.dp)) {
+                Text(
+                    text = if (quiz.attemptsLeft > 0) "Ready when you are" else "All attempts used",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.cardTitle,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = DetailInk
+                )
+                Spacer(Modifier.height(5.dp))
+                Text(
+                    text = if (quiz.attemptsLeft > 0) {
+                        "A retry starts a fresh attempt with ${quiz.questionCount} questions. " +
+                            "Your best score of $best% stays on record."
+                    } else {
+                        "This quiz is now part of your collection. Your results stay here, " +
+                            "and your best score of $best% is what counts."
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.meta,
+                    lineHeight = DQ.bodyHeight,
+                    color = DetailMuted
+                )
+            }
+        }
+    }
+}
+
+/** One attempt: score, pass state, time taken, EXP earned, when it happened. */
+@Composable
+private fun AttemptRow(
+    number: Int,
+    percent: Int,
+    passed: Boolean,
+    score: Int,
+    maxScore: Int,
+    durationSeconds: Int,
+    expAwarded: Int,
+    submittedAt: String
+) {
+    Surface(
+        shape = RoundedCornerShape(16.dp),
+        color = Color.White,
+        border = BorderStroke(1.dp, DetailHairline),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier.padding(12.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(42.dp)
+                    .clip(RoundedCornerShape(12.dp))
+                    .background(if (passed) DetailGreenSoft else Color(0xFFFFFBEB)),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text(
+                        text = "$percent%",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = DQ.micro,
+                        fontWeight = FontWeight.ExtraBold,
+                        color = if (passed) DetailGreen else Color(0xFFB45309)
+                    )
+                }
+            }
+            Spacer(Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = "Attempt $number · ${if (passed) "passed" else "not passed"}",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.body,
+                    fontWeight = FontWeight.Bold,
+                    color = DetailInk
+                )
+                Spacer(Modifier.height(2.dp))
+                Text(
+                    text = buildString {
+                        append("$score of $maxScore marks")
+                        if (durationSeconds > 0) {
+                            append(" · ")
+                            append("${durationSeconds / 60}m ${durationSeconds % 60}s")
+                        }
+                        if (submittedAt.isNotBlank()) {
+                            append(" · ")
+                            append(submittedAt.take(10))
+                        }
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = DQ.micro,
+                    color = DetailMuted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (expAwarded > 0) {
+                Spacer(Modifier.width(8.dp))
+                Surface(
+                    shape = RoundedCornerShape(50),
+                    color = DetailGreenSoft
+                ) {
+                    Text(
+                        text = "+$expAwarded EXP",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = DQ.overline,
+                        fontWeight = FontWeight.Bold,
+                        color = DetailGreen,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
+                    )
+                }
+            }
+        }
     }
 }
 

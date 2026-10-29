@@ -1,6 +1,9 @@
 package com.example.ui.screens
 
 import android.content.Context
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.PickVisualMediaRequest
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -33,6 +36,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Quiz
+import androidx.compose.material.icons.filled.Upload
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.OutlinedTextField
@@ -43,6 +47,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -53,11 +58,16 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.unit.sp
+import coil.compose.AsyncImage
 import com.example.data.model.QuizDraft
 import com.example.data.model.QuizDraftOption
 import com.example.data.model.QuizDraftQuestion
 import com.example.data.model.QuizQuestion
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import com.example.data.model.QuizSummary
 import com.example.ui.theme.MaisonNeueFontFamily
 import com.squareup.moshi.Moshi
@@ -120,6 +130,7 @@ fun quizDraftOf(quiz: QuizSummary?, questions: List<QuizQuestion>): QuizDraft {
     return QuizDraft(
         id = quiz?.id ?: 0,
         title = quiz?.title.orEmpty(),
+        heroImageUrl = quiz?.heroImageUrl.orEmpty(),
         description = quiz?.description.orEmpty(),
         subject = quiz?.subject.orEmpty(),
         grade = quiz?.grade.orEmpty(),
@@ -593,6 +604,8 @@ fun QuizEditorScreen(
     saveError: String?,
     onSave: (QuizDraft, Boolean) -> Unit,
     onClose: () -> Unit,
+    /** Upload bytes and return the URL to preview (the path is saved later). */
+    onUploadHero: suspend (bytes: ByteArray, fileName: String, mimeType: String) -> Result<String>,
     loadExisting: suspend (Int) -> QuizDraft?,
     modifier: Modifier = Modifier
 ) {
@@ -714,6 +727,14 @@ fun QuizEditorScreen(
                     EditorChips("Medium", MEDIUM_OPTIONS, current.medium) { draft = current.copy(medium = it) }
                 }
 
+                // ── hero image ─────────────────────────────────────────────
+                HeroImageField(
+                    value = current.heroImageUrl,
+                    onUploaded = { url -> draft = current.copy(heroImageUrl = url) },
+                    onClear = { draft = current.copy(heroImageUrl = "") },
+                    onUploadHero = onUploadHero
+                )
+
                 // ── rules ──────────────────────────────────────────────────
                 EditorCard(title = "Rules") {
                     Text(
@@ -767,8 +788,8 @@ fun QuizEditorScreen(
                         current.maxAttempts.toString()
                     ) { draft = current.copy(maxAttempts = it.toIntOrNull() ?: 3) }
                     Text(
-                        text = "When every attempt is used the quiz moves to the student's " +
-                            "Enrolled quizzes and closes.",
+                        text = "When every attempt is used the quiz stays open: students keep " +
+                            "opening it to read their own results.",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 11.5.sp,
                         lineHeight = 14.sp,
@@ -1060,6 +1081,183 @@ private fun QuestionEditor(
                 listOf("1", "2", "3"),
                 question.marks.toString()
             ) { onChange(question.copy(marks = it.toIntOrNull() ?: 1)) }
+        }
+    }
+}
+
+/**
+ * The quiz's cover picture, uploaded from the phone.
+ *
+ * There is deliberately no text field for a link: a hero is a file the admin
+ * picks, which the server stores under `uploads/quizzes/`. With nothing picked,
+ * the app falls back to the subject photo, so this never blocks saving a quiz.
+ */
+@Composable
+private fun HeroImageField(
+    value: String,
+    onUploaded: (String) -> Unit,
+    onClear: () -> Unit,
+    onUploadHero: suspend (bytes: ByteArray, fileName: String, mimeType: String) -> Result<String>
+) {
+    val context = LocalContext.current
+    val scope = rememberCoroutineScope()
+    var isUploading by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+
+    // Convert the picked content URI to bytes before uploading; the server never
+    // sees a URI, only a file it stores itself.
+    val picker = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.PickVisualMedia()
+    ) { uri ->
+        if (uri == null) return@rememberLauncherForActivityResult
+        scope.launch {
+            isUploading = true
+            error = null
+            val mime = context.contentResolver.getType(uri) ?: "image/jpeg"
+            val bytes = withContext(Dispatchers.IO) {
+                runCatching {
+                    context.contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                }.getOrNull()
+            }
+            if (bytes == null || bytes.isEmpty()) {
+                error = "That image could not be read. Try another one."
+                isUploading = false
+                return@launch
+            }
+            if (bytes.size > 5 * 1024 * 1024) {
+                error = "That image is larger than 5 MB. Pick a smaller one."
+                isUploading = false
+                return@launch
+            }
+            val extension = when (mime) {
+                "image/png" -> "png"
+                "image/webp" -> "webp"
+                else -> "jpg"
+            }
+            val result = onUploadHero(bytes, "quiz-hero.$extension", mime)
+            result
+                .onSuccess { onUploaded(it) }
+                .onFailure { error = it.message ?: "The image could not be uploaded." }
+            isUploading = false
+        }
+    }
+
+    EditorCard(title = "Cover image") {
+        if (value.isNotBlank()) {
+            AsyncImage(
+                model = value,
+                contentDescription = "Quiz cover image",
+                contentScale = ContentScale.Crop,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .heightIn(min = 120.dp, max = 180.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .testTag("quiz_hero_preview")
+            )
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(104.dp)
+                    .clip(RoundedCornerShape(14.dp))
+                    .background(AdmBg),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(
+                    text = "No image yet — the subject photo is used instead",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    color = AdmFaint,
+                    modifier = Modifier.padding(horizontal = 16.dp)
+                )
+            }
+        }
+
+        Spacer(Modifier.height(10.dp))
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            Surface(
+                onClick = {
+                    picker.launch(
+                        PickVisualMediaRequest(ActivityResultContracts.PickVisualMedia.ImageOnly)
+                    )
+                },
+                enabled = !isUploading,
+                shape = RoundedCornerShape(12.dp),
+                color = AdmGreenSoft,
+                modifier = Modifier.testTag("quiz_hero_upload")
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    if (isUploading) {
+                        CircularProgressIndicator(
+                            strokeWidth = 2.dp,
+                            color = AdmGreen,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Upload,
+                            contentDescription = null,
+                            tint = AdmGreen,
+                            modifier = Modifier.size(15.dp)
+                        )
+                    }
+                    Spacer(Modifier.width(6.dp))
+                    Text(
+                        text = when {
+                            isUploading -> "Uploading…"
+                            value.isBlank() -> "Upload image"
+                            else -> "Replace image"
+                        },
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = AdmGreen
+                    )
+                }
+            }
+            if (value.isNotBlank() && !isUploading) {
+                Surface(
+                    onClick = onClear,
+                    shape = RoundedCornerShape(12.dp),
+                    color = Color.White,
+                    border = BorderStroke(1.dp, AdmHairline),
+                    modifier = Modifier.testTag("quiz_hero_clear")
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 9.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            Icons.Default.Delete,
+                            contentDescription = null,
+                            tint = AdmMuted,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(Modifier.width(6.dp))
+                        Text(
+                            text = "Remove",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = AdmMuted
+                        )
+                    }
+                }
+            }
+        }
+
+        error?.let { message ->
+            Spacer(Modifier.height(8.dp))
+            Text(
+                text = message,
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 11.5.sp,
+                lineHeight = 15.sp,
+                color = AdmRed
+            )
         }
     }
 }

@@ -15,7 +15,10 @@ import com.squareup.moshi.Moshi
 import com.squareup.moshi.kotlin.reflect.KotlinJsonAdapterFactory
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.MultipartBody
 import okhttp3.OkHttpClient
+import okhttp3.RequestBody.Companion.toRequestBody
 import okhttp3.logging.HttpLoggingInterceptor
 import org.json.JSONObject
 import retrofit2.HttpException
@@ -83,6 +86,43 @@ class QuizzesRepository(context: Context) {
         return service
     }
 
+    /** A copy of the summary whose hero path is a URL Coil can actually open. */
+    private fun withAbsoluteHero(quiz: QuizSummary): QuizSummary =
+        quiz.copy(heroImageUrl = absoluteHero(quiz.heroImageUrl))
+
+    /**
+     * The reverse of [absoluteHero]: put a hero back into the stored form.
+     *
+     * The admin panel edits the URL it displays, so saving must send the path the
+     * column actually holds — the server only accepts paths it produced itself
+     * under `uploads/quizzes/`.
+     */
+    private fun storedHero(url: String): String {
+        val trimmed = url.trim()
+        if (trimmed.isEmpty()) return ""
+        val base = backendUrl.trimEnd('/')
+        return if (trimmed.startsWith("$base/")) {
+            trimmed.removePrefix(base)
+        } else {
+            trimmed
+        }
+    }
+
+    /**
+     * Turn a stored hero path into something Coil can fetch.
+     *
+     * The database keeps a path (`/uploads/quizzes/…`) because the host can
+     * change; the app prefixes the backend URL it is actually talking to. A row
+     * that already holds an absolute URL is passed through untouched, so an
+     * admin who migrated servers does not have to rewrite anything.
+     */
+    private fun absoluteHero(url: String?): String? {
+        val trimmed = url?.trim().orEmpty()
+        if (trimmed.isEmpty()) return null
+        if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) return trimmed
+        return backendUrl.trimEnd('/') + "/" + trimmed.trimStart('/')
+    }
+
     private fun authorization(): String? {
         val token = sessionPrefs.sessionToken
         return if (token.isNullOrBlank()) null else "Bearer $token"
@@ -129,7 +169,7 @@ class QuizzesRepository(context: Context) {
     suspend fun loadQuizzes(): QuizOutcome<List<QuizSummary>> = call { auth ->
         val envelope = service().listQuizzes(auth)
         if (envelope.status == "success") {
-            QuizOutcome.Ok(envelope.quizzes())
+            QuizOutcome.Ok(envelope.quizzes().map(::withAbsoluteHero))
         } else {
             QuizOutcome.Err(envelope.message ?: "Quizzes could not be loaded.")
         }
@@ -212,13 +252,49 @@ class QuizzesRepository(context: Context) {
     suspend fun save(draft: QuizDraft, publish: Boolean): QuizOutcome<Int> = call { auth ->
         val envelope = service().adminSave(
             auth,
-            draft.toSaveRequest(if (publish) "published" else "draft")
+            draft.copy(heroImageUrl = storedHero(draft.heroImageUrl))
+                .toSaveRequest(if (publish) "published" else "draft")
         )
         val id = envelope.data?.quizId ?: 0
         if (envelope.status == "success") {
             QuizOutcome.Ok(id)
         } else {
             QuizOutcome.Err(envelope.message ?: "The quiz could not be saved.")
+        }
+    }
+
+    /**
+     * Upload an image for a quiz's hero.
+     *
+     * The bytes go up as multipart/form-data to `api/quiz_image.php`, which stores
+     * the file under `uploads/quizzes/` and answers with the path to save on the
+     * quiz. Nothing is linked from a third-party site.
+     */
+    suspend fun uploadHeroImage(
+        bytes: ByteArray,
+        fileName: String,
+        mimeType: String
+    ): QuizOutcome<String> = call { auth ->
+        try {
+            val part = MultipartBody.Part.createFormData(
+                "image",
+                fileName,
+                bytes.toRequestBody(mimeType.toMediaTypeOrNull())
+            )
+            val response = service().uploadQuizImage(auth, part)
+            val hero = response.heroImageUrl
+            if (response.status == "success" && !hero.isNullOrBlank()) {
+                // The caller wants something it can draw right away; the stored
+                // path is rebuilt from this when the quiz is saved.
+                QuizOutcome.Ok(absoluteHero(hero) ?: hero)
+            } else {
+                QuizOutcome.Err(
+                    response.message?.takeIf { it.isNotBlank() }
+                        ?: "The image could not be uploaded."
+                )
+            }
+        } catch (error: Throwable) {
+            failure(error)
         }
     }
 
@@ -260,6 +336,7 @@ internal fun QuizDraft.toSaveRequest(status: String): QuizSaveRequest = QuizSave
     id = id,
     title = title.trim(),
     description = description.trim(),
+    heroImageUrl = heroImageUrl.takeIf { it.isNotBlank() },
     subject = subject,
     grade = grade,
     category = category,

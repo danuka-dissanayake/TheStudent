@@ -14,10 +14,13 @@ import com.example.data.model.QuizSummary
 import com.example.data.model.SubjectProgress
 import com.squareup.moshi.Json
 import com.squareup.moshi.JsonClass
+import okhttp3.MultipartBody
 import retrofit2.http.Body
 import retrofit2.http.GET
 import retrofit2.http.Header
 import retrofit2.http.POST
+import retrofit2.http.Multipart
+import retrofit2.http.Part
 import retrofit2.http.Query
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -90,6 +93,7 @@ data class QuizDto(
     @Json(name = "code") val code: String = "",
     @Json(name = "title") val title: String = "",
     @Json(name = "description") val description: String? = null,
+    @Json(name = "hero_image_url") val heroImageUrl: String? = null,
     @Json(name = "subject") val subject: String = "",
     @Json(name = "grade") val grade: String = "",
     @Json(name = "category") val category: String = "",
@@ -114,6 +118,7 @@ data class QuizDto(
         code = code,
         title = title.ifBlank { "Untitled quiz" },
         description = description.orEmpty(),
+        heroImageUrl = heroImageUrl?.takeIf { it.isNotBlank() },
         subject = subject,
         grade = grade,
         category = category,
@@ -268,6 +273,7 @@ data class QuizSaveRequest(
     @Json(name = "id") val id: Int = 0,
     @Json(name = "title") val title: String,
     @Json(name = "description") val description: String = "",
+    @Json(name = "hero_image_url") val heroImageUrl: String? = null,
     @Json(name = "subject") val subject: String,
     @Json(name = "grade") val grade: String,
     @Json(name = "category") val category: String,
@@ -294,7 +300,22 @@ data class QuizDeleteRequest(
     @Json(name = "id") val id: Int
 )
 
+@JsonClass(generateAdapter = true)
+data class QuizImageEnvelope(
+    @Json(name = "status") val status: String? = null,
+    @Json(name = "message") val message: String? = null,
+    @Json(name = "hero_image_url") val heroImageUrl: String? = null
+)
+
 interface QuizzesApiService {
+
+    /** Multipart upload for a quiz's hero image. Admin only, enforced server-side. */
+    @Multipart
+    @POST("api/quiz_image.php")
+    suspend fun uploadQuizImage(
+        @Header("Authorization") authorization: String,
+        @Part image: MultipartBody.Part
+    ): QuizImageEnvelope
 
     @GET("api/quizzes.php")
     suspend fun listQuizzes(
