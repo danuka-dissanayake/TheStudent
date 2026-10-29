@@ -31,10 +31,10 @@ Branded_Past_Papers/
 | `grade` | always `Grade 13` (what the app's A/L bucketing checks) |
 | `category` | always `A/L` |
 | `exam_type` | always `G.C.E. Advanced Level` |
-| `title` | `"<Subject> <Year> (<Medium> Medium)"`; language papers just `"<Language> <Year>"` |
+| `title` | `"<Year> <Subject> <Medium> Medium Past Paper"` — e.g. `2024 Science for Technology Sinhala Medium Past Paper`; a language paper is already named by its medium, so `2019 Japanese Past Paper` |
 | `stream` | from `SUBJECT_STREAM` in the script |
-| `pages` | counted from the PDF objects |
-| `file_size` | the real byte size, formatted like the panel does |
+| `pages` | counted from the PDF: page objects first, then the page tree's `/Count` (which catches linearised and partly compressed files) |
+| `file_size` | the real byte size on disk, formatted like the panel does (`3.42 MB`); the endpoint also re-measures the stored file, so the row is never wrong |
 | `marking_scheme_url` | the scheme file with the same subject + year + medium |
 
 Nothing is typed by hand, and no field is invented: a value the script cannot
@@ -48,8 +48,11 @@ python3 scripts/import_past_papers.py --scan ~/Branded_Past_Papers \
 ```
 
 The plan prints counts per medium, per subject with the year span, the scheme
-pairing, every subject it does not recognise, every file without a year, and
-every file that would breach the 25 MB upload limit. `papers.csv` is the exact
+pairing, how many page counts could be read from the PDFs, every subject it does
+not recognise, every file without a year, and every file that would breach the
+25 MB upload limit. Planning from `--tree` alone cannot see inside the files, so
+it says the payload is unknown instead of printing zeros — use `--scan` for real
+sizes and page counts. `papers.csv` is the exact
 set of rows that would be created; `issues.csv` is the "look at this" list.
 
 You can also plan from a `tree` listing alone, without the PDFs:

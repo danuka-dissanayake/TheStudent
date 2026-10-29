@@ -244,13 +244,32 @@ def human_size(num_bytes: int) -> str:
 
 
 def pdf_page_count(path: Path) -> int:
-    """Count page objects without a PDF library. Good enough for a card label."""
+    """
+    Count the pages in a PDF without a dependency.
+
+    Two passes, because one alone is not enough: count the `/Type /Page`
+    objects, then read `/Count` from the page-tree dictionaries (which is what
+    a linearised or partially compressed file relies on). The larger of the two
+    wins — a page object is only ever under-counted by the first pass.
+    """
     try:
         blob = path.read_bytes()
     except OSError:
         return 0
-    count = len(re.findall(rb"/Type\s*/Page[^s]", blob))
-    return count
+
+    direct = len(re.findall(rb"/Type\s*/Page[^s]", blob))
+
+    tree_count = 0
+    for match in re.finditer(rb"/Type\s*/Pages\b", blob):
+        window = blob[max(0, match.start() - 400): match.end() + 400]
+        for number in re.findall(rb"/Count\s+(\d+)", window):
+            tree_count = max(tree_count, int(number))
+
+    # An outline can carry a /Count too, so the tree figure is only trusted when
+    # it is in the same order of magnitude as the real page objects.
+    if tree_count and (direct == 0 or tree_count <= direct * 4):
+        return max(direct, tree_count)
+    return direct
 
 
 @dataclass
@@ -275,9 +294,15 @@ class Item:
 
     @property
     def title(self) -> str:
+        """
+        Year first, then subject, then medium, then "Past Paper" —
+        e.g. "2024 Science for Technology Sinhala Medium Past Paper".
+        A language paper is already named by its medium ("2019 Japanese
+        Past Paper"), so it is not repeated.
+        """
         if self.medium == self.subject:
-            return f"{self.subject} {self.year}"
-        return f"{self.subject} {self.year} ({self.medium} Medium)"
+            return f"{self.year} {self.subject} Past Paper"
+        return f"{self.year} {self.subject} {self.medium} Medium Past Paper"
 
     @property
     def description(self) -> str:
@@ -471,8 +496,21 @@ def print_plan(papers: list[Item], orphans: list[Item], issues: list[dict]) -> N
     print("=" * 74)
     print(f"  papers            {len(papers)}")
     print(f"  marking schemes   {len(paired)} paired · {len(orphans)} orphaned")
-    print(f"  payload           {human_size(total_bytes)}"
-          f"{'  (pages/size read from disk)' if papers and papers[0].size_bytes else ''}")
+    if any(p.size_bytes for p in papers):
+        print(f"  payload           {human_size(total_bytes)}")
+        no_pages = [p for p in papers if p.pages == 0]
+        counted = len(papers) - len(no_pages)
+        print(f"  page counts       {counted}/{len(papers)} read from the PDFs")
+        if no_pages:
+            print(f"  ⚠ {len(no_pages)} file(s) whose page count could not be "
+                  f"read — they upload without one:")
+            for paper in no_pages[:6]:
+                print(f"    {paper.rel_path}")
+            if len(no_pages) > 6:
+                print(f"    … and {len(no_pages) - 6} more")
+    else:
+        print("  payload           unknown — planning from a listing; run with "
+              "--scan for real sizes and page counts")
     print(f"  upload limit      {MAX_PDF_BYTES // 1048576} MB per file")
 
     by_medium: dict[str, int] = {}
@@ -698,6 +736,8 @@ class Backend:
             "file_size": human_size(paper.size_bytes),
             "status": status,
         }
+        # The endpoint also re-measures the stored file, so file_size is right
+        # either way; pages are ours to count, so send them whenever known.
         if paper.pages > 0:
             fields["pages"] = str(paper.pages)
 
@@ -808,7 +848,8 @@ def upload_all(
                 append_state(state_path, paper, reply.get("paper_id"))
                 elapsed = time.time() - started
                 rate = sent_bytes / elapsed / 1024 if elapsed > 0 else 0
-                print(f"{stamp} ✓ {human_size(paper.size_bytes):>9}  "
+                pages = f"{paper.pages}p" if paper.pages else "?p"
+                print(f"{stamp} ✓ {human_size(paper.size_bytes):>9} {pages:>5}  "
                       f"id={reply.get('paper_id')}  {rate:4.0f} KB/s")
                 break
             except Exception as error:  # noqa: BLE001 - reported, not raised
