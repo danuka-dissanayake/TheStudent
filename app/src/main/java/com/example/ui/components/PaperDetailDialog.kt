@@ -21,11 +21,24 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import androidx.compose.ui.window.DialogProperties
 import com.example.data.model.PastPaper
+
+/**
+ * The sheet's type scale, the same roles and values as the papers screen (`PT`)
+ * so the list and the sheet it opens read as one surface.
+ */
+private object DT {
+    val section: TextUnit = 18.sp
+    val sectionHeight: TextUnit = 24.sp
+    val body: TextUnit = 14.sp
+    val meta: TextUnit = 13.sp
+    val overline: TextUnit = 11.sp
+}
 
 /**
  * Paper Detail Bottom Sheet Card matching exact reference image (image_e6edf588.png):
@@ -144,8 +157,8 @@ fun PaperDetailDialog(
                             // one thing a student must never have to guess at.
                             Text(
                                 text = paper.title,
-                                fontSize = 16.5.sp,
-                                lineHeight = 21.sp,
+                                fontSize = DT.section,
+                                lineHeight = DT.sectionHeight,
                                 fontWeight = FontWeight.Bold,
                                 color = Color(0xFF0F172A)
                             )
@@ -156,7 +169,7 @@ fun PaperDetailDialog(
                                     paper.year.toString(),
                                     paper.medium
                                 ).filter { it.isNotBlank() }.joinToString(" · "),
-                                fontSize = 13.sp,
+                                fontSize = DT.meta,
                                 color = Color(0xFF64748B),
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
@@ -227,14 +240,14 @@ fun PaperDetailDialog(
                             ) {
                                 Text(
                                     text = "MEDIUM",
-                                    fontSize = 11.5.sp,
+                                    fontSize = DT.overline,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF15803D)
                                 )
                                 Spacer(modifier = Modifier.height(2.dp))
                                 Text(
                                     text = paper.medium,
-                                    fontSize = 14.sp,
+                                    fontSize = DT.body,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF15803D),
                                     maxLines = 1,
@@ -271,7 +284,7 @@ fun PaperDetailDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = "Download marking scheme",
-                                    fontSize = 14.5.sp,
+                                    fontSize = DT.body,
                                     fontWeight = FontWeight.Bold,
                                     color = Color(0xFF059669)
                                 )
@@ -321,7 +334,7 @@ fun PaperDetailDialog(
                                 Spacer(modifier = Modifier.width(8.dp))
                                 Text(
                                     text = if (isDownloaded) "PDF Downloaded" else "Download PDF",
-                                    fontSize = 14.5.sp,
+                                    fontSize = DT.body,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
@@ -351,7 +364,7 @@ fun PaperDetailDialog(
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     text = "Ask AI",
-                                    fontSize = 14.5.sp,
+                                    fontSize = DT.body,
                                     fontWeight = FontWeight.Bold,
                                     color = Color.White
                                 )
@@ -385,14 +398,14 @@ private fun PaperStatCard(
         ) {
             Text(
                 text = label,
-                fontSize = 11.5.sp,
+                fontSize = DT.overline,
                 fontWeight = FontWeight.Bold,
                 color = Color(0xFF64748B)
             )
             Spacer(modifier = Modifier.height(2.dp))
             Text(
                 text = value,
-                fontSize = 14.sp,
+                fontSize = DT.body,
                 fontWeight = FontWeight.Bold,
                 color = if (isDark) Color.White else Color(0xFF0F172A),
                 maxLines = 1,

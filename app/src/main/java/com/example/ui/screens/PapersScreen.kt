@@ -57,6 +57,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import kotlinx.coroutines.delay
@@ -147,6 +148,24 @@ private fun buildPaperEntries(papers: List<PastPaper>): List<PaperEntry> {
         if (paper.hasMarkingScheme) entries += PaperEntry(paper, isScheme = true)
     }
     return entries
+}
+
+/**
+ * The screen's type scale, named the same way the dashboard names its own
+ * (`HT`): a handful of roles instead of a dozen one-off sizes. Every size on
+ * this screen comes from here, so nothing drifts by half a point.
+ */
+private object PT {
+    val screen: TextUnit = 21.sp        // "Past papers" in the top bar
+    val section: TextUnit = 18.sp       // sheet headings, empty-state headlines
+    val cardTitle: TextUnit = 15.sp     // paper title in the roomy layout
+    val body: TextUnit = 14.sp          // paper title in the compact row, buttons
+    val meta: TextUnit = 13.sp          // metadata lines, sheet options, body copy
+    val micro: TextUnit = 12.sp         // subtitles, badges, page pills
+    val overline: TextUnit = 11.sp      // subject code, page label, tiny counters
+
+    val bodyHeight: TextUnit = 19.sp
+    val metaHeight: TextUnit = 17.sp
 }
 
 /** How long typing must pause before the library is re-filtered. */
@@ -355,10 +374,19 @@ fun PapersScreen(
     val listState = rememberLazyListState()
     val settleScope = rememberCoroutineScope()
 
-    // Turning a page is a change of scene: the list returns to the top of the
-    // results under a short shimmer, exactly like a filter change.
+    // The controls (tabs, search, chips, sort) are the list's first item, so the
+    // first paper or scheme sits one item further down — plus the offline notice
+    // when the library is showing cached rows.
+    val resultsStartIndex = 1 + if (isLiveDatabase) 0 else 1
+
+    // Turning a page is a change of scene: the list jumps to the top of the
+    // *results* under a short shimmer, not to the top of the whole screen.
+    var shownPage by remember { mutableStateOf(safePage) }
     LaunchedEffect(safePage) {
-        if (safePage > 0) listState.scrollToItem(0)
+        if (safePage != shownPage) {
+            shownPage = safePage
+            listState.scrollToItem(resultsStartIndex)
+        }
     }
 
     val isFiltering = query.isNotBlank() || quickChip != "All" || savedOnly || filters.count > 0
@@ -395,7 +423,7 @@ fun PapersScreen(
                     Text(
                         text = if (segment == 0) "Past papers" else "Quizzes",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 21.sp,
+                        fontSize = PT.screen,
                         fontWeight = FontWeight.ExtraBold,
                         color = PaperInk,
                         letterSpacing = (-0.4).sp
@@ -415,7 +443,7 @@ fun PapersScreen(
                             }
                         },
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = PT.micro,
                         color = PaperMuted
                     )
                 }
@@ -523,7 +551,7 @@ fun PapersScreen(
                                 Text(
                                     text = "Search subject, code or year — e.g. Physics, PHY, 2024",
                                     fontFamily = MaisonNeueFontFamily,
-                                    fontSize = 13.5.sp,
+                                    fontSize = PT.meta,
                                     color = PaperFaint
                                 )
                             },
@@ -554,7 +582,7 @@ fun PapersScreen(
                             shape = RoundedCornerShape(26.dp),
                             textStyle = androidx.compose.ui.text.TextStyle(
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 14.sp,
+                                fontSize = PT.body,
                                 color = PaperInk
                             ),
                             colors = OutlinedTextFieldDefaults.colors(
@@ -608,7 +636,7 @@ fun PapersScreen(
                                 else -> "${visible.size} papers"
                             },
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.5.sp,
+                            fontSize = PT.micro,
                             fontWeight = FontWeight.SemiBold,
                             color = PaperMuted,
                             modifier = Modifier.weight(1f)
@@ -617,7 +645,7 @@ fun PapersScreen(
                             Text(
                                 text = "Clear",
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = PT.micro,
                                 fontWeight = FontWeight.Bold,
                                 color = PaperGreen,
                                 modifier = Modifier
@@ -679,7 +707,7 @@ fun PapersScreen(
                             Text(
                                 text = sort.label,
                                 fontFamily = MaisonNeueFontFamily,
-                                fontSize = 12.5.sp,
+                                fontSize = PT.micro,
                                 fontWeight = FontWeight.SemiBold,
                                 color = PaperInk
                             )
@@ -784,7 +812,7 @@ fun PapersScreen(
                 Text(
                     text = "Sort papers",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
+                    fontSize = PT.cardTitle,
                     fontWeight = FontWeight.ExtraBold,
                     color = PaperInk,
                     modifier = Modifier.padding(bottom = 8.dp)
@@ -805,7 +833,7 @@ fun PapersScreen(
                         Text(
                             text = option.label,
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.sp,
+                            fontSize = PT.body,
                             fontWeight = if (sort == option) FontWeight.Bold else FontWeight.Normal,
                             color = PaperInk,
                             modifier = Modifier.weight(1f)
@@ -845,7 +873,7 @@ fun PapersScreen(
                     Text(
                         text = "Filters",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 17.sp,
+                        fontSize = PT.section,
                         fontWeight = FontWeight.ExtraBold,
                         color = PaperInk,
                         modifier = Modifier.weight(1f)
@@ -854,7 +882,7 @@ fun PapersScreen(
                         Text(
                             text = "Reset",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = PT.meta,
                             fontWeight = FontWeight.Bold,
                             color = PaperMuted
                         )
@@ -907,7 +935,7 @@ fun PapersScreen(
                     Text(
                         text = "Only papers with a marking scheme",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 13.5.sp,
+                        fontSize = PT.meta,
                         color = PaperInk,
                         modifier = Modifier.weight(1f)
                     )
@@ -928,7 +956,7 @@ fun PapersScreen(
                         Text(
                             text = if (visible.isEmpty()) "Show results" else "Show ${visible.size} papers",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.5.sp,
+                            fontSize = PT.body,
                             fontWeight = FontWeight.Bold,
                             color = Color.White
                         )
@@ -955,7 +983,7 @@ private fun SegmentPill(label: String, selected: Boolean, tag: String, onClick: 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = PT.meta,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else PaperMuted,
                 maxLines = 1
@@ -1001,7 +1029,8 @@ private fun PaperRow(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
+                    fontSize = PT.body,
+                    lineHeight = PT.bodyHeight,
                     fontWeight = FontWeight.Bold,
                     color = PaperInk,
                     maxLines = 2,
@@ -1011,7 +1040,7 @@ private fun PaperRow(
                 Text(
                     text = paper.subtitleLine(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = PT.micro,
                     color = PaperMuted,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
@@ -1075,7 +1104,7 @@ private fun PaperCardRow(
                 Text(
                     text = SubjectCodes.of(paper.subject),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = PT.overline,
                     fontWeight = FontWeight.ExtraBold,
                     color = PaperGreen,
                     letterSpacing = 0.6.sp
@@ -1084,8 +1113,8 @@ private fun PaperCardRow(
                 Text(
                     text = title,
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
-                    lineHeight = 19.sp,
+                    fontSize = PT.cardTitle,
+                    lineHeight = PT.bodyHeight,
                     fontWeight = FontWeight.Bold,
                     color = PaperInk,
                     maxLines = 3,
@@ -1095,7 +1124,7 @@ private fun PaperCardRow(
                 Text(
                     text = paper.subtitleLine(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = PT.micro,
                     color = PaperMuted,
                     maxLines = 2,
                     overflow = TextOverflow.Ellipsis
@@ -1183,7 +1212,7 @@ private fun PaginationBar(
                     Text(
                         text = "…",
                         fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
+                        fontSize = PT.micro,
                         color = PaperFaint,
                         modifier = Modifier.padding(horizontal = 3.dp)
                     )
@@ -1205,7 +1234,7 @@ private fun PaginationBar(
         Text(
             text = "Page $page of $pageCount · $PAPERS_PER_PAGE per page · $total papers",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.sp,
+            fontSize = PT.overline,
             color = PaperFaint,
             textAlign = TextAlign.Center,
             modifier = Modifier
@@ -1230,7 +1259,7 @@ private fun PagePill(number: Int, selected: Boolean, onClick: () -> Unit) {
         Text(
             text = number.toString(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = PT.micro,
             fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.SemiBold,
             color = if (selected) Color.White else PaperInk
         )
@@ -1286,14 +1315,14 @@ private fun OfflineNotice(onRefresh: () -> Unit) {
         Text(
             text = "Showing the last papers this phone loaded.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = PT.micro,
             color = Color(0xFF92400E),
             modifier = Modifier.weight(1f)
         )
         Text(
             text = "Refresh",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = PT.micro,
             fontWeight = FontWeight.Bold,
             color = Color(0xFF92400E),
             modifier = Modifier
@@ -1343,7 +1372,7 @@ private fun LibraryOfflineState(
         Text(
             text = "No papers yet",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 16.sp,
+            fontSize = PT.section,
             fontWeight = FontWeight.ExtraBold,
             color = PaperInk
         )
@@ -1351,8 +1380,8 @@ private fun LibraryOfflineState(
         Text(
             text = "The library returned nothing. If you are on a new server, check the connection; otherwise pull again.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.sp,
-            lineHeight = 17.sp,
+            fontSize = PT.meta,
+            lineHeight = PT.metaHeight,
             color = PaperMuted,
             modifier = Modifier.padding(horizontal = 10.dp)
         )
@@ -1369,7 +1398,7 @@ private fun LibraryOfflineState(
                 Text(
                     text = "Try again",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
+                    fontSize = PT.meta,
                     fontWeight = FontWeight.Bold,
                     color = Color.White,
                     modifier = Modifier.padding(horizontal = 26.dp)
@@ -1380,7 +1409,7 @@ private fun LibraryOfflineState(
         Text(
             text = if (showServer) "Hide server settings" else "Server settings",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 12.5.sp,
+            fontSize = PT.micro,
             fontWeight = FontWeight.SemiBold,
             color = PaperMuted,
             modifier = Modifier
@@ -1394,7 +1423,7 @@ private fun LibraryOfflineState(
                 onValueChange = { urlDraft = it },
                 singleLine = true,
                 label = {
-                    Text("Server URL", fontSize = 12.sp, fontFamily = MaisonNeueFontFamily)
+                    Text("Server URL", fontSize = PT.micro, fontFamily = MaisonNeueFontFamily)
                 },
                 shape = RoundedCornerShape(14.dp),
                 modifier = Modifier.fillMaxWidth()
@@ -1416,7 +1445,7 @@ private fun LibraryOfflineState(
                         Text(
                             text = "Save & retry",
                             fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
+                            fontSize = PT.meta,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
                             modifier = Modifier.padding(horizontal = 18.dp)
@@ -1426,7 +1455,7 @@ private fun LibraryOfflineState(
                 Text(
                     text = if (isLiveDatabase) "Connected" else "Not connected",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
+                    fontSize = PT.micro,
                     color = PaperMuted,
                     modifier = Modifier.align(Alignment.CenterVertically)
                 )
@@ -1447,7 +1476,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
         Text(
             text = "Nothing matches",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 16.sp,
+            fontSize = PT.section,
             fontWeight = FontWeight.ExtraBold,
             color = PaperInk
         )
@@ -1455,7 +1484,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
         Text(
             text = "Try a different subject, year or medium.",
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.sp,
+            fontSize = PT.meta,
             color = PaperMuted
         )
         Spacer(Modifier.height(16.dp))
@@ -1470,7 +1499,7 @@ private fun EmptyResultsState(onClear: () -> Unit) {
                 Text(
                     text = "Clear filters",
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.5.sp,
+                    fontSize = PT.meta,
                     fontWeight = FontWeight.Bold,
                     color = PaperInk,
                     modifier = Modifier.padding(horizontal = 22.dp)
@@ -1518,7 +1547,7 @@ private fun CircleIconButton(
                 Text(
                     text = badge.toString(),
                     fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
+                    fontSize = PT.overline,
                     fontWeight = FontWeight.Bold,
                     color = Color.White
                 )
@@ -1542,7 +1571,7 @@ private fun PillChip(label: String, selected: Boolean, tag: String, onClick: () 
             Text(
                 text = label,
                 fontFamily = MaisonNeueFontFamily,
-                fontSize = 13.sp,
+                fontSize = PT.meta,
                 fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
                 color = if (selected) Color.White else PaperMuted,
                 maxLines = 1
@@ -1562,7 +1591,7 @@ private fun MiniBadge(text: String, color: Color, background: Color) {
         Text(
             text = text,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 10.5.sp,
+            fontSize = PT.overline,
             fontWeight = FontWeight.Bold,
             color = color,
             maxLines = 1
@@ -1619,7 +1648,7 @@ private fun FilterGroup(title: String, content: @Composable () -> Unit) {
         Text(
             text = title.uppercase(),
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.5.sp,
+            fontSize = PT.overline,
             fontWeight = FontWeight.ExtraBold,
             color = PaperInk,
             letterSpacing = 1.sp,

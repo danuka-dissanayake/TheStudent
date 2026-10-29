@@ -97,8 +97,18 @@ Pagination is fixed at `PAPERS_PER_PAGE = 15`. The bar is the **last item of the
 LazyColumn**, not an overlay: it scrolls up with the list and comes to rest under
 the final row, showing `‹ 1 2 3 … N ›` (a windowed number set around the current
 page) plus "Page x of y · 15 per page · N papers". Changing the query, chip,
-filter or sort returns to page 1; changing page scrolls the list to the top under
-a short shimmer.
+filter or sort returns to page 1.
+
+Tapping a page number:
+
+1. sets `isSettling`, so the rows are replaced by skeletons immediately;
+2. scrolls to `resultsStartIndex` (`1`, plus one when the offline notice is
+   showing) — the top of the **first paper or scheme**, not the top of the whole
+   screen, so the search field stays where the student left it;
+3. restores the new page after ~300 ms.
+
+The scroll is skipped on first composition, so opening the screen still shows the
+search field rather than jumping past it.
 
 ---
 
@@ -130,7 +140,28 @@ returns instead.
 
 ---
 
-## 7. Empty and offline states
+## 7. Type scale
+
+Every size on this screen comes from `PT`, the same shape as the dashboard's
+`HT` and the course collection's `CT` — named roles instead of a dozen one-off
+values, so nothing drifts by half a point:
+
+| Role | Size | Used for |
+|---|---|---|
+| `screen` | 21sp | "Past papers" in the top bar |
+| `section` | 18sp | sheet headings, empty-state headlines |
+| `cardTitle` | 15sp | paper title in the roomy layout |
+| `body` | 14sp | paper title in the compact row, buttons |
+| `meta` | 13sp | metadata lines, sheet options, body copy |
+| `micro` | 12sp | subtitles, badges, page pills |
+| `overline` | 11sp | subject code, page label, tiny counters |
+
+`PaperDetailDialog` repeats the same ramp as `DT`, so the list and the sheet it
+opens read as one surface.
+
+---
+
+## 8. Empty and offline states
 
 Dispatch order: skeletons → no papers at all (`LibraryOfflineState`, which offers
 retry and the server URL) → no results for the current filters
