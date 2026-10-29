@@ -792,7 +792,17 @@ fun PapersScreen(
                                     page = safePage,
                                     pageCount = pageCount,
                                     total = visible.size,
-                                    onPage = { target -> page = target }
+                                    // Every page tap is a change of scene: the
+                                    // rows give way to skeletons, the list jumps
+                                    // to the first paper, then the new page lands.
+                                    onPage = { target ->
+                                        page = target
+                                        isSettling = true
+                                        settleScope.launch {
+                                            delay(300)
+                                            isSettling = false
+                                        }
+                                    }
                                 )
                             }
                         }
