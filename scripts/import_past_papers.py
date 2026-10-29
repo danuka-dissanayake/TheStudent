@@ -322,7 +322,8 @@ class Item:
         return text
 
     def label(self) -> str:
-        return f"{self.subject} {self.year} ({self.medium})"
+        """What the progress line shows — the row title, so the log matches."""
+        return self.title
 
 
 # ── discovery ────────────────────────────────────────────────────────────────
@@ -930,7 +931,7 @@ def upload_all(
             if waited < 1.1:
                 time.sleep(1.1 - waited)
 
-        stamp = f"[{index:>4}/{len(queue)}] {paper.label():<46}"
+        stamp = f"[{index:>4}/{len(queue)}] {paper.label():<56}"
         attempt = 0
         while True:
             attempt += 1
