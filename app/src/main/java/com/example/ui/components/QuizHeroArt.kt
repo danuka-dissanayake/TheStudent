@@ -115,8 +115,14 @@ private val HERO_LOOKS: List<Pair<List<String>, HeroLook>> = listOf(
 /** Anything that matched nothing: a quiet study photograph on emerald. */
 private val DEFAULT_LOOK = HeroLook("8199558", Color(0xFF065F46), Color(0xFF6EE7B7))
 
-/** The look a quiz earns, from its own words. Deterministic by design. */
-fun quizHeroLook(quiz: QuizSummary): HeroLook {
+/**
+ * The look a quiz earns, from its own words. Deterministic by design.
+ *
+ * Private because [HeroLook] is private to this file — a public function cannot
+ * hand out a type nobody outside can name. If another screen ever needs the
+ * theme, promote both to internal rather than just this one.
+ */
+private fun quizHeroLook(quiz: QuizSummary): HeroLook {
     val text = "${quiz.subject} ${quiz.title} ${quiz.description}".lowercase()
     return HERO_LOOKS.firstOrNull { (words, _) -> words.any { text.contains(it) } }?.second
         ?: DEFAULT_LOOK
