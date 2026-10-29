@@ -665,3 +665,27 @@ Accepted values — the same ones the app and the schema use:
 | `medium` | `English`, `Sinhala`, `Tamil` |
 | `status` | `draft`, `published`, `archived` |
 
+
+---
+
+## Quiz hub: the same treatments as the papers library
+
+The Quizzes segment (`QuizzesScreen.kt`, `QuizzesSegment`) now mirrors the papers
+screen it shares a tab with:
+
+| Papers | Quizzes |
+|---|---|
+| Submit-only search + white search button | same, with its own rotating hints |
+| 15 per page, page bar as the list's last item | same (`QUIZZES_PER_PAGE`) |
+| Only the top bar pinned | same — the Papers/Quizzes pills now scroll with the content, passed in through `topContent` |
+| Shimmer on entry, refresh, search, filter, page | same (`isLoading || isSettling`) |
+| Word-AND search with subject codes | `matchesQuizQuery`, same rules, plus `QUIZ_SEARCH_SYNONYMS` |
+
+Both screens use a named type scale (`PT` for papers, `QT` for quizzes) with the
+same roles and sizes (18 / 15 / 14 / 13 / 12 / 11), so the two halves of the tab
+read as one screen.
+
+The focus-dismiss observer is installed once per segment: the papers one is
+scoped with `pointerInput(segment)` and returns early unless papers are showing,
+and the quizzes segment installs its own for its own field, so the two never
+fight over the same tap.

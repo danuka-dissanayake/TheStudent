@@ -536,7 +536,10 @@ fun PapersScreen(
             // way every other search box on the phone behaves. This watches the
             // Initial pass and consumes nothing, so scrolling, row taps, chips
             // and the keyboard itself all keep working as before.
-            .pointerInput(Unit) {
+            .pointerInput(segment) {
+                // The quizzes segment installs its own handler for its own field;
+                // two observers would fight over every tap.
+                if (segment != 0) return@pointerInput
                 awaitPointerEventScope {
                     while (true) {
                         val event = awaitPointerEvent(PointerEventPass.Initial)
@@ -629,27 +632,6 @@ fun PapersScreen(
         }
 
         if (segment == 1) {
-            // ── segment pills: papers | quizzes ────────────────────────────
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                SegmentPill(
-                    label = "Papers",
-                    selected = segment == 0,
-                    tag = "segment_papers",
-                    onClick = { onSegmentChange(0) }
-                )
-                SegmentPill(
-                    label = "Quizzes",
-                    selected = segment == 1,
-                    tag = "segment_quizzes",
-                    onClick = { onSegmentChange(1) }
-                )
-            }
-
             QuizzesSegment(
                 quizzes = quizzes,
                 isLoading = isQuizLoading,
@@ -658,6 +640,28 @@ fun PapersScreen(
                 onOpenQuiz = onOpenQuiz,
                 onRefresh = onRefreshQuizzes,
                 onOpenProgress = onOpenQuizProgress,
+                // The pills scroll with the quiz content; only the top bar stays.
+                topContent = {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 6.dp),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        SegmentPill(
+                            label = "Papers",
+                            selected = segment == 0,
+                            tag = "segment_papers",
+                            onClick = { onSegmentChange(0) }
+                        )
+                        SegmentPill(
+                            label = "Quizzes",
+                            selected = segment == 1,
+                            tag = "segment_quizzes",
+                            onClick = { onSegmentChange(1) }
+                        )
+                    }
+                },
                 modifier = Modifier.fillMaxSize()
             )
         } else {
