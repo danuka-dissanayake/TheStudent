@@ -675,7 +675,6 @@ class MainActivity : ComponentActivity() {
                                                             activeLessonId = uiState.activeLessonId,
                                                             lessonStepIndex = uiState.lessonStepIndex,
                                                             isLessonComplete = uiState.isLessonComplete,
-                                                            hfStatusMessage = uiState.hfStatusMessage,
                                                             onStartCall = { viewModel.startTutorCall() },
                                                             onEndCall = { viewModel.endTutorCall() },
                                                             onExit = { viewModel.setTab(TheStudentNavTab.HOME) },

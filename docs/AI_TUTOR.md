@@ -382,3 +382,32 @@ glyphs, the same gentle 1.5 s pulse.
 
 Mockups: `designs/41a-tutor-idle-cloud-orb.png`,
 `designs/41b-tutor-live-cloud-orb.png`.
+
+### 11.7 Round 19c — the orb runs on the GPU, the idle page loses its status line
+
+**Why the orb looked like 144p.** It was a 96 × 96 bitmap stretched to ~600
+physical pixels, and the CPU loop could not afford more. Now, from Android 13
+(API 33), the very same maths is compiled by AGSL into a `RuntimeShader` and
+drawn by the canvas: one evaluation per *device* pixel, every frame, so there is
+no texture to upscale and no staircase on the contour. The frame loop is driven
+by `withFrameNanos`, i.e. the display's own vsync — the orb re-draws at the
+screen's refresh rate instead of a 30 fps budget, which is what fixes the
+stutter while the tutor speaks.
+
+**Fallback.** `android.os.Build.VERSION.SDK_INT < 33`, or a driver that refuses
+the program, silently keeps the CPU renderer (`OrbClouds`, 96 px, 30 fps). The
+API check and the `catch` live in `createOrbGpu()`, *outside* the class that
+mentions `RuntimeShader`, so an old device never resolves the missing type.
+
+**Shader notes.** Uniforms are `uOrigin`/`uSize` (the square the canvas is about
+to fill, in local pixels — Skia evaluates shaders in local space, so the
+entrance scale does not skew them), `uTime` (the integrated flow) and
+`uActivity`. Output is premultiplied. Note that AGSL needs a constant loop bound
+(the fBm has none of the `while` loops the Kotlin version uses).
+
+**Removed text.** The idle page had a small line under the cards that printed the
+model host status ("Qwen…", then "Connected"). The user does not want to see the
+plumbing, so the line — and the now-unused `hfStatusMessage` parameter — is gone.
+The cards now sit closer to the mic.
+
+Mockup: `designs/42a-orb-quality.png` (before / after).

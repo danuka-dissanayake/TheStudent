@@ -160,7 +160,6 @@ fun AiTutorScreen(
     activeLessonId: String?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
-    hfStatusMessage: String,
     onStartCall: () -> Unit,
     onEndCall: () -> Unit,
     /** Leave the tutor tab entirely (the idle screen's back button). */
@@ -244,7 +243,6 @@ fun AiTutorScreen(
                 studentName = studentName,
                 scenario = currentScenario,
                 lesson = lesson,
-                status = hfStatusMessage,
                 onMic = { startWithPermission() },
                 onMenu = {
                     menuLessons = activeLessonId != null
@@ -447,7 +445,6 @@ private fun IdleContent(
     studentName: String,
     scenario: String,
     lesson: TutorLesson?,
-    status: String,
     onMic: () -> Unit,
     onMenu: () -> Unit,
     onExit: () -> Unit,
@@ -532,17 +529,6 @@ private fun IdleContent(
                 }
 
                 Spacer(Modifier.weight(0.3f))
-                Text(
-                    text = status,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
-                    color = Faint,
-                    textAlign = TextAlign.Center,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.fillMaxWidth()
-                )
-                Spacer(Modifier.height(6.dp))
             }
         }
 
