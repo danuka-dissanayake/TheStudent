@@ -70,6 +70,13 @@ out, and the first is better:
    bash hf-space/deploy.sh --gradio
    ```
 
+   On the Gradio SDK the platform installs its own pinned stack — `torch`,
+   `gradio[oauth]==5.15.0`, `spaces==0.51.3`, `uvicorn` — on top of every
+   `requirements.txt`. `requirements-gradio.txt` therefore pins **nothing the
+   platform owns**: pinning `spaces` there makes pip fail with
+   `ResolutionImpossible`. It contains only `llama-cpp-python` and a
+   `huggingface_hub` floor.
+
    The phone app is unaffected: it still calls `POST /v1/chat/completions`. The
    model runs on the CPU part of the container either way, because ZeroGPU only
    hands a GPU to a `@spaces.GPU`-decorated function and the weights are loaded

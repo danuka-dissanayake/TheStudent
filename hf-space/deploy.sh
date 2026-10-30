@@ -65,9 +65,10 @@ if [[ "$GRADIO" == true ]]; then
   cp "$HERE/gradio_app.py" ./app.py
   cp "$HERE/requirements-gradio.txt" ./requirements.txt
   rm -f ./Dockerfile
-  # Front matter must describe a Gradio Space, and the SDK version is pinned so a
-  # redeploy is reproducible. python3 strips the old front matter rather than sed:
-  # the README body contains '---' of its own, and a range-based sed eats it.
+  # Front matter must describe a Gradio Space. sdk_version is pinned to the one the
+  # platform itself installs; python_version is left out so the SDK's base image
+  # decides it (the platform ships 3.10 for gradio 5.x — setting 3.11 here is how a
+  # Space ends up building against a Python it will not run on).
   python3 - "$HERE/README.md" > ./README.md <<'PY'
 import sys
 
@@ -82,7 +83,6 @@ colorTo: blue
 sdk: gradio
 sdk_version: 5.15.0
 app_file: app.py
-python_version: "3.11"
 pinned: false
 short_description: OpenAI-compatible voice tutor backend for The Student app
 ---

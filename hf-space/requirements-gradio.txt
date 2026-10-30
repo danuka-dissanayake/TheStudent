@@ -1,9 +1,19 @@
-# Gradio-SDK variant. Same four runtime dependencies plus the two the Gradio
-# Space platform insists on. No torch, no transformers, no accelerate: the model
-# is a GGUF file read by llama.cpp.
-fastapi==0.115.6
-uvicorn[standard]==0.34.0
+# Gradio-SDK variant.
+#
+# Keep this file SHORT. On the Gradio SDK the Space platform installs its own
+# pinned stack on top of whatever is here:
+#
+#     pip install -r requirements.txt "torch<=2.13.0" gradio[oauth]==5.15.0 \
+#                 "uvicorn>=0.14.0" "websockets>=10.4" spaces==0.51.3
+#
+# so pinning gradio, spaces, uvicorn, fastapi or torch here does not "control"
+# them — it makes pip refuse the install (ResolutionImpossible). The platform
+# base image also already provides fastapi and huggingface_hub>=0.30, which is
+# everything tutor_api.py imports.
+#
+# The CPU wheel index matters: without it pip builds llama.cpp from a 65 MB
+# sdist on every rebuild (~10 minutes); with it the build is a download.
+
+--extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
 llama-cpp-python==0.3.2
-huggingface_hub==0.27.1
-gradio==5.15.0
-spaces==0.30.1
+huggingface_hub>=0.30
