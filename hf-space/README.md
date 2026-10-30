@@ -70,12 +70,19 @@ out, and the first is better:
    bash hf-space/deploy.sh --gradio
    ```
 
-   On the Gradio SDK the platform installs its own pinned stack — `torch`,
-   `gradio[oauth]==5.15.0`, `spaces==0.51.3`, `uvicorn` — on top of every
-   `requirements.txt`. `requirements-gradio.txt` therefore pins **nothing the
-   platform owns**: pinning `spaces` there makes pip fail with
-   `ResolutionImpossible`. It contains only `llama-cpp-python` and a
-   `huggingface_hub` floor.
+   Two rules for this path, both learned on this Space:
+
+   * **Never pin a package the platform pins.** The Gradio SDK installs `torch`,
+     `gradio[oauth]==5.15.0`, `spaces==0.51.3`, `uvicorn` and `websockets` on top
+     of `requirements.txt`; a second pin fails with `ResolutionImpossible`.
+   * **Never trust the prebuilt CPU wheel index.** It has shipped musl builds
+     (`libc.musl-x86_64.so.1: cannot open shared object file`) to this glibc
+     image. `requirements-gradio.txt` builds `llama-cpp-python` from source
+     (`--no-binary`), with the compiler from `packages.txt`.
+
+   `tutor_api.py` also imports `llama_cpp` lazily, so a broken library cannot
+   stop the container: `/health` returns `503 {"status":"error","error":"…"}` with
+   the real reason instead of a crash loop.
 
    The phone app is unaffected: it still calls `POST /v1/chat/completions`. The
    model runs on the CPU part of the container either way, because ZeroGPU only
@@ -87,6 +94,7 @@ out, and the first is better:
 ```bash
 export HF_TOKEN=hf_...          # a WRITE token for the Space
 ./deploy.sh                    # clean + push (Docker SDK)
+./deploy.sh --gradio           # Gradio SDK + packages.txt, for ZeroGPU
 ./deploy.sh --gradio           # Gradio SDK, for ZeroGPU hardware
 ./deploy.sh --dry-run          # show what would change
 ./deploy.sh --no-prune         # push the code, delete nothing

@@ -64,6 +64,7 @@ if [[ "$GRADIO" == true ]]; then
   cp "$HERE/app.py" ./tutor_api.py
   cp "$HERE/gradio_app.py" ./app.py
   cp "$HERE/requirements-gradio.txt" ./requirements.txt
+  cp "$HERE/packages.txt" ./packages.txt
   rm -f ./Dockerfile
   # Front matter must describe a Gradio Space. sdk_version is pinned to the one the
   # platform itself installs; python_version is left out so the SDK's base image
@@ -94,7 +95,7 @@ else
   cp "$HERE/requirements.txt" ./requirements.txt
   cp "$HERE/Dockerfile" ./Dockerfile
   cp "$HERE/README.md" ./README.md
-  rm -f ./tutor_api.py
+  rm -f ./tutor_api.py ./packages.txt
 fi
 
 if [[ "$PRUNE" == true ]]; then

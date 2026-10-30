@@ -1,19 +1,16 @@
 # Gradio-SDK variant.
 #
-# Keep this file SHORT. On the Gradio SDK the Space platform installs its own
-# pinned stack on top of whatever is here:
+# Two rules learned the hard way on this Space:
 #
-#     pip install -r requirements.txt "torch<=2.13.0" gradio[oauth]==5.15.0 \
-#                 "uvicorn>=0.14.0" "websockets>=10.4" spaces==0.51.3
+# 1. Never pin a package the platform pins. On the Gradio SDK it pip-installs
+#    torch, gradio[oauth]==5.15.0, uvicorn, websockets and spaces==0.51.3 on top
+#    of this file; a second pin makes pip fail with ResolutionImpossible.
 #
-# so pinning gradio, spaces, uvicorn, fastapi or torch here does not "control"
-# them — it makes pip refuse the install (ResolutionImpossible). The platform
-# base image also already provides fastapi and huggingface_hub>=0.30, which is
-# everything tutor_api.py imports.
-#
-# The CPU wheel index matters: without it pip builds llama.cpp from a 65 MB
-# sdist on every rebuild (~10 minutes); with it the build is a download.
-
---extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu
+# 2. Never trust the prebuilt CPU wheel index here. It has served musl builds
+#    ("libc.musl-x86_64.so.1: cannot open shared object file") to this glibc
+#    container, which kills the app the moment it imports llama_cpp. Building
+#    from source is a few minutes on a cached rebuild and is glibc-correct every
+#    time — the compiler comes from packages.txt.
+no-binary llama-cpp-python
 llama-cpp-python==0.3.2
 huggingface_hub>=0.30

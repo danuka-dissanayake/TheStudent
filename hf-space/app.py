@@ -41,7 +41,15 @@ from typing import Any
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from huggingface_hub import hf_hub_download, list_repo_files
-from llama_cpp import Llama
+
+# `llama_cpp` is imported *inside* the loader, not here.
+#
+# Its wheels are the least predictable part of this image: the prebuilt "CPU"
+# index has shipped musl builds that die on a glibc container with
+# "libc.musl-x86_64.so.1: cannot open shared object file". An import at module
+# scope turns that into a container that never starts, and a Space that will not
+# start cannot tell you why. Importing lazily means the API still comes up and
+# /health reports the real error.
 
 # ── configuration ────────────────────────────────────────────────────────────
 # Everything is an env var, so the Space can be re-pointed without editing code.
@@ -72,9 +80,10 @@ THINK_BLOCK = re.compile(r"<think\b[^>]*>.*?<｜end▁of▁thinking｜>", re.DOT
 # Gemma's turn markers, used only if the GGUF has no chat template baked in.
 GEMMA_TURN_END = "<end_of_turn>"
 
-llm: Llama | None = None
+llm: Any = None
 model_ready = False
 load_started = False
+load_error = ""
 _load_lock = threading.Lock()
 has_chat_template = True
 model_label = MODEL_FILE or DEFAULT_REPO
@@ -120,12 +129,19 @@ def load_model() -> None:
     Guarded so that two entrypoints (the Docker lifespan and the Gradio shim)
     can both ask for it without loading the weights twice.
     """
-    global llm, model_ready, has_chat_template, model_label, load_started
+    global llm, model_ready, has_chat_template, model_label, load_started, load_error
 
     with _load_lock:
         if load_started:
             return
         load_started = True
+
+    try:
+        from llama_cpp import Llama
+    except Exception as error:  # noqa: BLE001 - reported by /health
+        load_error = f"llama_cpp could not load: {error}"
+        print(f"[tutor] {load_error}", flush=True)
+        return
 
     local_path = os.getenv("MODEL_PATH", "").strip()
     if not local_path:
@@ -138,15 +154,20 @@ def load_model() -> None:
         print(f"[tutor] using {MODEL_REPO}/{filename}", flush=True)
 
     started = time.time()
-    llm = Llama(
-        model_path=local_path,
-        n_ctx=N_CTX,
-        n_threads=N_THREADS,
-        n_batch=256,
-        use_mmap=True,
-        use_mlock=False,
-        verbose=False,
-    )
+    try:
+        llm = Llama(
+            model_path=local_path,
+            n_ctx=N_CTX,
+            n_threads=N_THREADS,
+            n_batch=256,
+            use_mmap=True,
+            use_mlock=False,
+            verbose=False,
+        )
+    except Exception as error:  # noqa: BLE001 - reported by /health
+        load_error = f"model could not be loaded: {error}"
+        print(f"[tutor] {load_error}", flush=True)
+        return
     has_chat_template = bool(
         (getattr(llm, "metadata", {}) or {}).get("tokenizer.chat_template")
     )
@@ -315,8 +336,13 @@ def generate(
 def health() -> JSONResponse:
     if not model_ready:
         # 503 is what the app already treats as "waking up", and it is honest: the
-        # container is up but cannot serve a real request yet.
-        return JSONResponse({"status": "warming_up", "model": model_label}, status_code=503)
+        # container is up but cannot serve a real request yet. `error` is filled in
+        # when the failure is permanent (a bad wheel, a missing quant), so the
+        # Space's own URL tells you what is wrong instead of a container log.
+        body: dict[str, Any] = {"status": "warming_up", "model": model_label}
+        if load_error:
+            body = {"status": "error", "model": model_label, "error": load_error}
+        return JSONResponse(body, status_code=503)
     return JSONResponse({"status": "ok", "model": model_label})
 
 
@@ -334,11 +360,13 @@ def models() -> dict[str, Any]:
 
 @app.get("/", response_class=HTMLResponse)
 def root() -> str:
-    state = "ready" if model_ready else "warming up"
+    state = "ready" if model_ready else ("failed" if load_error else "warming up")
+    error_html = f"<p style='color:#b00'><b>{load_error}</b></p>" if load_error else ""
     return (
         "<html><body style='font-family:system-ui;padding:40px'>"
         "<h2>Miss Emma tutor backend</h2>"
         f"<p>Status: <b>{state}</b></p>"
+        f"{error_html}"
         f"<p>Model: <code>{MODEL_REPO}/{model_label}</code></p>"
         "<p>Endpoint: <code>POST /v1/chat/completions</code></p>"
         "</body></html>"
