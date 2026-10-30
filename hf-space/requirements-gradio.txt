@@ -1,0 +1,9 @@
+# Gradio-SDK variant. Same four runtime dependencies plus the two the Gradio
+# Space platform insists on. No torch, no transformers, no accelerate: the model
+# is a GGUF file read by llama.cpp.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+llama-cpp-python==0.3.2
+huggingface_hub==0.27.1
+gradio==5.15.0
+spaces==0.30.1

@@ -55,11 +55,32 @@ reasoning in silence. Gemma has no such mode and is left untouched.
 - `POST /v1/chat/completions` — the only endpoint the app calls
 - `GET /` — a status page, so opening the Space URL shows something useful
 
+## ZeroGPU Spaces
+
+ZeroGPU hardware is only offered on the **Gradio** SDK — a Space pinned to it
+refuses a Dockerfile with *"ZeroGPU is only available on Gradio SDK"*. Two ways
+out, and the first is better:
+
+1. **Settings → Hardware → `CPU basic · 2 vCPU · 16 GB · FREE`.** The Docker
+   image then builds as written. Nothing in this folder changes.
+2. **Keep ZeroGPU:** deploy the Gradio variant, which mounts the same API inside a
+   Gradio app (`app.py` = `gradio_app.py`, the server becomes `tutor_api.py`):
+
+   ```bash
+   bash hf-space/deploy.sh --gradio
+   ```
+
+   The phone app is unaffected: it still calls `POST /v1/chat/completions`. The
+   model runs on the CPU part of the container either way, because ZeroGPU only
+   hands a GPU to a `@spaces.GPU`-decorated function and the weights are loaded
+   long before any call. For real GPU speed, use a paid GPU with the Docker image.
+
 ## Deploying from this folder
 
 ```bash
 export HF_TOKEN=hf_...          # a WRITE token for the Space
-./deploy.sh                    # clean + push
+./deploy.sh                    # clean + push (Docker SDK)
+./deploy.sh --gradio           # Gradio SDK, for ZeroGPU hardware
 ./deploy.sh --dry-run          # show what would change
 ./deploy.sh --no-prune         # push the code, delete nothing
 ```

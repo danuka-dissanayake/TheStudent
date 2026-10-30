@@ -74,6 +74,8 @@ GEMMA_TURN_END = "<end_of_turn>"
 
 llm: Llama | None = None
 model_ready = False
+load_started = False
+_load_lock = threading.Lock()
 has_chat_template = True
 model_label = MODEL_FILE or DEFAULT_REPO
 generate_lock = threading.Lock()
@@ -113,8 +115,17 @@ def _pick_quant(repo_id: str) -> str:
 
 
 def load_model() -> None:
-    """Download (once) and load the quantised model, then warm it up."""
-    global llm, model_ready, has_chat_template, model_label
+    """Download (once) and load the quantised model, then warm it up.
+
+    Guarded so that two entrypoints (the Docker lifespan and the Gradio shim)
+    can both ask for it without loading the weights twice.
+    """
+    global llm, model_ready, has_chat_template, model_label, load_started
+
+    with _load_lock:
+        if load_started:
+            return
+        load_started = True
 
     local_path = os.getenv("MODEL_PATH", "").strip()
     if not local_path:
@@ -156,11 +167,16 @@ def load_model() -> None:
     )
 
 
+def start_loader() -> None:
+    """Begin loading in the background, off whatever loop is serving requests."""
+    threading.Thread(target=load_model, daemon=True).start()
+
+
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     # Loading runs off the event loop so /health can answer "warming up" instead
     # of the platform deciding the container is dead.
-    threading.Thread(target=load_model, daemon=True).start()
+    start_loader()
     yield
 
 

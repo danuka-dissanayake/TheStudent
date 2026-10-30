@@ -61,6 +61,9 @@ Everything here is dead weight that slows every rebuild and every cold start:
 - [ ] **Do not commit the weights.** The backend downloads the quant at boot and
       caches it in `/data`; a committed `.gguf` is only LFS quota and a slower
       clone, and `deploy.sh` deletes it.
+- [ ] **Hardware vs SDK.** ZeroGPU can only run the Gradio SDK, so either switch
+      the hardware to *CPU basic* (free, keeps the Dockerfile) or deploy with
+      `./deploy.sh --gradio`. See the README section *ZeroGPU Spaces*.
 - [ ] **Sleep time.** Free Spaces sleep; the first call after sleep is the ~60 s
       cold start. Either accept it (the app shows "waking up") or pay for
       "always on" — but do not paper over it with a shorter timeout in the app.

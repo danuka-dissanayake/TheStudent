@@ -9,6 +9,7 @@
 #   ./hf-space/deploy.sh              # clean + push
 #   ./hf-space/deploy.sh --no-prune   # push only, keep every existing file
 #   ./hf-space/deploy.sh --dry-run    # show what would change
+#   ./hf-space/deploy.sh --gradio     # ZeroGPU Spaces: Gradio SDK, no Dockerfile
 #
 # The Space is a git repo: https://huggingface.co/spaces/danuka21/Qwen3.8-27B
 set -euo pipefail
@@ -19,10 +20,12 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 PRUNE=true
 DRY_RUN=false
+GRADIO=false
 for arg in "$@"; do
   case "$arg" in
     --no-prune) PRUNE=false ;;
     --dry-run) DRY_RUN=true ;;
+    --gradio) GRADIO=true ;;
     -h|--help) sed -n '2,16p' "$0"; exit 0 ;;
     *) echo "unknown option: $arg" >&2; exit 2 ;;
   esac
@@ -55,10 +58,44 @@ du -sh . 2>/dev/null || true
 find . -maxdepth 2 -name '*.gguf' -printf '    %10s  %p\n' 2>/dev/null | sort -nr | head -10 || true
 
 echo "==> installing the tutor backend"
-cp "$HERE/app.py" ./app.py
-cp "$HERE/requirements.txt" ./requirements.txt
-cp "$HERE/Dockerfile" ./Dockerfile
-cp "$HERE/README.md" ./README.md
+if [[ "$GRADIO" == true ]]; then
+  # ZeroGPU hardware only accepts the Gradio SDK, so the API is mounted inside a
+  # Gradio app instead of being served by uvicorn from a Dockerfile.
+  cp "$HERE/app.py" ./tutor_api.py
+  cp "$HERE/gradio_app.py" ./app.py
+  cp "$HERE/requirements-gradio.txt" ./requirements.txt
+  rm -f ./Dockerfile
+  # Front matter must describe a Gradio Space, and the SDK version is pinned so a
+  # redeploy is reproducible. python3 strips the old front matter rather than sed:
+  # the README body contains '---' of its own, and a range-based sed eats it.
+  python3 - "$HERE/README.md" > ./README.md <<'PY'
+import sys
+
+text = open(sys.argv[1], encoding="utf-8").read()
+body = text.split("---", 2)[2].lstrip("\n") if text.startswith("---") else text
+
+print("""---
+title: Miss Emma Tutor
+emoji: \U0001F399\uFE0F
+colorFrom: green
+colorTo: blue
+sdk: gradio
+sdk_version: 5.15.0
+app_file: app.py
+python_version: "3.11"
+pinned: false
+short_description: OpenAI-compatible voice tutor backend for The Student app
+---
+""")
+print(body, end="")
+PY
+else
+  cp "$HERE/app.py" ./app.py
+  cp "$HERE/requirements.txt" ./requirements.txt
+  cp "$HERE/Dockerfile" ./Dockerfile
+  cp "$HERE/README.md" ./README.md
+  rm -f ./tutor_api.py
+fi
 
 if [[ "$PRUNE" == true ]]; then
   echo "==> removing what the app never uses"
@@ -100,7 +137,14 @@ fi
 git config user.email "${GIT_AUTHOR_EMAIL:-deploy@thestudent.local}"
 git config user.name "${GIT_AUTHOR_NAME:-TheStudent deploy}"
 git add -A
-git commit -m "Tutor backend: one GGUF model, OpenAI-compatible API, nothing else
+if [[ "$GRADIO" == true ]]; then
+  COMMIT_MSG="Tutor backend on the Gradio SDK (ZeroGPU hardware): API mounted, one GGUF model"
+else
+  COMMIT_MSG="Tutor backend: one GGUF model, OpenAI-compatible API, nothing else"
+fi
+git commit -m "$COMMIT_MSG
+
+
 
 - app.py: /v1/chat/completions + /health + /v1/models, quant auto-discovered from
   ggml-org/gemma-4-E4B-it-GGUF, max_tokens clamped to the app's budget, n_ctx 2048,
