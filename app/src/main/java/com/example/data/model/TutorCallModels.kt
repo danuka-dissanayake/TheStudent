@@ -16,6 +16,15 @@ package com.example.data.model
 enum class CallPhase { IDLE, CONNECTING, LIVE, ENDED }
 
 /**
+ * State of the on-device voice pack (the Piper model Miss Emma speaks with).
+ *
+ * [MISSING] and [FAILED] both mean "the call cannot start yet", which is why the
+ * idle screen shows a card with a progress bar (or a retry) instead of letting a
+ * conversation begin on the phone's robotic default voice.
+ */
+enum class TutorVoiceState { MISSING, DOWNLOADING, UNPACKING, READY, FAILED }
+
+/**
  * One line of the call, in the order it happened.
  *
  * The screen draws a thread, not a transcript dump: a student line, the

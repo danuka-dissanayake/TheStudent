@@ -522,3 +522,34 @@ end a call at any time.
 `TheStudentPreferences` — versioned, so if the disclosure ever changes materially
 everyone is asked again. Decline merely returns to the previous tab; the screen
 waits for the next visit. Mockup: `designs/44a-tutor-consent.png`.
+
+### 11.12 Round 19g — the voice download becomes a card, and gates the call
+
+The snackbar is gone. The idle screen now owns the download:
+
+- **State.** `TutorVoiceState { MISSING, DOWNLOADING, UNPACKING, READY, FAILED }` in
+  `TutorCallModels.kt`, with `tutorVoiceProgress` (0..1) beside it in the UiState.
+  `PiperNarrator.prepare` reports progress through a callback; the ViewModel
+  publishes it at most once per percent, because a 20 MB file arrives in ~320
+  chunks and writing the UiState on every one would recompose the idle screen
+  hundreds of times.
+- **Card.** `VoiceDownloadCard` replaces the two mode cards until the pack is
+  ready: an icon chip (arrow → waveform → warning), "Her real voice, once", the
+  size, a real 8 dp progress bar in a brand gradient, the percentage on the right
+  and a **Retry** pill when it fails. Tapping the card starts or retries the
+  download. It is the same cream card as the mode tiles, so the page still fits
+  without scrolling on any device.
+- **Gating.** `startTutorCall()` refuses to begin unless the engine is actually
+  loaded, and the screen's `startWithPermission()` routes a microphone tap into
+  "start/retry the download" instead of a call. Nothing ever speaks with the
+  phone's default voice in the middle of a conversation.
+- **When it starts.** `LaunchedEffect(consentGiven, tutorVoiceState)` fires once
+  consent is accepted, so the pack downloads while the student is still reading
+  the greeting rather than after they have tapped.
+- **Robustness.** The model, `tokens.txt` and `espeak-ng-data/` are now searched
+  from the voice root rather than a guessed folder name, so a pack that unpacks
+  into a different top-level directory still loads. The pack is validated by
+  walking the tree (`isDownloaded()`), so a half-written archive is re-downloaded
+  instead of producing an engine that fails to load.
+
+Mockup: `designs/45a-tutor-voice-download.png`.

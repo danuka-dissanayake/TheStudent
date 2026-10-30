@@ -48,7 +48,6 @@ import java.util.concurrent.atomic.AtomicInteger
 class PiperNarrator(private val context: Context) {
 
     private val rootDir = File(context.filesDir, "piper")
-    private val voiceDir = File(rootDir, VOICE_FOLDER)
     private val cacheDir = File(context.cacheDir, "piper").apply { mkdirs() }
     private val main = Handler(Looper.getMainLooper())
     private val worker = Executors.newSingleThreadExecutor()
@@ -64,7 +63,7 @@ class PiperNarrator(private val context: Context) {
 
     /** The voice pack is already on disk, so no download is needed. */
     fun isDownloaded(): Boolean =
-        File(voiceDir, "tokens.txt").exists() && findModel() != null && findEspeakData() != null
+        findTokens() != null && findModel() != null && findEspeakData() != null
 
     /**
      * Download (once), unpack and load the voice.
@@ -284,16 +283,19 @@ class PiperNarrator(private val context: Context) {
         }
     }
 
-    private fun findModel(): File? = voiceDir.walkTopDown()
+    private fun findTokens(): File? = rootDir.walkTopDown()
+        .firstOrNull { it.isFile && it.name == "tokens.txt" }
+
+    private fun findModel(): File? = rootDir.walkTopDown()
         .filter { it.isFile && it.name.endsWith(".onnx", ignoreCase = true) }
         .maxByOrNull { it.length() }
 
-    private fun findEspeakData(): File? = voiceDir.walkTopDown()
+    private fun findEspeakData(): File? = rootDir.walkTopDown()
         .firstOrNull { it.isDirectory && it.name == "espeak-ng-data" }
 
     private fun buildEngine(): OfflineTts? {
         val model = findModel() ?: return null
-        val tokens = voiceDir.walkTopDown().firstOrNull { it.isFile && it.name == "tokens.txt" } ?: return null
+        val tokens = findTokens() ?: return null
         val data = findEspeakData() ?: return null
         // The Android AAR ships the *Kotlin* API: the configs are data classes
         // (named arguments, everything else defaulted) and the engine takes a

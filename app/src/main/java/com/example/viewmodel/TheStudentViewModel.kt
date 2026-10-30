@@ -176,6 +176,17 @@ data class TheStudentUiState(
     val isLessonComplete: Boolean = false,
     /** CEFR level the tutor aims at; raised from the profile once known. */
     val tutorLevel: String = "B1",
+    /**
+     * Miss Emma's on-device voice pack.
+     *
+     * The tutor does not start a call until this is [TutorVoiceState.READY]:
+     * hearing a robotic system voice on the first sentence, and a natural one on
+     * the second, is worse than waiting twenty seconds once. The idle screen
+     * shows a download card while it is in flight.
+     */
+    val tutorVoiceState: TutorVoiceState = TutorVoiceState.MISSING,
+    /** Download progress, 0..1. Reaches 1 again while the pack is unpacking. */
+    val tutorVoiceProgress: Float = 0f,
 
     // Multimodal AI Study Assistant (ChatGPT / Gemini style)
     val isAiAssistantOpen: Boolean = false,
@@ -4051,10 +4062,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun startTutorCall() {
         val state = _uiState.value
         if (state.callPhase == CallPhase.LIVE || state.callPhase == CallPhase.CONNECTING) return
+        // The call waits for the real voice. Nothing starts on the phone's
+        // default engine and then switches mid-conversation.
+        if (!piper.isReady()) {
+            prepareTutorVoice()
+            return
+        }
 
         initTts()
         initSpeechRecognizer()
-        ensureNaturalVoice()
         conversationTurns.clear()
         recognitionMisses = 0
         isTutorTurnInFlight = false
@@ -4326,27 +4342,69 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Fetch and load the neural voice, once.
+     * Download and load Miss Emma's voice, once.
      *
-     * Silent for the user apart from one line of snackbar text on the very first
-     * call: until the pack is on disk the call simply runs on the phone's voice,
-     * and the next call sounds like a person.
+     * This is the **only** place a call is allowed to get its voice from. It is
+     * idempotent: opening the tutor screen, tapping the microphone or tapping the
+     * card all land here, and a second tap while the download is running does
+     * nothing. Progress is published in the UiState so the idle screen can show
+     * a real progress bar instead of a snackbar.
      */
-    private fun ensureNaturalVoice() {
-        if (piper.isReady() || piperJob?.isActive == true) return
-        piperJob = viewModelScope.launch(Dispatchers.IO) {
-            val firstTime = !piper.isDownloaded()
-            if (firstTime) {
-                showSnackbar("Preparing Miss Emma's natural voice — one-time 20 MB download.")
+    fun prepareTutorVoice() {
+        if (piperJob?.isActive == true) return
+        if (piper.isReady()) {
+            _uiState.update {
+                it.copy(tutorVoiceState = TutorVoiceState.READY, tutorVoiceProgress = 1f)
             }
-            val ready = piper.prepare()
-            when {
-                ready && firstTime -> showSnackbar("Miss Emma's natural voice is ready.")
-                ready -> Unit
-                firstTime -> showSnackbar("Natural voice unavailable — using the phone's voice.")
-                else -> Unit
+            return
+        }
+        piperJob = viewModelScope.launch(Dispatchers.IO) {
+            val resuming = piper.isDownloaded()
+            _uiState.update {
+                it.copy(
+                    tutorVoiceState = if (resuming) TutorVoiceState.UNPACKING else TutorVoiceState.DOWNLOADING,
+                    tutorVoiceProgress = if (resuming) 1f else 0f
+                )
+            }
+            // Progress arrives from the download loop, at most once per percent:
+            // writing the UiState on every 64 KB chunk would recompose the idle
+            // screen a thousand times for a 20 MB file.
+            var lastStep = -1
+            val ready = piper.prepare { fraction ->
+                val step = if (fraction < 0f) 101 else (fraction * 100f).toInt()
+                if (step == lastStep) return@prepare
+                lastStep = step
+                _uiState.update { state ->
+                    state.copy(
+                        tutorVoiceState = if (fraction < 0f) {
+                            TutorVoiceState.UNPACKING
+                        } else {
+                            TutorVoiceState.DOWNLOADING
+                        },
+                        tutorVoiceProgress = if (fraction < 0f) 1f else fraction.coerceIn(0f, 1f)
+                    )
+                }
+            }
+            _uiState.update {
+                it.copy(
+                    tutorVoiceState = if (ready) TutorVoiceState.READY else TutorVoiceState.FAILED,
+                    tutorVoiceProgress = if (ready) 1f else 0f
+                )
+            }
+            if (!ready) {
+                Log.w("TheStudentViewModel", "Tutor voice pack could not be prepared")
             }
         }
+    }
+
+    /** The card's "Try again": clear the failed state and restart the download. */
+    fun retryTutorVoiceDownload() {
+        piperJob?.cancel()
+        piperJob = null
+        _uiState.update {
+            it.copy(tutorVoiceState = TutorVoiceState.MISSING, tutorVoiceProgress = 0f)
+        }
+        prepareTutorVoice()
     }
 
     /**
