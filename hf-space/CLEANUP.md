@@ -3,6 +3,11 @@
 Written to be followed in the Space UI, top to bottom. Nothing here needs the
 token you pasted, and nothing here touches the app.
 
+> **Fastest path:** `export HF_TOKEN=hf_... && ./deploy.sh` — it clones the Space,
+> installs these four files, deletes the dead weight and pushes. The sections
+> below explain *why* each item is on the list, and cover the settings the script
+> cannot change for you.
+
 > **First: revoke that token.** It was posted in a chat, so treat it as public.
 > huggingface.co → Settings → Access Tokens → *Revoke*. A write token can change
 > every repo you own. Then create a **fine-grained read token** for the app, scoped
@@ -47,11 +52,15 @@ Everything here is dead weight that slows every rebuild and every cold start:
 
 ## 3. Change — settings
 
-- [ ] **Hardware.** A 27B-class model cannot serve a phone call from free CPU; it
-      either times out or speaks after 30 seconds. The app's whole design assumes
-      a reply in a couple of seconds. Use a 1.7B–4B quantised model on CPU, or a
-      paid GPU if you want the bigger model. `README.md` in this folder documents
-      both.
+- [ ] **Model size vs. hardware.** The Space is *named* `Qwen3.8-27B`, but the
+      weights are `ggml-org/gemma-4-E4B-it-GGUF` — an "effective 4B" Gemma 4. On
+      free CPU (2 vCPU) that is the difference between a 3-second answer and a
+      15-second one. If replies feel slow after this change, set
+      `MODEL_REPO=ggml-org/gemma-4-E2B-it-GGUF` — no code change, and the quant is
+      still discovered automatically. Paid GPU: keep E4B, or move up.
+- [ ] **Do not commit the weights.** The backend downloads the quant at boot and
+      caches it in `/data`; a committed `.gguf` is only LFS quota and a slower
+      clone, and `deploy.sh` deletes it.
 - [ ] **Sleep time.** Free Spaces sleep; the first call after sleep is the ~60 s
       cold start. Either accept it (the app shows "waking up") or pay for
       "always on" — but do not paper over it with a shorter timeout in the app.
