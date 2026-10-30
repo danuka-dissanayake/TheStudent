@@ -679,6 +679,7 @@ class MainActivity : ComponentActivity() {
                                                             tutorVoiceProgress = uiState.tutorVoiceProgress,
                                                             onPrepareVoice = { viewModel.prepareTutorVoice() },
                                                             onRetryVoiceDownload = { viewModel.retryTutorVoiceDownload() },
+                                                            onRefreshVoiceState = { viewModel.refreshTutorVoiceState() },
                                                             onStartCall = { viewModel.startTutorCall() },
                                                             onEndCall = { viewModel.endTutorCall() },
                                                             onExit = { viewModel.setTab(TheStudentNavTab.HOME) },

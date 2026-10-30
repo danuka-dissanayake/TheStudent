@@ -553,3 +553,39 @@ The snackbar is gone. The idle screen now owns the download:
   instead of producing an engine that fails to load.
 
 Mockup: `designs/45a-tutor-voice-download.png`.
+
+### 11.13 Round 19h — the card clears itself, and the voice stops pausing
+
+**Why there was a hole between sentences.** The first Piper implementation wrote
+each sentence to a wav, opened a `MediaPlayer`, waited for its completion
+callback, and only *then* started synthesising the next sentence. Every boundary
+therefore cost decode + a ~200 KB flash write + player setup + synthesis of the
+next line before a single new sample was heard.
+
+**Now:**
+
+- **Two threads, one slot ahead.** A synthesis thread produces sentence N+1 into a
+  two-slot `ArrayBlockingQueue` while a playback thread is still pushing sentence
+  N to the speaker. Synthesis runs ahead of playback instead of behind it.
+- **No files, no container.** `GeneratedAudio.samples` (float mono) go straight
+  into an `AudioTrack` at the model's own **22,050 Hz** — the rate is read from
+  the engine (`tts.sampleRate()`), never resampled, never written to disk.
+- **Silence trimmed.** Amy pads each line with 0.1–0.3 s of silence; both ends are
+  trimmed to a 25 ms breath, which alone removes most of the perceived pause.
+- **Rate.** `SPEED` went `0.98 → 1.08` — Amy's medium voice is unhurried, and at
+  0.98 she sounded hesitant.
+- **The turn is handed back correctly.** `onSentenceDone` fires after
+  `playbackHeadPosition` has passed the last frame of that sentence, not when the
+  bytes were merely buffered, so the student is never cut off mid-word.
+- **Barge-in stays instant.** Playback is written in ~125 ms slices with the
+  sequence token checked before each one, and the synthesiser uses a *timed*
+  `offer` (never a blocking `put`), so an interrupt can always unblock it.
+
+**The download card now clears itself.** Three things were keeping it up: a
+`FAILED` state that was really just a slow unpack, a pack that was already on
+disk while the state said `MISSING`, and an unpack phase that sat at 100% looking
+finished. So: the screen re-reads the pack on entry (`refreshTutorVoiceState`),
+`READY` is derived from `piper.isReady()` rather than from the download's return
+value, unpacking and unknown-length downloads show a sliding bar instead of a
+stuck percentage, and the card fades out through a 320 ms `Crossfade` as the two
+mode cards fade in.

@@ -4387,12 +4387,41 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             }
             _uiState.update {
                 it.copy(
-                    tutorVoiceState = if (ready) TutorVoiceState.READY else TutorVoiceState.FAILED,
-                    tutorVoiceProgress = if (ready) 1f else 0f
+                    // "Loaded" is the truth to report, not "the download
+                    // returned true": a pack that was already on disk needs no
+                    // download at all.
+                    tutorVoiceState = when {
+                        piper.isReady() -> TutorVoiceState.READY
+                        ready -> TutorVoiceState.READY
+                        else -> TutorVoiceState.FAILED
+                    },
+                    tutorVoiceProgress = if (piper.isReady() || ready) 1f else 0f
                 )
             }
             if (!ready) {
                 Log.w("TheStudentViewModel", "Tutor voice pack could not be prepared")
+            }
+        }
+    }
+
+    /**
+     * Re-read the voice pack from disk.
+     *
+     * Called every time the tutor screen opens. Without it a state left behind by
+     * an older process — or a `FAILED` that was really just a slow unpack — keeps
+     * the download card on screen even though the voice is already loaded. If the
+     * engine is alive, the card must be gone.
+     */
+    fun refreshTutorVoiceState() {
+        if (piperJob?.isActive == true) return
+        val ready = piper.isReady()
+        _uiState.update { state ->
+            when {
+                ready && state.tutorVoiceState != TutorVoiceState.READY ->
+                    state.copy(tutorVoiceState = TutorVoiceState.READY, tutorVoiceProgress = 1f)
+                !ready && state.tutorVoiceState == TutorVoiceState.READY ->
+                    state.copy(tutorVoiceState = TutorVoiceState.MISSING, tutorVoiceProgress = 0f)
+                else -> state
             }
         }
     }

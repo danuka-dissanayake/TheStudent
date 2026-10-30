@@ -5,6 +5,8 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
+import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -171,6 +173,7 @@ fun AiTutorScreen(
     tutorVoiceProgress: Float,
     onPrepareVoice: () -> Unit,
     onRetryVoiceDownload: () -> Unit,
+    onRefreshVoiceState: () -> Unit,
     onStartCall: () -> Unit,
     onEndCall: () -> Unit,
     /** Leave the tutor tab entirely (the idle screen's back button). */
@@ -224,10 +227,13 @@ fun AiTutorScreen(
         if (granted) onStartCall() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    // The download starts as soon as the screen is trusted (consent accepted),
-    // not when the student is already waiting with the mic in hand.
-    LaunchedEffect(consentGiven, tutorVoiceState) {
-        if (consentGiven && tutorVoiceState == TutorVoiceState.MISSING) onPrepareVoice()
+    // Opening the screen re-reads the voice pack, then starts the download if it
+    // is genuinely missing — so the student is never waiting on their own tap,
+    // and a stale state can never leave the card up.
+    LaunchedEffect(consentGiven) {
+        if (!consentGiven) return@LaunchedEffect
+        onRefreshVoiceState()
+        if (tutorVoiceState == TutorVoiceState.MISSING) onPrepareVoice()
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("ai_voice_tutor_screen")) {
@@ -554,37 +560,44 @@ private fun IdleContent(
                 // Until the voice is on the phone there is nothing to choose
                 // between — both cards would lead to the same silent call. The
                 // download card takes their place, so the sheet still fits
-                // without scrolling.
-                if (voiceState == TutorVoiceState.READY) {
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(11.dp),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        ModeCard(
-                            icon = Icons.Default.Chat,
-                            tint = Brand,
-                            title = "Free conversation",
-                            subtitle = "Speak freely and let Miss Emma correct you as you talk",
-                            onClick = onMic,
-                            modifier = Modifier.weight(1f)
-                        )
-                        ModeCard(
-                            icon = Icons.Default.PlayArrow,
-                            tint = Warm,
-                            title = lesson?.title ?: "Guided lesson",
-                            subtitle = lesson?.goal
-                                ?: "Pick a lesson and I will teach one point, step by step",
-                            onClick = onPickLesson,
-                            modifier = Modifier.weight(1f)
+                // without scrolling. When the pack lands, the card fades away and
+                // the two modes fade in underneath it.
+                Crossfade(
+                    targetState = voiceState == TutorVoiceState.READY,
+                    animationSpec = tween(320),
+                    label = "voice_ready"
+                ) { ready ->
+                    if (ready) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(11.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            ModeCard(
+                                icon = Icons.Default.Chat,
+                                tint = Brand,
+                                title = "Free conversation",
+                                subtitle = "Speak freely and let Miss Emma correct you as you talk",
+                                onClick = onMic,
+                                modifier = Modifier.weight(1f)
+                            )
+                            ModeCard(
+                                icon = Icons.Default.PlayArrow,
+                                tint = Warm,
+                                title = lesson?.title ?: "Guided lesson",
+                                subtitle = lesson?.goal
+                                    ?: "Pick a lesson and I will teach one point, step by step",
+                                onClick = onPickLesson,
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
+                    } else {
+                        VoiceDownloadCard(
+                            state = voiceState,
+                            progress = voiceProgress,
+                            onStart = onPrepareVoice,
+                            onRetry = onRetryVoice
                         )
                     }
-                } else {
-                    VoiceDownloadCard(
-                        state = voiceState,
-                        progress = voiceProgress,
-                        onStart = onPrepareVoice,
-                        onRetry = onRetryVoice
-                    )
                 }
 
                 Spacer(Modifier.weight(0.3f))
@@ -710,7 +723,7 @@ private fun VoiceDownloadCard(
                         color = Color.White
                     )
                 }
-            } else if (busy) {
+            } else if (state == TutorVoiceState.DOWNLOADING && shown > 0f) {
                 Text(
                     text = "$percent%",
                     fontFamily = MaisonNeueFontFamily,
@@ -724,8 +737,7 @@ private fun VoiceDownloadCard(
         if (!failed) {
             Spacer(Modifier.height(13.dp))
             // A hand-drawn bar rather than LinearProgressIndicator: 8 dp tall with
-            // a rounded cap, and it animates as the bytes arrive, not in steps of
-            // an indeterminate spinner.
+            // a rounded cap, and it fills as the bytes arrive.
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -733,13 +745,39 @@ private fun VoiceDownloadCard(
                     .clip(CircleShape)
                     .background(Color(0xFFE3EFE9))
             ) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth(if (busy) shown.coerceAtLeast(0.02f) else 0.02f)
-                        .fillMaxHeight()
-                        .clip(CircleShape)
-                        .background(Brush.horizontalGradient(listOf(Fresh, BrandDeep)))
-                )
+                val unpacking = state == TutorVoiceState.UNPACKING
+                val unknown = state == TutorVoiceState.DOWNLOADING && shown <= 0f
+                if (unpacking || unknown) {
+                    // The server did not send a content length, or we are
+                    // unpacking 20 MB of bz2 — both are "working", neither has a
+                    // number, so slide a bar rather than lie with a stuck 0/100%.
+                    val slide by rememberInfiniteTransition(label = "voice_unknown")
+                        .animateFloat(
+                            initialValue = 0f,
+                            targetValue = 1f,
+                            animationSpec = infiniteRepeatable(
+                                animation = tween(1_150, easing = LinearEasing),
+                                repeatMode = RepeatMode.Restart
+                            ),
+                            label = "voice_unknown_x"
+                        )
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(0.34f)
+                            .fillMaxHeight()
+                            .offset(x = (slide * 250).dp)
+                            .clip(CircleShape)
+                            .background(Brush.horizontalGradient(listOf(Fresh, BrandDeep)))
+                    )
+                } else {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(shown.coerceAtLeast(0.02f))
+                            .fillMaxHeight()
+                            .clip(CircleShape)
+                            .background(Brush.horizontalGradient(listOf(Fresh, BrandDeep)))
+                    )
+                }
             }
         }
     }
@@ -1365,7 +1403,7 @@ private fun MicDock(
                             )
                         )
                 )
-                androidx.compose.animation.Crossfade(
+                Crossfade(
                     targetState = face,
                     animationSpec = tween(220),
                     label = "mic_face"
