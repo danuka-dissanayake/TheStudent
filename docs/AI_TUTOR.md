@@ -411,3 +411,26 @@ plumbing, so the line — and the now-unused `hfStatusMessage` parameter — is 
 The cards now sit closer to the mic.
 
 Mockup: `designs/42a-orb-quality.png` (before / after).
+
+### 11.8 Round 19d — idle life, bigger cards, no "connecting", a thread that follows itself
+
+- **Idle orb is a little livelier.** The prototype idles at speed `0.30` /
+  roughness `0.12`, which on a phone reads as almost frozen. `IDLE` now runs
+  `0.46` / `0.16`: still well under listening (`0.72`) and nowhere near speaking
+  (`1.65`). Connecting and muted keep the prototype's calm values.
+- **Mode cards are bigger.** Title `13.5 → 15.5 sp` (line 17 → 20) and the
+  description `11 → 12.5 sp` (line 15 → 17); the cards are taller and the
+  weighted spacers above and below absorb it, so the page still never scrolls.
+- **"Connecting" is gone.** `startTutorCall` moves to `CONNECTING` and only
+  reaches `LIVE` when the greeting has finished speaking, so the call used to sit
+  on the word "connecting". Now the header always shows the timer, the status
+  label goes straight to the voice state, the empty-thread placeholder is
+  removed, and the orb no longer has a connecting look — the tap feels immediate.
+  `CallPhase.CONNECTING` still exists as an internal state (the call timer and
+  `endTutorCall` use it); it is simply never displayed.
+- **The thread now follows itself.** `scroll.maxValue` is measured from the
+  layout that exists when the effect runs, so a single `animateScrollTo(maxValue)`
+  landed one bubble short and the newest line sat under the mic. The effect now
+  waits a frame, scrolls, and re-checks up to four times, keyed on the transcript
+  size, the live correction and the voice state (the thinking bubble changes the
+  height too). Bottom padding went `8 → 14 dp`.

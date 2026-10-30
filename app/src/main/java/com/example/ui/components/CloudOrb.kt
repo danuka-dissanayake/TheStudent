@@ -357,6 +357,10 @@ private fun speedFor(state: CloudOrbState, level: Float): Float = when (state) {
     CloudOrbState.LISTENING -> 0.72f + level * 0.78f
     CloudOrbState.SPEAKING -> 1.65f + level * 1.55f
     CloudOrbState.THINKING -> 0.24f
+    // The reference idles at 0.30, which on a phone reads as almost frozen. The
+    // home screen wants a little visible life — still well under listening
+    // (0.72) and nowhere near speaking (1.65).
+    CloudOrbState.IDLE -> 0.46f
     else -> 0.30f
 }
 
@@ -365,6 +369,7 @@ private fun roughnessFor(state: CloudOrbState, level: Float): Float = when (stat
     CloudOrbState.LISTENING -> 0.28f + level * 0.32f
     CloudOrbState.SPEAKING -> 0.66f + level * 0.34f
     CloudOrbState.THINKING -> 0.18f
+    CloudOrbState.IDLE -> 0.16f
     else -> 0.12f
 }
 

@@ -63,6 +63,7 @@ import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -596,19 +597,19 @@ private fun ModeCard(
         Text(
             text = title,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 13.5.sp,
-            lineHeight = 17.sp,
+            fontSize = 15.5.sp,
+            lineHeight = 20.sp,
             fontWeight = FontWeight.Bold,
             color = Ink,
             maxLines = 2,
             overflow = TextOverflow.Ellipsis
         )
-        Spacer(Modifier.height(4.dp))
+        Spacer(Modifier.height(5.dp))
         Text(
             text = subtitle,
             fontFamily = MaisonNeueFontFamily,
-            fontSize = 11.sp,
-            lineHeight = 15.sp,
+            fontSize = 12.5.sp,
+            lineHeight = 17.sp,
             color = Muted,
             maxLines = 3,
             overflow = TextOverflow.Ellipsis
@@ -651,18 +652,27 @@ private fun LiveContent(
             haptics.performHapticFeedback(HapticFeedbackType.LongPress)
         }
     }
-    LaunchedEffect(transcript.size, voiceState) {
-        scroll.animateScrollTo(scroll.maxValue)
+    // Follow the bottom of the thread.
+    //
+    // `maxValue` is measured from the *current* layout, so scrolling to it inside
+    // the same effect that reacts to a new bubble lands one bubble short and the
+    // newest line hides under the mic. So: animate to the known bottom, wait for
+    // the new bubble to be measured, and keep chasing until the bottom stops
+    // moving. `currentFix` and the thinking bubble both change the height too,
+    // hence the extra keys.
+    LaunchedEffect(transcript.size, currentFix, voiceState) {
+        repeat(4) {
+            withFrameNanos { }
+            val bottom = scroll.maxValue
+            if (scroll.value == bottom) return@LaunchedEffect
+            scroll.animateScrollTo(bottom)
+        }
     }
 
     Column(modifier = Modifier.fillMaxSize()) {
         GlassHeader(
             title = "Miss Emma",
-            subtitle = if (callPhase == CallPhase.CONNECTING) {
-                "connecting…"
-            } else {
-                "${formatCallTime(callSeconds)}  ·  live"
-            },
+            subtitle = "${formatCallTime(callSeconds)}  ·  live",
             onBack = onBack,
             onMenu = onMenu
         )
@@ -674,7 +684,6 @@ private fun LiveContent(
         ) {
             LiveOrb(
                 voiceState = voiceState,
-                phase = callPhase,
                 isMuted = isMuted,
                 micLevel = micLevel,
                 size = 132.dp
@@ -694,7 +703,7 @@ private fun LiveContent(
             )
             Spacer(Modifier.width(7.dp))
             Text(
-                text = statusLabel(voiceState, callPhase, isMuted),
+                text = statusLabel(voiceState, isMuted),
                 fontFamily = MaisonNeueFontFamily,
                 fontSize = 13.5.sp,
                 fontWeight = FontWeight.Bold,
@@ -715,18 +724,9 @@ private fun LiveContent(
                 .fillMaxWidth()
                 .verticalScroll(scroll)
                 .padding(horizontal = 20.dp)
-                .padding(top = 14.dp, bottom = 8.dp),
+                .padding(top = 14.dp, bottom = 14.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            if (transcript.isEmpty()) {
-                Text(
-                    text = "Connecting you to Miss Emma…",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 14.5.sp,
-                    color = Muted,
-                    modifier = Modifier.padding(top = 20.dp)
-                )
-            }
             transcript.forEachIndexed { index, entry ->
                 // Keyed by position and role: a new line slides up into place, an
                 // old one never replays its entrance when the list is re-composed.
@@ -797,14 +797,12 @@ private fun LiveContent(
 @Composable
 private fun LiveOrb(
     voiceState: AssistantVoiceState,
-    phase: CallPhase,
     isMuted: Boolean,
     micLevel: StateFlow<Float>,
     size: Dp
 ) {
     val level by micLevel.collectAsState()
     val orbState = when {
-        phase == CallPhase.CONNECTING -> CloudOrbState.CONNECTING
         isMuted -> CloudOrbState.MUTED
         voiceState == AssistantVoiceState.LISTENING -> CloudOrbState.LISTENING
         voiceState == AssistantVoiceState.SPEAKING -> CloudOrbState.SPEAKING
@@ -833,9 +831,8 @@ private fun statusColor(state: AssistantVoiceState, isMuted: Boolean): Color = w
     else -> Brand
 }
 
-private fun statusLabel(state: AssistantVoiceState, phase: CallPhase, isMuted: Boolean): String = when {
+private fun statusLabel(state: AssistantVoiceState, isMuted: Boolean): String = when {
     isMuted -> "Muted"
-    phase == CallPhase.CONNECTING -> "Connecting"
     state == AssistantVoiceState.LISTENING -> "Your turn"
     state == AssistantVoiceState.THINKING -> "Thinking"
     state == AssistantVoiceState.SPEAKING -> "Emma is speaking"
