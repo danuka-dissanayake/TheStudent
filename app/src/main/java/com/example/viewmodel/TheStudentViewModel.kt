@@ -4390,7 +4390,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         // Only a sentence that was actually wrong makes a turn "not clean"; a
         // better word for a correct sentence is a bonus, not a deduction.
-        val wrongTurns = state.callFixes.count { it.isUseful }
+        // One wrong sentence is one unclean turn, even if the local pass and the
+        // model both corrected it.
+        val wrongTurns = state.callFixes
+            .filter { it.isUseful }
+            .map { it.original.lowercase(Locale.US) }
+            .distinct()
+            .size
         val cleanPercent = if (state.callTurns == 0) {
             0
         } else {

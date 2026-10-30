@@ -699,3 +699,68 @@ bonus, never a deduction.
 next turn's system prompt carries it (`focusRule`) with the instruction to ask a
 question that makes the student use the correct form once — never to lecture in
 SAY.
+
+### 11.17 Round 20 — the tutor that remembers, waits, and makes you speak
+
+Ten changes, each answering something the call could not do before. They share
+one idea: a tutor is measured by what the student *produces*, not by how much
+good feedback is printed.
+
+**1. Say it (drills).** A correction card now has **Say it ▸** beside *Hear it*.
+The tutor reads the sentence once, then opens the microphone; `TutorDrill`
+compares the content words (75% pass, fillers ignored) and the card reports
+`I heard "…"`. The words the recogniser never caught become the call's practice
+list. Producing a form is what puts it in the mouth; hearing it is not.
+
+**2. One turn, many segments** (from 19k) plus a **correction budget**: at most
+three corrections and two word-upgrades per call, and a rule never repeats inside
+a call. Everything, shown or not, is still recorded — the summary is the
+correction slot at the end. `acceptForDisplay` owns the counter and de-duplicates
+the local fix and the model's version of the same sentence.
+
+**3. Adaptive level.** `TutorProgressStore.level` moves on evidence from the whole
+call: up needs ≥80% clean turns, ≥9 words a turn and some connected speech;
+down needs <50% clean and <6 words. The next call's prompt uses the new level.
+
+**4. Memory.** The model returns `NOTE:` — one fact the student told it — which is
+stored (max 8, de-duplicated) and injected into later prompts as *"you remember
+these things about this student"*. A call can now open with "how did the exam
+go?" instead of "tell me about yourself".
+
+**5. Waiting.** The silence ladder no longer nudges on a fixed count. Misses 1–2
+reopen the microphone silently; 3 "Take your time.", 4 "I'm still here whenever
+you're ready.", 6 "I'll wait. Take all the time you need.", 7 a polite hang-up.
+The prompt also forbids asking a question twice in one call.
+
+**6. Fluency.** Words per minute is measured from voice onset (first
+`onBeginningOfSpeech`) to commit, only for turns with ≥4 words, and the summary
+reads the number against the 110–140 range. Drill misses add the "say these
+aloud" list.
+
+**7. Spaced repetition.** `TutorProgressStore` keeps the student's own corrected
+sentences with a 1-day / 3-day / 1-week ladder. Up to three are asked at the start
+of the next call, in the student's words ("Last time you said …"), and a correct
+answer moves the sentence along; three correct answers retire it.
+
+**8. Scenario scorecards.** `TutorScenarioRubric` is local and deterministic: it
+reads the student's own lines and returns four checks with the sentence to try
+next time. Interview: experience, past tense, a strength, a question back. Café:
+polite order, a detail, thanks. Travel, exam and grammar-doctor rubrics follow the
+same shape; free conversation checks length, detail and whether they asked
+anything.
+
+**9. Voice barge-in.** `BargeInMonitor` listens **only while the tutor speaks**,
+from `VOICE_COMMUNICATION` with echo cancellation, needs 400 ms of sustained level
+above 0.055 RMS, ignores the first 600 ms of playback, and hands the microphone
+over only after the recogniser's session has had time to open (500 ms). Two false
+starts in a call and it disables itself for that call — a detector that keeps
+cutting her off is worse than none.
+
+**10. Continuity.** The idle screen shows one pill: how many sentences are due, or
+what the last call left to do. One line, not a panel — the screen's job is still
+to get the student to tap the orb.
+
+Cost of all ten: no new dependency. `org.json` and `AudioRecord` are platform
+APIs, and every heuristic is local, so the call still works with no network at
+all; the model only adds what it is uniquely good at (conversation, `NOTE`, a
+contextual `WORD`).
