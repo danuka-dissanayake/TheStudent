@@ -30,8 +30,18 @@ rename or a new Q4 file does not need a code change.
 
 from __future__ import annotations
 
-import asyncio
 import os
+
+# The model is 2–5 GB. huggingface_hub reads HF_HOME at import time, so this has
+# to be set before it is imported, or every cold start downloads the whole quant
+# again into the image's writable layer.
+os.environ.setdefault("HF_HOME", "/data/hf")
+try:
+    os.makedirs(os.environ["HF_HOME"], exist_ok=True)
+except OSError:
+    pass
+
+import asyncio
 import re
 import threading
 import time
@@ -455,6 +465,17 @@ async def chat_completions(request: Request):
 
 
 if __name__ == "__main__":
+    import sys
+    import threading
+
     import uvicorn
 
-    uvicorn.run(app, host="0.0.0.0", port=int(os.getenv("PORT", "7860")))
+    port = int(os.getenv("PORT", "7860"))
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port)
+    except OSError as error:
+        # Something already serves this port — usually the platform. Staying alive
+        # beats exiting, which the platform reports as a runtime error.
+        print(f"[tutor] port {port} already served: {error}", flush=True)
+        threading.Event().wait()
+        sys.exit(0)

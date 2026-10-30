@@ -55,9 +55,27 @@ app = gr.mount_gradio_app(tutor_api.app, _blocks, path="/ui")
 
 
 if __name__ == "__main__":
+    # Two launch paths exist, and starting a second server is fatal:
+    #
+    #   * the Space platform may already serve this module (it detects the ASGI
+    #     `app` and binds GRADIO_SERVER_PORT itself) — then our bind fails with
+    #     "[Errno 98] address already in use" and the container exits 3;
+    #   * or nothing is serving it, and this block is the only server.
+    #
+    # So: try to bind, and if the port is taken, keep the process alive and let
+    # whoever holds it serve. Exiting here is what turned a working Space into a
+    # "runtime error" with a model that had already downloaded successfully.
     import os
+    import sys
+    import threading
 
     import uvicorn
 
-    port = int(os.getenv("GRADIO_SERVER_PORT", os.getenv("PORT", "7860")))
-    uvicorn.run(app, host="0.0.0.0", port=port)
+    port = int(os.getenv("GRADIO_SERVER_PORT") or os.getenv("PORT") or "7860")
+    try:
+        uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+    except OSError as error:
+        print(f"[tutor] not starting a second server on {port}: {error}", flush=True)
+        print("[tutor] the platform's own server is serving this app", flush=True)
+        threading.Event().wait()
+        sys.exit(0)

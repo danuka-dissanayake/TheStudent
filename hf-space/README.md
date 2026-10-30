@@ -36,7 +36,8 @@ skipped, because loading one of those as "the model" loads no weights at all.
 
 | Variable | Default | Why |
 | --- | --- | --- |
-| `MODEL_REPO` | `ggml-org/gemma-4-E4B-it-GGUF` | Use `…gemma-4-E2B-it-GGUF` on free CPU if replies feel slow |
+| `MODEL_REPO` | `ggml-org/gemma-4-E4B-it-GGUF` | Its Q4_0 is 4.6 GB — on free CPU set `ggml-org/gemma-4-E2B-it-GGUF` for a ~half-size download |
+| `HF_HOME` | `/data/hf` | Set in code before `huggingface_hub` loads, so a cold start reuses the quant instead of re-downloading it |
 | `MODEL_FILE` | *(empty = auto)* | Set only to pin a specific quant |
 | `N_CTX` | `2048` | The app sends six turns plus the system prompt; 32k only costs RAM |
 | `N_THREADS` | CPU count | 2 on free CPU |
