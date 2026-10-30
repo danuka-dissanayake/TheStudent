@@ -80,6 +80,11 @@ out, and the first is better:
      image. `requirements-gradio.txt` builds `llama-cpp-python` from source
      (`--no-binary`), with the compiler from `packages.txt`.
 
+   `packages.txt` must contain **package names only** — the platform pipes it
+   into `xargs apt-get install -y`, so a `#` comment becomes
+   `E: Unable to locate package #`. `deploy.sh` strips comments and blank lines
+   before pushing it.
+
    `tutor_api.py` also imports `llama_cpp` lazily, so a broken library cannot
    stop the container: `/health` returns `503 {"status":"error","error":"…"}` with
    the real reason instead of a crash loop.

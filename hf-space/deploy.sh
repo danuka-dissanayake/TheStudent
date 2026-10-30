@@ -64,7 +64,11 @@ if [[ "$GRADIO" == true ]]; then
   cp "$HERE/app.py" ./tutor_api.py
   cp "$HERE/gradio_app.py" ./app.py
   cp "$HERE/requirements-gradio.txt" ./requirements.txt
-  cp "$HERE/packages.txt" ./packages.txt
+  # packages.txt is piped into `xargs apt-get install -y`, which treats every
+  # token as a package name: a `#` comment becomes "E: Unable to locate package #".
+  # Blank lines and comments are stripped here so the file on disk can stay
+  # readable without breaking the build.
+  grep -v '^[[:space:]]*#' "$HERE/packages.txt" | grep -v '^[[:space:]]*$' > ./packages.txt
   rm -f ./Dockerfile
   # Front matter must describe a Gradio Space. sdk_version is pinned to the one the
   # platform itself installs; python_version is left out so the SDK's base image

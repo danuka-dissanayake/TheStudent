@@ -1,5 +1,2 @@
-# Debian packages for SBOM/apt. Only the compiler and cmake are needed: they are
-# what turn llama-cpp-python's sdist into a libllama.so that matches this image's
-# glibc, instead of whatever the wheel index happens to have built that day.
 build-essential
 cmake
