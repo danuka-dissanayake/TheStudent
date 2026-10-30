@@ -66,6 +66,12 @@ from huggingface_hub import hf_hub_download, list_repo_files
 
 DEFAULT_REPO = "ggml-org/gemma-4-E4B-it-GGUF"
 
+# Where the quant is cached. /data survives a restart on a Space; the default
+# (~/.cache/huggingface) does not. HF_HOME is set at the top of this file too, but
+# Gradio imports huggingface_hub before this module runs, so the download call
+# passes cache_dir explicitly rather than trusting the env var.
+MODEL_CACHE_DIR = os.getenv("MODEL_CACHE_DIR", "/data/hf")
+
 # Preference order for the quant. Q4_K_M is the size/quality point that fits a
 # free Space; the rest are fallbacks in case a repo ships a different set.
 QUANT_PREFERENCE = ("q4_k_m", "q4_k_s", "q4_0", "q5_k_m", "q8_0", "q6_k")
@@ -147,7 +153,10 @@ def load_model() -> None:
         load_started = True
 
     try:
-        from llama_cpp import Llama
+        import llama_cpp
+
+        Llama = llama_cpp.Llama
+        print(f"[tutor] llama_cpp {getattr(llama_cpp, '__version__', '?')}", flush=True)
     except Exception as error:  # noqa: BLE001 - reported by /health
         load_error = f"llama_cpp could not load: {error}"
         print(f"[tutor] {load_error}", flush=True)
@@ -160,7 +169,15 @@ def load_model() -> None:
             print(f"[tutor] no .gguf found in {MODEL_REPO}; set MODEL_FILE", flush=True)
             return
         model_label = filename
-        local_path = hf_hub_download(repo_id=MODEL_REPO, filename=filename)
+        try:
+            os.makedirs(MODEL_CACHE_DIR, exist_ok=True)
+        except OSError:
+            pass
+        local_path = hf_hub_download(
+            repo_id=MODEL_REPO,
+            filename=filename,
+            cache_dir=MODEL_CACHE_DIR,
+        )
         print(f"[tutor] using {MODEL_REPO}/{filename}", flush=True)
 
     started = time.time()
@@ -175,7 +192,15 @@ def load_model() -> None:
             verbose=False,
         )
     except Exception as error:  # noqa: BLE001 - reported by /health
-        load_error = f"model could not be loaded: {error}"
+        # "Failed to load model from file" almost always means the bundled
+        # llama.cpp is older than the model's architecture — which is exactly what
+        # llama-cpp-python 0.3.2 (Nov 2024) did with Gemma 4. Say so, because the
+        # raw message gives no hint and the download has already succeeded.
+        hint = ""
+        if "Failed to load model" in str(error):
+            hint = (" — the bundled llama.cpp probably predates this model's "
+                    "architecture; use a newer llama-cpp-python")
+        load_error = f"model could not be loaded: {error}{hint}"
         print(f"[tutor] {load_error}", flush=True)
         return
     has_chat_template = bool(

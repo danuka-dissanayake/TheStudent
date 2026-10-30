@@ -3,5 +3,5 @@
 # every line is a valid requirement.
 fastapi==0.115.6
 uvicorn[standard]==0.34.0
-llama-cpp-python==0.3.2
+llama-cpp-python==0.3.36
 huggingface_hub>=0.30

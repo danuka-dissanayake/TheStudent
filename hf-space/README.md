@@ -37,7 +37,8 @@ skipped, because loading one of those as "the model" loads no weights at all.
 | Variable | Default | Why |
 | --- | --- | --- |
 | `MODEL_REPO` | `ggml-org/gemma-4-E4B-it-GGUF` | Its Q4_0 is 4.6 GB — on free CPU set `ggml-org/gemma-4-E2B-it-GGUF` for a ~half-size download |
-| `HF_HOME` | `/data/hf` | Set in code before `huggingface_hub` loads, so a cold start reuses the quant instead of re-downloading it |
+| `MODEL_CACHE_DIR` | `/data/hf` | Passed to `hf_hub_download` explicitly, so a restart reuses the quant (`~/.cache` is wiped) |
+| `MODEL_FILE` | *(auto)* | Pins a quant; by default Q4_K_M → Q4_K_S → Q4_0 → … is chosen |
 | `MODEL_FILE` | *(empty = auto)* | Set only to pin a specific quant |
 | `N_CTX` | `2048` | The app sends six turns plus the system prompt; 32k only costs RAM |
 | `N_THREADS` | CPU count | 2 on free CPU |
@@ -48,6 +49,15 @@ skipped, because loading one of those as "the model" loads no weights at all.
 Qwen-specific: if you point `MODEL_REPO` at a Qwen3 repo, the server appends
 `/no_think` to the newest user message so the model does not spend the call
 reasoning in silence. Gemma has no such mode and is left untouched.
+
+## Why the llama-cpp-python version is pinned
+
+`llama-cpp-python==0.3.36` (Oct 2026) ships a llama.cpp that supports
+`LLM_ARCH_GEMMA4`. The older `0.3.2` from Nov 2024 does not, and its failure mode
+is nasty: the 4.6 GB quant downloads fine, then loading fails with
+`Failed to load model from file`. If you change the model to a newer architecture,
+check that the binding is new enough first — the API reports the reason at
+`/health` in the `error` field.
 
 ## Endpoints
 

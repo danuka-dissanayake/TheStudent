@@ -11,9 +11,14 @@
 #    container. Plain PyPI is safe: any manylinux wheel is glibc, and if there is
 #    no wheel pip builds from the sdist using the compiler from packages.txt.
 #
-# 3. Every line must be a requirement — `pip install -r` rejects anything else.
+# 3. Pin llama-cpp-python to a build new enough for the model. 0.3.2 was published
+#    in Nov 2024 and its bundled llama.cpp predates Gemma 4, so it fails with
+#    "Failed to load model from file" *after* downloading the whole quant. 0.3.36
+#    ships a llama.cpp with LLM_ARCH_GEMMA4.
+#
+# 4. Every line must be a requirement — `pip install -r` rejects anything else.
 #    A pip option needs its argument with '=', e.g. --no-binary=llama-cpp-python,
 #    and a line that is just '--' is a syntax error. deploy.sh checks this file
 #    before pushing for exactly that reason.
-llama-cpp-python==0.3.2
+llama-cpp-python==0.3.36
 huggingface_hub>=0.30
