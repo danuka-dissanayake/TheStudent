@@ -58,6 +58,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.speech.tts.UtteranceProgressListener
+import android.speech.tts.Voice
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -495,6 +496,90 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
+    /**
+     * Picks the warmest female English voice the installed engine has.
+     *
+     * The phone's own text-to-speech engine is what we synthesise with — no API
+     * key, no network round trip, and it keeps working offline. Which voices
+     * exist is up to the engine (Google's usually ships several female en-US and
+     * en-GB voices, most of them neural on newer builds), so instead of hard-
+     * coding a name we score every English voice we are given: female, high
+     * quality, and the en-US/en-GB locales win; anything male or marked "not
+     * installed" is dropped. If nothing suitable is installed we fall back to a
+     * slightly higher pitch, which is the one knob every engine honours.
+     */
+    private fun applyNarratorVoice(engine: TextToSpeech) {
+        val available = try {
+            engine.voices
+        } catch (e: Exception) {
+            null
+        }
+        if (available.isNullOrEmpty()) {
+            applyWarmFallback(engine)
+            return
+        }
+        val best = available
+            .asSequence()
+            .filter { it.locale?.language == "en" }
+            .filterNot { voice -> voice.features.orEmpty().any { it.equals("notInstalled", true) } }
+            .maxByOrNull { narratorScore(it) }
+        if (best == null) {
+            applyWarmFallback(engine)
+            return
+        }
+        try {
+            engine.voice = best
+            // A touch of lift and a calmer rate: it is a tutor, and a flat
+            // default voice is what makes synthetic speech sound robotic.
+            engine.setPitch(1.06f)
+            Log.d("TheStudentViewModel", "Tutor voice: ${best.name} (${best.locale})")
+        } catch (e: Exception) {
+            Log.w("TheStudentViewModel", "Could not select tutor voice", e)
+            applyWarmFallback(engine)
+        }
+    }
+
+    private fun applyWarmFallback(engine: TextToSpeech) {
+        try {
+            engine.setPitch(1.10f)
+        } catch (_: Exception) {
+        }
+    }
+
+    /** Higher is a better fit for a young female tutor speaking to a student. */
+    private fun narratorScore(voice: Voice): Int {
+        val name = voice.name?.lowercase(Locale.US).orEmpty()
+        val features = voice.features.orEmpty().map { it.lowercase(Locale.US) }
+        var score = 0
+
+        val femaleNames = listOf(
+            "female", "woman", "emma", "aria", "jenny", "samantha", "kate", "serena",
+            "fiona", "zira", "tessa", "sfg", "iol", "tpf", "gba", "rjs", "hfc", "slt"
+        )
+        val isFemale = features.contains("female") || femaleNames.any { name.contains(it) }
+        val isMale = features.contains("male") || (name.contains("male") && !name.contains("female"))
+        if (isFemale) score += 60
+        if (isMale) score -= 70
+
+        score += when (voice.quality) {
+            Voice.QUALITY_VERY_HIGH -> 30
+            Voice.QUALITY_HIGH -> 24
+            Voice.QUALITY_NORMAL -> 8
+            else -> 0
+        }
+        // Newer engines publish their neural voices over the network; they sound
+        // far more human, and the call already needs the network for the model.
+        if (features.any { it.contains("network") }) score += 14
+
+        score += when (voice.locale?.country?.uppercase(Locale.US)) {
+            "US" -> 8
+            "GB" -> 7
+            "AU" -> 3
+            else -> 0
+        }
+        return score
+    }
+
     private fun initSpeechRecognizer() {
         if (speechRecognizer != null) return
         if (SpeechRecognizer.isRecognitionAvailable(getApplication())) {
@@ -592,8 +677,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
-            tts?.language = Locale.US
-            tts?.setSpeechRate(0.95f) // Slightly relaxed rate for language learning
+            val engine = tts ?: return
+            engine.language = Locale.US
+            applyNarratorVoice(engine)
+            engine.setSpeechRate(0.97f) // Slightly relaxed rate for language learning
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     _uiState.update {

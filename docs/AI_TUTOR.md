@@ -434,3 +434,16 @@ Mockup: `designs/42a-orb-quality.png` (before / after).
   waits a frame, scrolls, and re-checks up to four times, keyed on the transcript
   size, the live correction and the voice state (the thinking bubble changes the
   height too). Bottom padding went `8 → 14 dp`.
+
+### 11.9 Round 19e — a warmer, more natural tutor voice
+
+The call still synthesises with the phone's own TTS engine (no API key, works
+offline), but it no longer accepts whatever voice the engine offers by default.
+`applyNarratorVoice` scores every English voice the engine exposes: `+60` for a
+female voice, `−70` for a male one, `+30/+24/+8` for very-high/high/normal
+quality, `+14` for a neural (network) voice, and a small bonus for `en-US`,
+`en-GB` then `en-AU`. Anything flagged `notInstalled` is skipped. The winner is
+applied with `setPitch(1.06)` and `setSpeechRate(0.97)`; if the device has no
+suitable voice at all — or refuses the selection — the pitch goes to `1.10`
+instead, which every engine honours. The chosen voice is logged as
+`Tutor voice: <name> (<locale>)` so it is one `adb logcat` line away.
