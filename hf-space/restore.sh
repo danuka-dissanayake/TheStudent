@@ -14,6 +14,10 @@
 # The Space is https://huggingface.co/spaces/danuka21/Qwen3.8-27B
 set -euo pipefail
 export GIT_LFS_SKIP_SMUDGE=1     # never download the old weights just to push them back
+# A pager stops the script dead, waiting for a human to press q. It happened once;
+# these three lines are why it cannot happen again.
+export GIT_PAGER=cat
+export PAGER=cat
 
 SPACE="${SPACE:-danuka21/Qwen3.8-27B}"
 BRANCH="${BRANCH:-main}"
@@ -40,12 +44,12 @@ git clone "https://user:${HF_TOKEN}@huggingface.co/spaces/${SPACE}" "$WORK/space
 cd "$WORK/space"
 
 echo "==> recent history (newest first)"
-git log --format='    %h  %ad  %s' --date=short -n 15
+git --no-pager log --format='    %h  %ad  %s' --date=short -n 15
 
 if [[ -z "$TARGET" ]]; then
   # Our deploys all start with "Tutor backend". The *oldest* of them is the first
   # push; its parent is the app that worked.
-  FIRST_DEPLOY="$(git log --format='%H%x09%s' | awk -F'\t' '$2 ~ /^Tutor backend/ {sha=$1} END {print sha}')"
+  FIRST_DEPLOY="$(git --no-pager log --format='%H%x09%s' | awk -F'\t' '$2 ~ /^Tutor backend/ {sha=$1} END {print sha}')"
   if [[ -z "$FIRST_DEPLOY" ]]; then
     echo "==> no 'Tutor backend' commit found; pass --to <sha> to choose a version" >&2
     exit 1
@@ -57,9 +61,9 @@ git rev-parse --verify "$TARGET" >/dev/null 2>&1 \
   || { echo "error: $TARGET is not a commit in this Space" >&2; exit 1; }
 
 echo
-echo "==> restoring to $(git log --format='%h  %ad  %s' --date=short -n1 "$TARGET")"
+echo "==> restoring to $(git --no-pager log --format='%h  %ad  %s' --date=short -n1 "$TARGET")"
 echo "==> files that change:"
-git diff --stat "$TARGET" HEAD | sed 's/^/    /'
+git --no-pager diff --stat "$TARGET" HEAD | sed 's/^/    /'
 
 if [[ "$CONFIRMED" != true ]]; then
   echo
