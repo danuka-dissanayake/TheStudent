@@ -1,0 +1,8 @@
+# The tutor backend needs four things and nothing else.
+# No torch, no transformers, no accelerate, no bitsandbytes, no gradio: the model
+# is a GGUF file read by llama.cpp, and every one of those packages would add
+# hundreds of megabytes to the image and minutes to every restart.
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+llama-cpp-python==0.3.2
+huggingface_hub==0.27.1
