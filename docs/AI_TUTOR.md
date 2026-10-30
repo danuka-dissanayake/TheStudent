@@ -630,3 +630,27 @@ engine that used to be here; they are kept as history, not as current behaviour.
 The consent screen's "one-time download" clause now says the voice is generated
 by the phone's own engine, so nothing is downloaded and nothing extra leaves the
 device.
+
+### 11.15 Round 19j — the student's words are the only ones corrected
+
+**Corrections belong to the learner.** A fix is now shown only when it was
+produced from the sentence the student just said: `deliverTutorTurn` compares
+`fix.original` against `callStudentLine` and drops anything else, and a model
+"correction" that shares less than half its words with the original is discarded
+(`isCloseTo`) — that is the shape a model takes when it answers with its own
+reply or a paraphrase. Corrections are de-duplicated by their corrected text, so a
+learner repeating one mistake does not get a wall of identical yellow cards.
+
+**The student's speech is punctuated.** `TutorSpeech.polishRecognised` turns the
+recogniser's bare word chain into a sentence: capitalised, `i` → `I`, a comma
+after a leading discourse marker ("So, …", "Actually, …"), long runs broken at
+"and / but / so / then", and each sentence ended with `?` or `.`. The question
+mark is inferred from how the sentence opens — a wh-word first, or an auxiliary
+in front of a subject ("do you", "is it"), while "is going" stays a statement. It
+is applied to both the call path and the generic voice input, and it is what the
+grammar checker, the model, and the transcript all see.
+
+**Mute is sticky.** `startVoiceListening()` refuses to run while
+`isCallMuted` — so the end of a tutor line, a scheduled relisten, the silence
+watchdog and a barge-in can none of them reopen the microphone behind the
+student's back. Only unmuting does.

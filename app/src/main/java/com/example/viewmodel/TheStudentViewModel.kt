@@ -4324,13 +4324,27 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val phase = _uiState.value.callPhase
         if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) return
 
+        // Corrections belong to the student, never to the tutor. A fix is only
+        // shown when it was produced *from* the sentence the student just said;
+        // anything else (a model tidying its own reply, or answering with a
+        // rewritten line) is dropped rather than displayed as the student's
+        // mistake.
+        val studentLine = _uiState.value.callStudentLine?.trim()
+        val safeFix = fix?.takeIf { candidate ->
+            candidate.original.trim().isNotEmpty() &&
+                candidate.original.trim() == studentLine &&
+                candidate.corrected.trim() != studentLine
+        }
+
         _uiState.update { state ->
             state.copy(
                 callTutorLine = say,
                 currentAiResponseText = say,
-                callFix = fix,
-                callFixes = if (fix != null && state.callFixes.none { it.corrected == fix.corrected }) {
-                    state.callFixes + fix
+                callFix = safeFix,
+                callFixes = if (safeFix != null &&
+                    state.callFixes.none { it.corrected.equals(safeFix.corrected, ignoreCase = true) }
+                ) {
+                    state.callFixes + safeFix
                 } else {
                     state.callFixes
                 },
@@ -4339,7 +4353,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 } else {
                     state.callWords
                 },
-                currentGrammarTip = fix?.let { "Better: \"${it.corrected}\"  ·  ${it.rule}" }
+                currentGrammarTip = safeFix?.let { "Better: \"${it.corrected}\"  ·  ${it.rule}" }
                     ?: state.currentGrammarTip,
                 currentVocabularyHighlight = word ?: state.currentVocabularyHighlight,
                 suggestedVoicePills = starters.ifEmpty { state.suggestedVoicePills },
@@ -4443,8 +4457,27 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * the student sees their own sentence fixed while the tutor is "thinking",
      * and a slow or unreachable server never means a silent call.
      */
+    /**
+     * Is [corrected] a rewrite of [original], or a different sentence?
+     *
+     * A model asked for "the corrected version of the student's sentence"
+     * sometimes answers with its own reply, or with a tidied paraphrase. Showing
+     * that as the student's mistake is confusing and, worse, teaches the wrong
+     * sentence. A genuine correction keeps at least half of the original words.
+     */
+    private fun isCloseTo(corrected: String, original: String): Boolean {
+        val a = original.lowercase(Locale.US).split(Regex("[^a-z']+")).filter { it.isNotBlank() }
+        val b = corrected.lowercase(Locale.US).split(Regex("[^a-z']+")).filter { it.isNotBlank() }
+        if (a.isEmpty() || b.isEmpty()) return false
+        val shared = a.count { it in b }
+        return shared.toFloat() / a.size >= 0.5f
+    }
+
     private fun submitCallTurn(text: String) {
-        val trimmed = text.trim()
+        // What the recogniser hands over is an unpunctuated word chain. This is
+        // the student's sentence as it will be shown, corrected and remembered:
+        // capitalised, paused and ended properly.
+        val trimmed = TutorSpeech.polishRecognised(text)
         val state = _uiState.value
         if (trimmed.isBlank()) {
             handleRecognitionMiss()
@@ -4497,9 +4530,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 callTranscript = (it.callTranscript +
                     TutorCallEntry(TutorCallEntry.Role.STUDENT, trimmed) +
                     listOfNotNull(
-                        localFix?.let { fix ->
-                            TutorCallEntry(TutorCallEntry.Role.FIX, fix.corrected, fix)
-                        }
+                        // The same sentence pattern repeating every few turns is
+                        // the most common thing a learner does; showing the same
+                        // yellow card again and again buries the conversation.
+                        localFix
+                            ?.takeIf { fix ->
+                                it.callFixes.none {
+                                    it.corrected.equals(fix.corrected, ignoreCase = true)
+                                }
+                            }
+                            ?.let { fix -> TutorCallEntry(TutorCallEntry.Role.FIX, fix.corrected, fix) }
                     )).takeLast(MAX_TRANSCRIPT_LINES)
             )
         }
@@ -4535,7 +4575,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                             corrected = corrected,
                             rule = turn.rule.orEmpty(),
                             turnIndex = turnIndex
-                        ).takeIf { it.isUseful }
+                        ).takeIf { it.isUseful && isCloseTo(corrected, trimmed) }
                     }
                     appendConversationTurn(trimmed, turn.say)
                     deliverTutorTurn(
@@ -4647,6 +4687,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun startVoiceListening() {
+        // Mute is a promise, not a pause: nothing reopens the microphone behind
+        // the student's back — not the end of a tutor line, not a watchdog, not a
+        // scheduled relisten. Only [toggleCallMute] clears it.
+        if (_uiState.value.isCallMuted) return
         stopSpeaking()
         if (SpeechRecognizer.isRecognitionAvailable(getApplication())) {
             if (speechRecognizer == null) {
@@ -4715,7 +4759,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     fun processUserVoiceInput(userInput: String) {
-        val trimmed = userInput.trim()
+        // Same treatment as a call turn: recognised speech is punctuated before
+        // anything else looks at it. Typed input keeps its own punctuation.
+        val trimmed = TutorSpeech.polishRecognised(userInput)
         if (trimmed.isBlank()) return
 
         // During a call, typing is just another way of taking a turn: same
