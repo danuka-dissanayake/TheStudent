@@ -796,10 +796,13 @@ private fun LiveContent(
             phase = callPhase,
             isMuted = isMuted,
             caption = when {
-                isMuted -> "Muted — tap to unmute · hold to speak again"
+                isMuted -> "Microphone off — tap to turn it back on"
                 voiceState == AssistantVoiceState.SPEAKING -> "Tap to interrupt"
                 voiceState == AssistantVoiceState.THINKING -> "Thinking… tap to hear the last line again"
-                voiceState == AssistantVoiceState.LISTENING -> "Listening — tap when you have finished"
+                // The recogniser restarts itself mid-turn now, so the caption has
+                // to say that pausing is allowed.
+                voiceState == AssistantVoiceState.LISTENING ->
+                    "Listening — keep going, tap when you have finished"
                 else -> "Tap to speak"
             },
             onMic = micAction,
@@ -1005,15 +1008,20 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
                 )
             }
             Spacer(Modifier.height(7.dp))
-            Text(
-                text = "“${fix.corrected}”",
-                fontFamily = MaisonNeueFontFamily,
-                fontSize = 15.sp,
-                lineHeight = 21.sp,
-                fontWeight = FontWeight.Bold,
-                color = Ink
-            )
-            if (fix.rule.isNotBlank()) {
+            // The corrected sentence, only when something was actually wrong. A
+            // card that quotes the student's own sentence back at them reads as a
+            // correction with nothing to correct.
+            if (fix.isUseful) {
+                Text(
+                    text = "“${fix.corrected}”",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 15.sp,
+                    lineHeight = 21.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink
+                )
+            }
+            if (fix.rule.isNotBlank() && fix.isUseful) {
                 Spacer(Modifier.height(3.dp))
                 Text(
                     text = fix.rule,
@@ -1021,6 +1029,29 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
                     fontSize = 12.sp,
                     color = Color(0xFF8A6A2F)
                 )
+            }
+            // The other half of the feedback: not a mistake, a stronger word for
+            // the one they already used.
+            if (fix.hasUpgrade) {
+                Spacer(Modifier.height(if (fix.isUseful) 9.dp else 0.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text(
+                        text = "TRY",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 10.sp,
+                        fontWeight = FontWeight.ExtraBold,
+                        letterSpacing = 0.8.sp,
+                        color = Color(0xFF8A6A2F).copy(alpha = 0.8f)
+                    )
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "${fix.upgradeFrom}  →  ${fix.upgradeTo}",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 13.5.sp,
+                        fontWeight = FontWeight.Bold,
+                        color = Ink
+                    )
+                }
             }
         }
     }
@@ -1268,7 +1299,10 @@ private fun SummaryContent(
                     horizontalArrangement = Arrangement.SpaceEvenly
                 ) {
                     SummaryStat(summary.turns.toString(), "turns")
-                    SummaryStat(summary.corrections.size.toString(), "corrections")
+                    SummaryStat(
+                        summary.corrections.count { it.isUseful }.toString(),
+                        "corrections"
+                    )
                     SummaryStat(summary.words.size.toString(), "new words")
                 }
             }
@@ -1298,21 +1332,33 @@ private fun SummaryContent(
                                 maxLines = 2,
                                 overflow = TextOverflow.Ellipsis
                             )
-                            Spacer(Modifier.height(3.dp))
-                            Text(
-                                text = "“${fix.corrected}”",
-                                fontFamily = MaisonNeueFontFamily,
-                                fontSize = 14.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = Ink
-                            )
-                            if (fix.rule.isNotBlank()) {
+                            if (fix.isUseful) {
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = "“${fix.corrected}”",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 14.5.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = Ink
+                                )
+                            }
+                            if (fix.rule.isNotBlank() && fix.isUseful) {
                                 Spacer(Modifier.height(3.dp))
                                 Text(
                                     text = fix.rule,
                                     fontFamily = MaisonNeueFontFamily,
                                     fontSize = 12.sp,
                                     color = Warm
+                                )
+                            }
+                            if (fix.hasUpgrade) {
+                                Spacer(Modifier.height(3.dp))
+                                Text(
+                                    text = "try  ${fix.upgradeFrom} → ${fix.upgradeTo}",
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = BrandDeep
                                 )
                             }
                         }

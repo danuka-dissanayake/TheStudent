@@ -654,3 +654,48 @@ grammar checker, the model, and the transcript all see.
 `isCallMuted` — so the end of a tutor line, a scheduled relisten, the silence
 watchdog and a barge-in can none of them reopen the microphone behind the
 student's back. Only unmuting does.
+
+### 11.16 Round 19k — one turn, many segments; corrections that are corrections
+
+**Why long answers used to arrive cut in half.** Android's `SpeechRecognizer`
+is built for a short command, not for a student telling a story. It ends its own
+session after roughly a second of quiet and hands back only what it heard in
+*that* session, and the app was treating that result as the end of the turn — so
+a student who paused to think had the first few words sent to the tutor and the
+rest spoken into a microphone nobody was reading.
+
+The turn is now **dictated**, not captured in one shot:
+
+| Step | What happens |
+| --- | --- |
+| segment | `onResults` appends its words to `dictationBuffer` (`mergeHeard` drops words a restarted session repeats) |
+| reopen | `beginRecognition()` starts a fresh session ~90 ms later, so the gap is shorter than the student's next breath |
+| commit | the student taps, the recogniser stops with words in hand, an error arrives after words, or `DICTATION_PAUSE_MS` (2 800 ms) of quiet passes |
+| ignore | `discardingRecognition` swallows the late callback from the cancelled session, so a turn can never be submitted twice |
+
+`EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS` /
+`..._POSSIBLY_COMPLETE_...` are set to 4 s as hints for engines that honour them;
+engines that ignore them are covered by the restart loop. The silence watchdog
+and `onEndOfSpeech` are both disabled while dictating, so nothing declares the
+turn over in the middle of it. The live caption is `buffer + partial`, never just
+the current partial.
+
+**Corrections now belong to the learner, and are corrections.** A card appears
+only when it is about the sentence the student just said (`fix.original ==
+callStudentLine`), and the model's version is discarded when it is the tutor's own
+reply, a paraphrase, or the student's sentence with punctuation added —
+`modelFixFor` compares word lists, not strings. The prompt asks for a *minimal
+edit* of the student's own words and explicitly forbids putting its reply on the
+FIX line.
+
+**Word upgrades.** `WordUpgrades` (on-device, instant) and the model's
+`WORD: plain => better` line supply the second kind of feedback: not a mistake,
+a stronger word. `GrammarFix.upgradeFrom/upgradeTo` carries it, the card shows a
+`TRY very good → excellent` row, "Hear it" reads whichever half exists, and it is
+excluded from `cleanTurnPercent` — a better word for a correct sentence is a
+bonus, never a deduction.
+
+**Recurring mistakes.** When the same rule has now fired twice on a call, the
+next turn's system prompt carries it (`focusRule`) with the instruction to ask a
+question that makes the student use the correct form once — never to lecture in
+SAY.

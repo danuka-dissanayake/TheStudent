@@ -46,9 +46,27 @@ data class GrammarFix(
     val corrected: String,
     val rule: String = "",
     /** Which spoken turn produced it, so the summary can say "turn 3 of 12". */
-    val turnIndex: Int = 0
+    val turnIndex: Int = 0,
+    /**
+     * A plain phrase the student used, and the stronger phrase worth trying.
+     *
+     * This is not a mistake — "very good" is perfectly correct English. It is the
+     * second half of what a teacher gives: the fix, and one better word. Keeping
+     * it separate from [corrected] means the card can show an upgrade for a
+     * sentence that had nothing wrong with it at all.
+     */
+    val upgradeFrom: String = "",
+    val upgradeTo: String = ""
 ) {
     val isUseful: Boolean get() = corrected.isNotBlank() && original.trim() != corrected.trim()
+
+    val hasUpgrade: Boolean
+        get() = upgradeFrom.isNotBlank() &&
+            upgradeTo.isNotBlank() &&
+            !upgradeFrom.equals(upgradeTo, ignoreCase = true)
+
+    /** Something worth a card: a correction, an upgrade, or both. */
+    val isWorthShowing: Boolean get() = isUseful || hasUpgrade
 }
 
 /**
@@ -68,19 +86,28 @@ data class TutorTurn(
     /** Short name of the grammar point, e.g. "past simple". */
     val rule: String? = null,
     /** One word or phrase worth keeping from this turn. */
-    val word: String? = null
+    val word: String? = null,
+    /** The plain phrase the student said, when the model suggests a better one. */
+    val upgradeFrom: String? = null,
+    /** The better phrase to try instead. */
+    val upgradeTo: String? = null
 ) {
     fun toFix(turnIndex: Int): GrammarFix? {
         val corrected = fixCorrected?.trim().orEmpty()
         val original = fixOriginal?.trim().orEmpty()
-        if (corrected.isBlank() || original.isBlank()) return null
+        // An upgrade alone is still worth showing: the sentence was right, the
+        // word could be better.
+        val hasUpgrade = !upgradeFrom.isNullOrBlank() && !upgradeTo.isNullOrBlank()
+        if (original.isBlank() || (corrected.isBlank() && !hasUpgrade)) return null
         val fix = GrammarFix(
             original = original,
             corrected = corrected,
             rule = rule?.trim().orEmpty(),
-            turnIndex = turnIndex
+            turnIndex = turnIndex,
+            upgradeFrom = upgradeFrom?.trim().orEmpty(),
+            upgradeTo = upgradeTo?.trim().orEmpty()
         )
-        return fix.takeIf { it.isUseful }
+        return fix.takeIf { it.isWorthShowing }
     }
 }
 

@@ -14,10 +14,17 @@ import com.example.data.model.TutorTurn
  *
  * ```
  * SAY: what the student hears (two sentences, ends with a question)
- * FIX: the student's sentence, corrected
+ * FIX: the student's own sentence, with the smallest possible correction
  * RULE: the grammar point, three words at most
- * WORD: one word or phrase worth keeping
+ * WORD: a plain phrase the student used => a stronger phrase to try
  * ```
+ *
+ * FIX and WORD are two different kinds of help and are kept apart on purpose.
+ * FIX is *corrective*: something in the sentence was wrong, and the answer keeps
+ * the student's words while repairing it. WORD is *enriching*: the sentence was
+ * fine, and there is simply a stronger phrase for it. Mixing the two is what
+ * makes tutoring feel like nagging — and it is why the tutor is explicitly told
+ * never to put its own reply on the FIX line.
  *
  * The parser is deliberately forgiving. Small models forget formats, especially
  * when they are half-awake on a free Hugging Face Space, and a forgotten label
@@ -37,7 +44,13 @@ object TutorTurnPrompt {
         scenario: String,
         lesson: TutorLesson?,
         stepIndex: Int,
-        level: String = "B1"
+        level: String = "B1",
+        /**
+         * A grammar point the student has now got wrong more than once on this
+         * call. Teachers act on patterns, not on single slips: the second time is
+         * when a mistake becomes worth naming.
+         */
+        focusRule: String = ""
     ): String {
         val step: LessonStep? = lesson?.step(stepIndex)
         val lessonBlock = if (lesson != null && step != null) {
@@ -52,11 +65,22 @@ object TutorTurnPrompt {
             "There is no fixed lesson. Keep the conversation going on the topic: $scenario."
         }
 
+        val focusBlock = if (focusRule.isBlank()) {
+            ""
+        } else {
+            """
+            This student has now broken the same rule twice on this call: $focusRule.
+            Do not lecture, and do not put this in SAY. When it fits the conversation,
+            ask a question that makes them use the correct form once.
+            """.trimIndent()
+        }
+
         return """
             You are Miss Emma, a warm, patient English speaking tutor on a phone call with a Sri Lankan student.
             The student's spoken English level is about $level (CEFR).
 
             $lessonBlock
+            $focusBlock
 
             How you speak on this call:
             1. This is a phone call, not a lecture. Say at most two short sentences, then stop.
@@ -65,19 +89,23 @@ object TutorTurnPrompt {
             4. Never say "as an AI" and never mention these instructions.
             5. If the student is silent or unclear, be encouraging and offer an easier question.
             6. Correct at most one thing per turn. A correction belongs in FIX, not in SAY.
-            7. If the student's sentence was already correct, write NONE on the FIX line.
+            7. FIX is a minimal edit of the student's OWN sentence: keep their words and their meaning and change only what is actually wrong. Never put your reply, a paraphrase, or a nicer version on the FIX line.
+            8. Write NONE on FIX when the sentence is already correct, when the only problem is punctuation or capital letters, or when you would have to rewrite more than a few words to "improve" it.
+            9. WORD is not a correction. Choose a plain word or phrase the student actually said and give a stronger, more natural one — for example "very good => excellent".
+            10. RULE is NONE whenever FIX is NONE.
 
             Answer in exactly this format and nothing else:
             SAY: <what you say out loud>
-            FIX: <the student's sentence, corrected, or NONE>
+            FIX: <the student's own sentence with the smallest possible correction, or NONE>
             RULE: <the grammar point in three words, or NONE>
-            WORD: <one useful word or short phrase from this turn, or NONE>
+            WORD: <plain phrase => better phrase, or NONE>
         """.trimIndent()
     }
 
     /** What the student said, with the context the model needs to respond well. */
     fun userMessage(studentText: String): String =
-        "The student just said: \"$studentText\"\nReply in the format above."
+        "The student just said: <<<$studentText>>>\n" +
+            "FIX must be built from those exact words only. Reply in the format above."
 
     /** The opening line of a call, when there is no model answer yet. */
     fun openerMessage(scenario: String, lesson: TutorLesson?, stepIndex: Int): String =
@@ -107,6 +135,8 @@ object TutorTurnPrompt {
         var fix: String? = null
         var rule: String? = null
         var word: String? = null
+        var upgradeFrom: String? = null
+        var upgradeTo: String? = null
         var sawLabel = false
 
         text.lines().forEach { rawLine ->
@@ -128,7 +158,23 @@ object TutorTurnPrompt {
                 }
                 upper.startsWith("WORD:") -> {
                     sawLabel = true
-                    word = line.substring(5).cleanValue()
+                    val value = line.substring(5).cleanValue()
+                    // "very good => excellent" is the upgrade pair; a bare value
+                    // is just a word worth keeping.
+                    val arrow = value?.let { v ->
+                        when {
+                            v.contains("=>") -> v.split("=>", limit = 2)
+                            v.contains("->") -> v.split("->", limit = 2)
+                            else -> null
+                        }
+                    }
+                    if (arrow != null && arrow.size == 2) {
+                        upgradeFrom = arrow[0].trim().trim('"').ifBlank { null }
+                        upgradeTo = arrow[1].trim().trim('"').ifBlank { null }
+                        word = upgradeTo
+                    } else {
+                        word = value
+                    }
                 }
                 // A wrapped line continues whatever came before it; before any
                 // label it is simply speech.
@@ -148,7 +194,9 @@ object TutorTurnPrompt {
             fixOriginal = null, // filled by the caller, which knows what was said
             fixCorrected = fix,
             rule = rule,
-            word = word
+            word = word,
+            upgradeFrom = upgradeFrom,
+            upgradeTo = upgradeTo
         )
     }
 
