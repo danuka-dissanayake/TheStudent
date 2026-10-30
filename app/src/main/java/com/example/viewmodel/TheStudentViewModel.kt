@@ -4542,13 +4542,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * One student turn: transcribe, correct, answer, speak, advance the lesson.
-     *
-     * The local correction is shown immediately — before the network call — so
-     * the student sees their own sentence fixed while the tutor is "thinking",
-     * and a slow or unreachable server never means a silent call.
-     */
-    /**
      * The instant correction, computed on the phone while the model is still
      * thinking.
      *
@@ -4640,6 +4633,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         return shared.toFloat() / a.size >= 0.5f
     }
 
+    /**
+     * One student turn: transcribe, correct, answer, speak, advance the lesson.
+     *
+     * The local correction is shown immediately — before the network call — so
+     * the student sees their own sentence fixed while the tutor is "thinking",
+     * and a slow or unreachable server never means a silent call.
+     */
     private fun submitCallTurn(text: String) {
         // What the recogniser hands over is an unpunctuated word chain. This is
         // the student's sentence as it will be shown, corrected and remembered:
