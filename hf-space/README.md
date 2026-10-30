@@ -2,7 +2,7 @@
 title: Miss Emma Tutor
 emoji: 🎙️
 colorFrom: green
-colorTo: teal
+colorTo: blue
 sdk: docker
 app_port: 7860
 pinned: false
