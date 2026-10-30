@@ -17,6 +17,7 @@ import com.example.data.model.TutorTurn
  * FIX: the student's own sentence, with the smallest possible correction
  * RULE: the grammar point, three words at most
  * WORD: a plain phrase the student used => a stronger phrase to try
+ * NOTE: one fact about the student worth remembering
  * ```
  *
  * FIX and WORD are two different kinds of help and are kept apart on purpose.
@@ -50,7 +51,13 @@ object TutorTurnPrompt {
          * call. Teachers act on patterns, not on single slips: the second time is
          * when a mistake becomes worth naming.
          */
-        focusRule: String = ""
+        focusRule: String = "",
+        /**
+         * Facts the student has already told the tutor on earlier calls. A tutor
+         * who remembers "your exam is on Tuesday" is a tutor; one who asks the
+         * same five questions every call is a form.
+         */
+        knownFacts: List<String> = emptyList()
     ): String {
         val step: LessonStep? = lesson?.step(stepIndex)
         val lessonBlock = if (lesson != null && step != null) {
@@ -63,6 +70,15 @@ object TutorTurnPrompt {
             """.trimIndent()
         } else {
             "There is no fixed lesson. Keep the conversation going on the topic: $scenario."
+        }
+
+        val memoryBlock = if (knownFacts.isEmpty()) {
+            ""
+        } else {
+            """
+            You remember these things about this student from earlier calls: ${knownFacts.joinToString("; ")}.
+            Bring one of them up only if it fits naturally — one, never a list.
+            """.trimIndent()
         }
 
         val focusBlock = if (focusRule.isBlank()) {
@@ -80,6 +96,7 @@ object TutorTurnPrompt {
             The student's spoken English level is about $level (CEFR).
 
             $lessonBlock
+            $memoryBlock
             $focusBlock
 
             How you speak on this call:
@@ -93,12 +110,15 @@ object TutorTurnPrompt {
             8. Write NONE on FIX when the sentence is already correct, when the only problem is punctuation or capital letters, or when you would have to rewrite more than a few words to "improve" it.
             9. WORD is not a correction. Choose a plain word or phrase the student actually said and give a stronger, more natural one — for example "very good => excellent".
             10. RULE is NONE whenever FIX is NONE.
+            11. Never ask a question you have already asked in this call. Read the conversation so far before you write SAY.
+            12. NOTE is one short fact the student has told you about themselves — a name, a job, an exam, a place, a family member. Write NONE if there is nothing new. Never invent one.
 
             Answer in exactly this format and nothing else:
             SAY: <what you say out loud>
             FIX: <the student's own sentence with the smallest possible correction, or NONE>
             RULE: <the grammar point in three words, or NONE>
             WORD: <plain phrase => better phrase, or NONE>
+            NOTE: <one fact about the student, or NONE>
         """.trimIndent()
     }
 
@@ -137,6 +157,7 @@ object TutorTurnPrompt {
         var word: String? = null
         var upgradeFrom: String? = null
         var upgradeTo: String? = null
+        var note: String? = null
         var sawLabel = false
 
         text.lines().forEach { rawLine ->
@@ -178,6 +199,10 @@ object TutorTurnPrompt {
                 }
                 // A wrapped line continues whatever came before it; before any
                 // label it is simply speech.
+                upper.startsWith("NOTE:") -> {
+                    sawLabel = true
+                    note = line.substring(5).cleanValue()
+                }
                 else -> say.appendLine(line)
             }
         }
@@ -196,7 +221,8 @@ object TutorTurnPrompt {
             rule = rule,
             word = word,
             upgradeFrom = upgradeFrom,
-            upgradeTo = upgradeTo
+            upgradeTo = upgradeTo,
+            note = note
         )
     }
 

@@ -88,6 +88,7 @@ import androidx.core.content.ContextCompat
 import com.example.data.model.CallPhase
 import com.example.data.model.CallSummary
 import com.example.data.model.GrammarFix
+import com.example.data.model.TutorReviewState
 import com.example.data.model.TutorCallEntry
 import com.example.data.model.TutorLesson
 import com.example.data.local.TheStudentPreferences
@@ -178,6 +179,16 @@ fun AiTutorScreen(
     onSelectLesson: (TutorLesson?) -> Unit,
     onDismissSummary: () -> Unit,
     onShowSnackbar: (String) -> Unit,
+    /** A "say it properly" moment in progress: warm-up review or a drill. */
+    review: TutorReviewState? = null,
+    /** Sentences from earlier calls waiting to be practised. */
+    dueReviews: Int = 0,
+    /** What the last call left to do, shown on the idle screen. */
+    lastCallNote: String = "",
+    /** Read the corrected sentence and open the microphone for a drill. */
+    onSayFix: () -> Unit = {},
+    /** Leave a drill and go back to talking. */
+    onCancelDrill: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -248,6 +259,7 @@ fun AiTutorScreen(
                 micLevel = micLevel,
                 transcript = transcript,
                 currentFix = currentFix,
+                review = review,
                 lesson = lesson,
                 lessonStepIndex = lessonStepIndex,
                 isLessonComplete = isLessonComplete,
@@ -256,6 +268,8 @@ fun AiTutorScreen(
                 onFinishTurn = onFinishTurn,
                 onReplay = onReplay,
                 onHearFix = onHearFix,
+                onSayFix = onSayFix,
+                onCancelDrill = onCancelDrill,
                 onMenu = {
                     menuLessons = activeLessonId != null
                     menuOpen = true
@@ -267,6 +281,8 @@ fun AiTutorScreen(
                 studentName = studentName,
                 scenario = currentScenario,
                 lesson = lesson,
+                dueReviews = dueReviews,
+                lastCallNote = lastCallNote,
                 onMic = { startWithPermission() },
                 onMenu = {
                     menuLessons = activeLessonId != null
@@ -469,6 +485,8 @@ private fun IdleContent(
     studentName: String,
     scenario: String,
     lesson: TutorLesson?,
+    dueReviews: Int,
+    lastCallNote: String,
     onMic: () -> Unit,
     onMenu: () -> Unit,
     onExit: () -> Unit,
@@ -527,6 +545,10 @@ private fun IdleContent(
                     color = Ink,
                     textAlign = TextAlign.Center
                 )
+                if (dueReviews > 0 || lastCallNote.isNotBlank()) {
+                    Spacer(Modifier.height(12.dp))
+                    ReviewPill(note = lastCallNote, due = dueReviews)
+                }
                 Spacer(Modifier.weight(0.55f))
 
                 Row(
@@ -653,6 +675,7 @@ private fun LiveContent(
     micLevel: StateFlow<Float>,
     transcript: List<TutorCallEntry>,
     currentFix: GrammarFix?,
+    review: TutorReviewState?,
     lesson: TutorLesson?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
@@ -661,6 +684,8 @@ private fun LiveContent(
     onFinishTurn: () -> Unit,
     onReplay: () -> Unit,
     onHearFix: () -> Unit,
+    onSayFix: () -> Unit,
+    onCancelDrill: () -> Unit,
     onMenu: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -759,7 +784,7 @@ private fun LiveContent(
                             TutorCallEntry.Role.STUDENT -> StudentBubble(entry.text)
                             TutorCallEntry.Role.TUTOR -> TutorBubble(entry.text)
                             TutorCallEntry.Role.FIX -> entry.fix?.let {
-                                CorrectionCard(fix = it, onHear = onHearFix)
+                                CorrectionCard(fix = it, onHear = onHearFix, onSay = onSayFix)
                             }
                         }
                     }
@@ -769,7 +794,7 @@ private fun LiveContent(
             // The live correction is shown even before the model's reply lands, so
             // the student sees the fix while the words are still fresh.
             if (currentFix != null && transcript.none { it.role == TutorCallEntry.Role.FIX }) {
-                AppearIn { CorrectionCard(fix = currentFix, onHear = onHearFix) }
+                AppearIn { CorrectionCard(fix = currentFix, onHear = onHearFix, onSay = onSayFix) }
             }
 
             AnimatedVisibility(
@@ -780,6 +805,12 @@ private fun LiveContent(
                 ThinkingBubble()
             }
             Spacer(Modifier.height(4.dp))
+        }
+
+        // A drill takes over the floor: it says exactly what to say, so the
+        // student never has to remember a sentence they heard a moment ago.
+        if (review != null) {
+            DrillCard(review = review, onCancel = onCancelDrill)
         }
 
         // One button, whose meaning depends on whose turn it is. That is the whole
@@ -975,14 +1006,13 @@ private fun StudentBubble(text: String) {
  * real teacher gives.
  */
 @Composable
-private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
+private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit, onSay: () -> Unit) {
     Box(
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(18.dp))
             .background(CorrectionFill)
             .border(1.dp, Color(0xCCFFFFFF), RoundedCornerShape(18.dp))
-            .clickable(onClick = onHear)
             .padding(14.dp)
             .testTag("tutor_grammar_fix")
     ) {
@@ -1000,11 +1030,29 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
                 )
                 Spacer(Modifier.weight(1f))
                 Text(
-                    text = "Hear it  ▸",
+                    text = "Hear it",
                     fontFamily = MaisonNeueFontFamily,
                     fontSize = 12.sp,
                     fontWeight = FontWeight.Bold,
-                    color = Warm
+                    color = Warm,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onHear)
+                        .padding(horizontal = 6.dp, vertical = 3.dp)
+                )
+                Spacer(Modifier.width(2.dp))
+                Text(
+                    text = "Say it  ▸",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    color = Color.White,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(9.dp))
+                        .background(Brand)
+                        .clickable(onClick = onSay)
+                        .padding(horizontal = 9.dp, vertical = 4.dp)
+                        .testTag("tutor_say_fix")
                 )
             }
             Spacer(Modifier.height(7.dp))
@@ -1054,6 +1102,137 @@ private fun CorrectionCard(fix: GrammarFix, onHear: () -> Unit) {
                 }
             }
         }
+    }
+}
+
+/**
+ * The drill, in front of the student while they speak.
+ *
+ * A correction card is something you *read*; this is something you *do*. The
+ * target sentence is large, the last thing heard is underneath in grey (so a
+ * misrecognition is visible rather than mysterious), and the result replaces the
+ * instruction the moment it lands.
+ */
+@Composable
+private fun DrillCard(review: TutorReviewState, onCancel: () -> Unit) {
+    val done = review.phase != TutorReviewState.Phase.LISTENING
+    val good = review.phase == TutorReviewState.Phase.CORRECT
+    Box(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(
+                when {
+                    !done -> Color(0xF2FFFFFF)
+                    good -> Color(0xF2E7F8EF)
+                    else -> Color(0xF2FFF4E2)
+                }
+            )
+            .border(
+                1.dp,
+                if (done && !good) Warm.copy(alpha = 0.5f) else Color(0xCCFFFFFF),
+                RoundedCornerShape(18.dp)
+            )
+            .padding(14.dp)
+            .testTag("tutor_drill_card")
+    ) {
+        Column {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = when {
+                        !done && review.isWarmUp -> "WARM-UP · SAY IT"
+                        !done -> "SAY IT"
+                        good -> "THAT'S IT"
+                        else -> "TRY THIS ONE"
+                    },
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 10.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.9.sp,
+                    color = if (good) BrandDeep else Warm
+                )
+                Spacer(Modifier.weight(1f))
+                Text(
+                    text = "Skip",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Faint,
+                    modifier = Modifier
+                        .clip(RoundedCornerShape(8.dp))
+                        .clickable(onClick = onCancel)
+                        .padding(horizontal = 6.dp, vertical = 2.dp)
+                )
+            }
+            Spacer(Modifier.height(6.dp))
+            Text(
+                text = "“${review.target}”",
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 16.sp,
+                lineHeight = 22.sp,
+                fontWeight = FontWeight.Bold,
+                color = Ink
+            )
+            if (review.wrong.isNotBlank() && !done) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "you said “${review.wrong}”",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    color = Muted,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+            if (review.heard.isNotBlank()) {
+                Spacer(Modifier.height(3.dp))
+                Text(
+                    text = "I heard “${review.heard}”",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    color = if (good) BrandDeep else Color(0xFF8A6A2F),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+/**
+ * What the last call left behind, one line above the mode cards.
+ *
+ * Deliberately a pill, not a panel: the idle screen has one job — get the student
+ * to tap the orb — and a second card competing with it would be worse than no
+ * continuity at all.
+ */
+@Composable
+private fun ReviewPill(note: String, due: Int) {
+    val text = when {
+        due > 0 -> "$due sentence${if (due == 1) "" else "s"} to review · tap to start"
+        note.isNotBlank() -> note
+        else -> return
+    }
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .clip(RoundedCornerShape(50))
+            .background(Color(0x66FFFFFF))
+            .border(1.dp, GlassEdge, RoundedCornerShape(50))
+            .padding(horizontal = 12.dp, vertical = 6.dp)
+    ) {
+        Box(Modifier.size(5.dp).clip(CircleShape).background(if (due > 0) Warm else Brand))
+        Spacer(Modifier.width(7.dp))
+        Text(
+            text = text,
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = if (due > 0) Color(0xFF8A6A2F) else BrandDeep,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
+        )
     }
 }
 
@@ -1304,6 +1483,176 @@ private fun SummaryContent(
                         "corrections"
                     )
                     SummaryStat(summary.words.size.toString(), "new words")
+                }
+            }
+
+            if (summary.levelLabel.isNotBlank()) {
+                Spacer(Modifier.height(10.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Box(
+                        Modifier
+                            .clip(RoundedCornerShape(50))
+                            .background(Brand.copy(alpha = 0.12f))
+                            .padding(horizontal = 10.dp, vertical = 5.dp)
+                    ) {
+                        Text(
+                            text = "Level ${summary.levelLabel}",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = BrandDeep
+                        )
+                    }
+                    Spacer(Modifier.width(8.dp))
+                    Text(
+                        text = "your next call starts here",
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 12.sp,
+                        color = Muted
+                    )
+                }
+            }
+
+            if (summary.reviewAsked > 0) {
+                Spacer(Modifier.height(14.dp))
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            text = "Warm-up",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp,
+                            color = Muted
+                        )
+                        Spacer(Modifier.weight(1f))
+                        Text(
+                            text = "${summary.reviewed} of ${summary.reviewAsked} right",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = BrandDeep
+                        )
+                    }
+                }
+            }
+
+            if (summary.checks.isNotEmpty()) {
+                Spacer(Modifier.height(18.dp))
+                Text(
+                    text = "SCENARIO CHECK",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 11.5.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    letterSpacing = 0.9.sp,
+                    color = Muted
+                )
+                Spacer(Modifier.height(8.dp))
+                summary.checks.forEach { check ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        verticalAlignment = Alignment.Top
+                    ) {
+                        Text(
+                            text = if (check.met) "✓" else "○",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 14.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            color = if (check.met) Brand else Faint
+                        )
+                        Spacer(Modifier.width(9.dp))
+                        Column {
+                            Text(
+                                text = check.label,
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.5.sp,
+                                fontWeight = if (check.met) FontWeight.Bold else FontWeight.Medium,
+                                color = if (check.met) Ink else Muted
+                            )
+                            if (!check.met) {
+                                Text(
+                                    text = check.tip,
+                                    fontFamily = MaisonNeueFontFamily,
+                                    fontSize = 12.sp,
+                                    color = Color(0xFF8A6A2F)
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (summary.paceWpm > 0) {
+                Spacer(Modifier.height(16.dp))
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "SPEAKING PACE",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = 0.8.sp,
+                                color = Muted
+                            )
+                            Spacer(Modifier.weight(1f))
+                            Text(
+                                text = "${summary.paceWpm} words / min",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = Ink
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(
+                            text = when {
+                                summary.paceWpm < 95 ->
+                                    "That is a careful pace. Aim for 110–140 so a listener does not have to wait."
+                                summary.paceWpm > 165 ->
+                                    "That is quick. 110–140 gives the other person room to follow you."
+                                else -> "That sits right in the natural range for a conversation."
+                            },
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            lineHeight = 16.sp,
+                            color = Muted
+                        )
+                    }
+                }
+            }
+
+            if (summary.practiceWords.isNotEmpty()) {
+                Spacer(Modifier.height(16.dp))
+                GlassCard(modifier = Modifier.fillMaxWidth()) {
+                    Column(modifier = Modifier.padding(14.dp)) {
+                        Text(
+                            text = "SAY THESE ALOUD",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 0.8.sp,
+                            color = Muted
+                        )
+                        Spacer(Modifier.height(5.dp))
+                        Text(
+                            text = summary.practiceWords.joinToString("  ·  "),
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 14.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Ink
+                        )
+                        Spacer(Modifier.height(3.dp))
+                        Text(
+                            text = "The microphone did not catch these cleanly. Slow down on them.",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            color = Muted
+                        )
+                    }
                 }
             }
 

@@ -1,5 +1,7 @@
 package com.example.data.model
 
+import com.example.data.voice.ScenarioCheck
+
 /**
  * The state of a tutor call.
  *
@@ -90,7 +92,9 @@ data class TutorTurn(
     /** The plain phrase the student said, when the model suggests a better one. */
     val upgradeFrom: String? = null,
     /** The better phrase to try instead. */
-    val upgradeTo: String? = null
+    val upgradeTo: String? = null,
+    /** One fact about the student worth remembering for the next call. */
+    val note: String? = null
 ) {
     fun toFix(turnIndex: Int): GrammarFix? {
         val corrected = fixCorrected?.trim().orEmpty()
@@ -109,6 +113,31 @@ data class TutorTurn(
         )
         return fix.takeIf { it.isWorthShowing }
     }
+}
+
+/**
+ * A "say it properly" moment.
+ *
+ * Two things use it: the warm-up that brings back a sentence the student got
+ * wrong on an earlier call, and the **Say it** button on a correction card.
+ * Both are the same act — the student produces the right sentence instead of
+ * only hearing it — so they share one piece of state and one judge
+ * ([com.example.data.voice.TutorDrill]).
+ */
+data class TutorReviewState(
+    /** The sentence the student is being asked to produce. */
+    val target: String,
+    /** What they said the first time, for the warm-up card. Empty for a drill. */
+    val wrong: String = "",
+    /** What the microphone heard this time. */
+    val heard: String = "",
+    val phase: Phase = Phase.LISTENING,
+    /** True for the pre-call warm-up, false for a mid-call drill. */
+    val isWarmUp: Boolean = false,
+    /** Review sentences still waiting after this one. */
+    val remaining: Int = 0
+) {
+    enum class Phase { LISTENING, CORRECT, TRY_AGAIN }
 }
 
 /**
@@ -170,7 +199,20 @@ data class CallSummary(
     val cleanTurnPercent: Int = 0,
     val scenario: String = "",
     val lessonTitle: String? = null,
-    val lessonCompleted: Boolean = false
+    val lessonCompleted: Boolean = false,
+    /** Did they do the task, not just speak: the scenario's own scorecard. */
+    val checks: List<ScenarioCheck> = emptyList(),
+    /** Speaking pace for this call; 0 when there was not enough speech. */
+    val paceWpm: Int = 0,
+    /** Words the drill struggled with — the ones worth saying aloud again. */
+    val practiceWords: List<String> = emptyList(),
+    /** Review sentences answered correctly during the warm-up. */
+    val reviewed: Int = 0,
+    val reviewAsked: Int = 0,
+    /** "B1 → B2", or empty when the level did not move. */
+    val levelLabel: String = "",
+    /** The one line the idle screen shows before the next call. */
+    val nextStepNote: String = ""
 ) {
     val durationLabel: String
         get() = if (durationSeconds >= 60) {
