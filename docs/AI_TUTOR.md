@@ -468,10 +468,11 @@ cannot turn English into phonemes without it — 2.x expects an external
 phonemizer. 1.13.2 is the last line where `dataDir` still works, which is exactly
 what a Piper pack needs.
 
-**The AAR ships the Java API**, which configures through builders
-(`OfflineTtsVitsModelConfig.builder().setModel().setTokens().setDataDir()`),
-not through named-argument constructors — Kotlin named arguments would not
-compile against it. Synthesis is `tts.generate(sentence, 0, speed)` followed by
+**The Android AAR ships the Kotlin API** (`android/SherpaOnnxAar`, `Tts.kt`), not
+the Java one: the configs are data classes, so they are built with named
+arguments, and the engine is `OfflineTts(config = config)` — its first parameter
+is an optional `AssetManager`, so `config` can never be passed positionally.
+Synthesis is `tts.generate(sentence, 0, speed)` followed by
 `GeneratedAudio.save(path)`.
 
 **Voice pack.** Downloaded once, on the first call, from sherpa-onnx's `tts-models`

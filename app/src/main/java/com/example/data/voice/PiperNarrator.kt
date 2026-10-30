@@ -295,22 +295,22 @@ class PiperNarrator(private val context: Context) {
         val model = findModel() ?: return null
         val tokens = voiceDir.walkTopDown().firstOrNull { it.isFile && it.name == "tokens.txt" } ?: return null
         val data = findEspeakData() ?: return null
-        // The AAR ships a Java API, so configuration is via builders. `dataDir`
-        // is the espeak-ng data: in 1.13.x it is what turns English text into
-        // phonemes for the voice, and it must be passed as a real path.
-        val vits = OfflineTtsVitsModelConfig.builder()
-            .setModel(model.absolutePath)
-            .setTokens(tokens.absolutePath)
-            .setDataDir(data.absolutePath)
-            .build()
-        val modelConfig = OfflineTtsModelConfig.builder()
-            .setVits(vits)
-            .setNumThreads(2)
-            .build()
-        val config = OfflineTtsConfig.builder()
-            .setModel(modelConfig)
-            .build()
-        return OfflineTts(config)
+        // The Android AAR ships the *Kotlin* API: the configs are data classes
+        // (named arguments, everything else defaulted) and the engine takes a
+        // named `config` — the first parameter is an optional AssetManager.
+        // `dataDir` is the espeak-ng data that turns English into phonemes; it
+        // is still honoured on this 1.13.x runtime.
+        val vits = OfflineTtsVitsModelConfig(
+            model = model.absolutePath,
+            tokens = tokens.absolutePath,
+            dataDir = data.absolutePath
+        )
+        val modelConfig = OfflineTtsModelConfig(
+            vits = vits,
+            numThreads = 2
+        )
+        val config = OfflineTtsConfig(model = modelConfig)
+        return OfflineTts(config = config)
     }
 
     companion object {
