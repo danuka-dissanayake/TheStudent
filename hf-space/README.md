@@ -75,10 +75,15 @@ out, and the first is better:
    * **Never pin a package the platform pins.** The Gradio SDK installs `torch`,
      `gradio[oauth]==5.15.0`, `spaces==0.51.3`, `uvicorn` and `websockets` on top
      of `requirements.txt`; a second pin fails with `ResolutionImpossible`.
-   * **Never trust the prebuilt CPU wheel index.** It has shipped musl builds
+   * **Never use the third-party CPU wheel index.** It has shipped musl builds
      (`libc.musl-x86_64.so.1: cannot open shared object file`) to this glibc
-     image. `requirements-gradio.txt` builds `llama-cpp-python` from source
-     (`--no-binary`), with the compiler from `packages.txt`.
+     image. Both requirement files now install from plain PyPI: a manylinux wheel
+     is glibc, and otherwise pip builds the sdist with the compiler from
+     `packages.txt`.
+   * **Every line must be a requirement.** `pip install -r` rejects anything
+     else — a pip option needs `=` (`--no-binary=llama-cpp-python`), and a line
+     that is just `--` is a syntax error. `deploy.sh` validates both requirement
+     files and `packages.txt` before pushing.
 
    `packages.txt` must contain **package names only** — the platform pipes it
    into `xargs apt-get install -y`, so a `#` comment becomes

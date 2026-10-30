@@ -20,20 +20,17 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends build-essential cmake curl \
     && rm -rf /var/lib/apt/lists/*
 
-# Try the prebuilt CPU wheel first (seconds), then *prove it imports*. The index
-# has shipped musl builds that install cleanly and then fail on this glibc image
-# with "libc.musl-x86_64.so.1: cannot open shared object file", so the check is an
-# import, not an install. If it fails, rebuild from source — that is why the
-# compiler is still installed at this point.
+# Plain PyPI only — no third-party wheel index. That is what served a musl build
+# to this glibc image once ("libc.musl-x86_64.so.1: cannot open shared object
+# file"). If PyPI has a manylinux wheel it is glibc; if not, pip builds the sdist,
+# which is why the compiler is installed above. The import check then proves the
+# library actually loads before the image is declared good.
 COPY requirements.txt .
-RUN pip install --extra-index-url https://abetlen.github.io/llama-cpp-python/whl/cpu \
-        -r requirements.txt \
-    && (python -c "import llama_cpp" \
-        || pip install --no-cache-dir --force-reinstall --no-binary llama-cpp-python \
-               "llama-cpp-python==0.3.2") \
+RUN pip install --no-cache-dir -r requirements.txt \
     && python -c "import llama_cpp; print('llama_cpp ok')" \
-    && apt-get purge -y build-essential cmake \
-    && apt-get autoremove -y
+    && apt-get purge -y build-essential \
+    && apt-get autoremove -y \
+    && rm -rf /var/lib/apt/lists/*
 
 COPY app.py .
 

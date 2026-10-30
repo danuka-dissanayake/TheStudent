@@ -1,16 +1,19 @@
-# Gradio-SDK variant.
+# Gradio-SDK variant — keep this file boring.
 #
-# Two rules learned the hard way on this Space:
+# Rules learned on this Space, in order of how much time they cost:
 #
-# 1. Never pin a package the platform pins. On the Gradio SDK it pip-installs
-#    torch, gradio[oauth]==5.15.0, uvicorn, websockets and spaces==0.51.3 on top
-#    of this file; a second pin makes pip fail with ResolutionImpossible.
+# 1. Never pin a package the platform pins. The Gradio SDK pip-installs torch,
+#    gradio[oauth]==5.15.0, uvicorn, websockets and spaces==0.51.3 on top of this
+#    file; a second pin fails with ResolutionImpossible.
 #
-# 2. Never trust the prebuilt CPU wheel index here. It has served musl builds
+# 2. Never use the abetlen wheel index here. It has served musl builds
 #    ("libc.musl-x86_64.so.1: cannot open shared object file") to this glibc
-#    container, which kills the app the moment it imports llama_cpp. Building
-#    from source is a few minutes on a cached rebuild and is glibc-correct every
-#    time — the compiler comes from packages.txt.
-no-binary llama-cpp-python
+#    container. Plain PyPI is safe: any manylinux wheel is glibc, and if there is
+#    no wheel pip builds from the sdist using the compiler from packages.txt.
+#
+# 3. Every line must be a requirement — `pip install -r` rejects anything else.
+#    A pip option needs its argument with '=', e.g. --no-binary=llama-cpp-python,
+#    and a line that is just '--' is a syntax error. deploy.sh checks this file
+#    before pushing for exactly that reason.
 llama-cpp-python==0.3.2
 huggingface_hub>=0.30

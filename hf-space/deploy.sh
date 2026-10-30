@@ -57,6 +57,48 @@ echo "==> what the Space currently has"
 du -sh . 2>/dev/null || true
 find . -maxdepth 2 -name '*.gguf' -printf '    %10s  %p\n' 2>/dev/null | sort -nr | head -10 || true
 
+echo "==> validating the files the Space will install"
+# pip and apt both read these files literally, and both fail *after* a long
+# rebuild when a line is malformed. Three of the last four failures were one bad
+# line in one of them, so they are checked before the push instead.
+python3 - "$HERE" <<'PYVALIDATE'
+import re
+import sys
+from pathlib import Path
+
+here = Path(sys.argv[1])
+# name, optional [extras], optional version specifier — "uvicorn[standard]==0.34.0"
+REQ = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._-]+\])?\s*([<>=!~].*)?$")
+OPTION = re.compile(r"^(--[a-z-]+(=[^\s]+)?|-[a-zA-Z])$")
+
+problems = []
+for name in ("requirements.txt", "requirements-gradio.txt"):
+    for number, raw in enumerate((here / name).read_text(encoding="utf-8").splitlines(), 1):
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("-"):
+            if not OPTION.match(line):
+                problems.append(f"{name}:{number}: pip option must be --flag=value -> {line!r}")
+            continue
+        if not REQ.match(line):
+            problems.append(f"{name}:{number}: not a valid requirement -> {line!r}")
+
+for number, raw in enumerate((here / "packages.txt").read_text(encoding="utf-8").splitlines(), 1):
+    line = raw.strip()
+    if not line or line.startswith("#"):
+        continue
+    if not re.match(r"^[a-z0-9][a-z0-9.+-]*$", line):
+        problems.append(f"packages.txt:{number}: not an apt package name -> {line!r}")
+
+if problems:
+    print("error: the Space would fail to build:", file=sys.stderr)
+    for problem in problems:
+        print(f"  {problem}", file=sys.stderr)
+    sys.exit(1)
+print("    requirements / packages files look installable")
+PYVALIDATE
+
 echo "==> installing the tutor backend"
 if [[ "$GRADIO" == true ]]; then
   # ZeroGPU hardware only accepts the Gradio SDK, so the API is mounted inside a
