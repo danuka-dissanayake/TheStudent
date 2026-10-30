@@ -30,9 +30,6 @@ object TutorSpeech {
     /** Roughly 15 spoken words: the point where one breath of intonation ends. */
     private const val MAX_UTTERANCE = 95
 
-    /** Below this it is better to join a clause onto the previous one. */
-    private const val MIN_UTTERANCE = 28
-
     private val EMOJI = Regex(
         "[\\u2190-\\u21FF\\u2300-\\u23FF\\u25A0-\\u27BF\\u2B00-\\u2BFF" +
             "\\uD83C-\\uDBFF\\uDC00-\\uDFFF\\uFE0F\\u2600-\\u26FF]"
@@ -67,20 +64,19 @@ object TutorSpeech {
             for (clause in clauses) {
                 val piece = if (clause.last() in ",;:—–") clause.dropLast(1).trim() else clause
                 if (piece.isEmpty()) continue
-                if (builder.isEmpty()) {
+                if (builder.length == 0) {
                     builder.append(piece)
                     continue
                 }
                 if (builder.length + 2 + piece.length <= MAX_UTTERANCE) {
                     builder.append(", ").append(piece)
                 } else {
-                    if (builder.length >= MIN_UTTERANCE) out.add(terminate(builder.toString()))
-                    else out.add(terminate(builder.toString()))
-                    builder.clear()
+                    out.add(terminate(builder.toString()))
+                    builder.setLength(0)
                     builder.append(piece)
                 }
             }
-            if (builder.isNotEmpty()) out.add(terminate(builder.toString()))
+            if (builder.length > 0) out.add(terminate(builder.toString()))
         }
         return out.map { it.trim() }.filter { it.length > 1 }
     }
