@@ -484,3 +484,28 @@ apply to both engines, so barge-in still works exactly as before.
 **Known trade-off:** sentences are synthesised one at a time, so there is a small
 pause after each one instead of a seamless stream. Prefetching the next sentence
 while the current one plays is the obvious next improvement.
+
+### 11.11 Round 19g — the consent screen
+
+The first time the AI tutor screen is opened it now shows a disclosure before it
+does anything: a deep emerald-to-teal head with "Hello 👋" and one sentence of
+intent, then a white sheet (28 dp top corners, offset over the head) with six
+numbered clauses and a Decline / Accept pair pinned above the navigation bar with
+a fade so the text can scroll underneath it.
+
+The design is the "Terms & Conditions" reference the user supplied, restyled into
+the app's palette — emerald/teal instead of violet, Roboto/Maison type, pill
+buttons. The `?` button is not decoration: it scrolls to the "what we never do"
+clause.
+
+**What it says** (nothing about the backend): the microphone is open for one call
+and nothing is recorded; the phone turns speech into text and the voice stays on
+the device; each sentence is sent to the app's AI service for a reply and one
+correction, and the turn is saved as a practice record; the first call downloads
+~20 MB of voice data; no background listening, no recordings, no selling; mute or
+end a call at any time.
+
+**Acceptance** is stored on the device as `tutor_consent_v1` in
+`TheStudentPreferences` — versioned, so if the disclosure ever changes materially
+everyone is asked again. Decline merely returns to the previous tab; the screen
+waits for the next visit. Mockup: `designs/44a-tutor-consent.png`.

@@ -41,6 +41,18 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_IS_GUEST, false)
         set(value) = prefs.edit().putBoolean(KEY_IS_GUEST, value).apply()
 
+    /**
+     * The student has read and accepted what the AI tutor does with the
+     * microphone, the transcript and the one-time voice download.
+     *
+     * Versioned on purpose: if the disclosure ever changes materially — a new
+     * kind of data leaving the phone — the key changes with it and everyone is
+     * asked again, which is the only honest way to keep a consent screen.
+     */
+    var tutorConsentAccepted: Boolean
+        get() = prefs.getBoolean(KEY_TUTOR_CONSENT, false)
+        set(value) = prefs.edit().putBoolean(KEY_TUTOR_CONSENT, value).apply()
+
 
     /**
      * The bearer token, decrypted on demand.
@@ -200,6 +212,7 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_CELEBRATED_RATING = "celebrated_rating_id"
         private const val KEY_SPEAKING_SECONDS = "tutor_speaking_seconds"
         private const val KEY_SPEAKING_CALLS = "tutor_speaking_calls"
+        private const val KEY_TUTOR_CONSENT = "tutor_consent_v1"
         private const val LAST_DISMISSALS_KEPT = 40
 
         const val ROLE_STUDENT = "student"

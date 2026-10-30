@@ -89,6 +89,7 @@ import com.example.data.model.CallSummary
 import com.example.data.model.GrammarFix
 import com.example.data.model.TutorCallEntry
 import com.example.data.model.TutorLesson
+import com.example.data.local.TheStudentPreferences
 import com.example.data.remote.TutorLessonCatalog
 import com.example.ui.components.AssistantVoiceState
 import com.example.ui.components.CloudOrb
@@ -177,6 +178,10 @@ fun AiTutorScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    // The disclosure is stored on the device, not in UiState: it is read once
+    // when the screen opens, and saying yes must survive the process dying.
+    val preferences = remember { TheStudentPreferences(context) }
+    var consentGiven by remember { mutableStateOf(preferences.tutorConsentAccepted) }
     var menuOpen by remember { mutableStateOf(false) }
     // Which tab the sheet opens on. The lesson tile asks for the lesson list; the
     // ⋯ button opens wherever the student left off.
@@ -206,6 +211,15 @@ fun AiTutorScreen(
         TutorBackdrop()
 
         when {
+            // First visit: say what this screen does before it does any of it.
+            !consentGiven -> TutorConsentScreen(
+                onAccept = {
+                    preferences.tutorConsentAccepted = true
+                    consentGiven = true
+                },
+                onDecline = onExit
+            )
+
             callPhase == CallPhase.ENDED && callSummary != null -> SummaryContent(
                 summary = callSummary,
                 onCallAgain = { onDismissSummary(); startWithPermission() },
