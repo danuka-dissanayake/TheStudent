@@ -9,6 +9,7 @@ import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
+import com.example.data.voice.PiperNarrator
 import com.example.data.local.ChatCrypto
 import com.example.data.local.ChatAttachmentStore
 import com.example.data.local.ChatMediaPrep
@@ -313,6 +314,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var aiAssistantJob: Job? = null
     private var ocrJob: Job? = null
     private var tts: TextToSpeech? = null
+
+    /**
+     * Miss Emma's on-device neural voice (Piper / sherpa-onnx).
+     *
+     * It is optional by design: the 20 MB voice pack is fetched on first use, and
+     * until it is on disk — or on a phone where the native runtime cannot load —
+     * every `speak` path falls back to the system engine, so a call never loses
+     * its voice because a download failed.
+     */
+    private val piper = PiperNarrator(application.applicationContext)
+    private var piperJob: Job? = null
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
     /** How much of the call stays on screen; a long call scrolls, it does not grow forever. */
@@ -3958,6 +3970,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         tutorSpeechSeq++
         pendingTutorSentences = 0
         tts?.stop()
+        piper.stop()
         _uiState.update { it.copy(isTtsSpeaking = false) }
     }
 
@@ -4041,6 +4054,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         initTts()
         initSpeechRecognizer()
+        ensureNaturalVoice()
         conversationTurns.clear()
         recognitionMisses = 0
         isTutorTurnInFlight = false
@@ -4191,6 +4205,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         tutorSpeechSeq++
         pendingTutorSentences = 0
         try { tts?.stop() } catch (_: Exception) {}
+        piper.stop()
         _uiState.update {
             it.copy(voiceAssistantState = AssistantVoiceState.LISTENING, isTtsSpeaking = false)
         }
@@ -4311,6 +4326,106 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
+     * Fetch and load the neural voice, once.
+     *
+     * Silent for the user apart from one line of snackbar text on the very first
+     * call: until the pack is on disk the call simply runs on the phone's voice,
+     * and the next call sounds like a person.
+     */
+    private fun ensureNaturalVoice() {
+        if (piper.isReady() || piperJob?.isActive == true) return
+        piperJob = viewModelScope.launch(Dispatchers.IO) {
+            val firstTime = !piper.isDownloaded()
+            if (firstTime) {
+                showSnackbar("Preparing Miss Emma's natural voice — one-time 20 MB download.")
+            }
+            val ready = piper.prepare()
+            when {
+                ready && firstTime -> showSnackbar("Miss Emma's natural voice is ready.")
+                ready -> Unit
+                firstTime -> showSnackbar("Natural voice unavailable — using the phone's voice.")
+                else -> Unit
+            }
+        }
+    }
+
+    /**
+     * Speak through Piper.
+     *
+     * Mirrors the system-engine path: the same sequence guard means an interrupt
+     * (which bumps [tutorSpeechSeq] and stops the narrator) cannot hand the turn
+     * back a second time.
+     */
+    private fun speakWithPiper(sentences: List<String>) {
+        tutorSpeechSeq++
+        val seq = tutorSpeechSeq
+        pendingTutorSentences = sentences.size
+        try { tts?.stop() } catch (_: Exception) {}
+        piper.speak(
+            sentences = sentences,
+            onStart = {
+                if (seq != tutorSpeechSeq) return@speak
+                _uiState.update {
+                    it.copy(voiceAssistantState = AssistantVoiceState.SPEAKING, isTtsSpeaking = true)
+                }
+            },
+            onSentenceDone = {
+                if (seq != tutorSpeechSeq) return@speak
+                pendingTutorSentences = (pendingTutorSentences - 1).coerceAtLeast(0)
+                if (pendingTutorSentences == 0) {
+                    _uiState.update {
+                        it.copy(voiceAssistantState = AssistantVoiceState.IDLE, isTtsSpeaking = false)
+                    }
+                    onTutorSpeechFinished()
+                }
+            },
+            onError = {
+                if (seq != tutorSpeechSeq) return@speak
+                pendingTutorSentences = 0
+                // The neural engine gave up mid-answer: carry on with the phone's
+                // voice rather than leaving the call silent.
+                val rest = _uiState.value.callTutorLine
+                if (rest.isNotBlank()) {
+                    speakTutorSentencesWithSystemVoice(rest)
+                } else {
+                    onTutorSpeechFinished()
+                }
+            }
+        )
+    }
+
+    /**
+     * The pre-Piper sentence loop, kept as the fallback for [speakWithPiper].
+     */
+    private fun speakTutorSentencesWithSystemVoice(text: String) {
+        val engine = tts
+        if (engine == null || !isTtsInitialized) {
+            onTutorSpeechFinished()
+            return
+        }
+        val sentences = text.trim().split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+        if (sentences.isEmpty()) {
+            onTutorSpeechFinished()
+            return
+        }
+        tutorSpeechSeq++
+        val seq = tutorSpeechSeq
+        pendingTutorSentences = sentences.size
+        try {
+            engine.stop()
+            sentences.forEachIndexed { index, sentence ->
+                val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                engine.speak(sentence, mode, null, "$callUtterancePrefix$seq-$index")
+            }
+        } catch (_: Exception) {
+            pendingTutorSentences = 0
+            onTutorSpeechFinished()
+        }
+    }
+
+    /**
      * Speak a turn sentence by sentence.
      *
      * Queuing each sentence separately means the student hears the first one
@@ -4324,6 +4439,18 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             onTutorSpeechFinished()
             return
         }
+        val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
+            .map { it.trim() }
+            .filter { it.isNotEmpty() }
+            .ifEmpty { listOf(clean) }
+
+        // The neural voice speaks first when it is ready; the sentence loop, the
+        // interrupt rules and the "your turn" hand-back stay exactly the same.
+        if (piper.isReady()) {
+            speakWithPiper(sentences)
+            return
+        }
+
         val engine = tts
         if (engine == null || !isTtsInitialized) {
             // No voice engine on this device: keep the call usable as captions.
@@ -4331,10 +4458,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             onTutorSpeechFinished()
             return
         }
-        val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .ifEmpty { listOf(clean) }
 
         tutorSpeechSeq++
         val seq = tutorSpeechSeq

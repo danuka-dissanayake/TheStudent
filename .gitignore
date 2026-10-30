@@ -37,3 +37,7 @@ backend/fcm-service-account.json
 
 # Python bytecode from scripts/
 __pycache__/
+
+# Fetched by the build (see app/build.gradle.kts); never committed
+/app/libs/*.aar
+/app/libs/*.aar.part

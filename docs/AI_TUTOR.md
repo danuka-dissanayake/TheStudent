@@ -447,3 +447,40 @@ applied with `setPitch(1.06)` and `setSpeechRate(0.97)`; if the device has no
 suitable voice at all — or refuses the selection — the pitch goes to `1.10`
 instead, which every engine honours. The chosen voice is logged as
 `Tutor voice: <name> (<locale>)` so it is one `adb logcat` line away.
+
+### 11.10 Round 19f — Miss Emma gets a real neural voice (Piper, on device)
+
+The phone's text-to-speech engine is now only the fallback. The tutor speaks with
+**Piper** — a small VITS neural voice (`en_US-amy-medium`, int8) — running locally
+through **sherpa-onnx**, so it is natural, unlimited, private and works offline.
+
+**Runtime.** sherpa-onnx is not on Maven Central (k2-fsa publish it as a GitHub
+release asset only), so `app/build.gradle.kts` has a `fetchSherpaOnnx` task that
+downloads `sherpa-onnx-2.0.1.aar` (47 MB) into `app/libs/` on the first build and
+is wired into `preBuild`; the file is git-ignored. If the machine has no access to
+GitHub the task fails with the exact URL to download by hand. `commons-compress`
+is pulled from Maven Central to unpack the `.tar.bz2` voice pack, because Android
+has no bzip2.
+
+**Voice pack.** Downloaded once, on the first call, from sherpa-onnx's `tts-models`
+release: `vits-piper-en_US-amy-medium-int8.tar.bz2` (20 MB — the same voice as the
+64 MB fp32 build), unpacked into `filesDir/piper/`, and never touched again. The
+model, `tokens.txt` and `espeak-ng-data/` are *found by walking the folder*, not by
+assuming filenames, so a different Piper voice is a one-constant change.
+
+**Playback.** `data/voice/PiperNarrator.kt` synthesises each sentence to a
+temporary wav and plays it with a `MediaPlayer`, one after another, on a single
+worker thread. Callbacks (`onStart`, `onSentenceDone`, `onError`) always arrive on
+the main thread, and a token counter makes [stop] instant: an interrupt bumps the
+token, the worker walks away and the player is released.
+
+**The call loop is unchanged.** `speakTutorSentences` asks the narrator first and
+falls back to the system engine when it is not ready — before the download
+finishes, on a device where the native library will not load, or if a line fails
+mid-answer. The same `tutorSpeechSeq` guard, the same
+`pendingTutorSentences` countdown and the same `onTutorSpeechFinished` hand-back
+apply to both engines, so barge-in still works exactly as before.
+
+**Known trade-off:** sentences are synthesised one at a time, so there is a small
+pause after each one instead of a seamless stream. Prefetching the next sentence
+while the current one plays is the obvious next improvement.

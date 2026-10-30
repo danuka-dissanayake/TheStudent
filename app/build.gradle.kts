@@ -63,6 +63,47 @@ android {
   }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  sherpa-onnx (the on-device Piper runtime)
+//
+//  It is not on Maven Central — k2-fsa only publish it as a GitHub release
+//  asset — so the build fetches it once into app/libs/ instead of committing a
+//  47 MB binary to Git. If the download fails (no network, GitHub blocked) the
+//  file can be dropped in by hand from
+//  https://github.com/k2-fsa/sherpa-onnx/releases/tag/v2.0.1
+// ─────────────────────────────────────────────────────────────────────────────
+val sherpaOnnxAar = layout.projectDirectory.file("libs/sherpa-onnx-2.0.1.aar")
+
+val fetchSherpaOnnx by tasks.registering {
+  val target = sherpaOnnxAar.asFile
+  val source = "https://github.com/k2-fsa/sherpa-onnx/releases/download/v2.0.1/sherpa-onnx-2.0.1.aar"
+  outputs.file(target)
+  onlyIf { !target.exists() }
+  doLast {
+    target.parentFile.mkdirs()
+    val partial = File(target.parentFile, target.name + ".part")
+    logger.lifecycle("Downloading the sherpa-onnx Android runtime (47 MB, once)…")
+    try {
+      java.net.URI(source).toURL().openStream().use { input ->
+        partial.outputStream().use { output -> input.copyTo(output) }
+      }
+      if (!partial.renameTo(target)) {
+        partial.copyTo(target, overwrite = true)
+        partial.delete()
+      }
+    } catch (error: Exception) {
+      partial.delete()
+      throw GradleException(
+        "Could not download the sherpa-onnx runtime. Download it manually from " +
+          "$source and save it as ${target.absolutePath}.",
+        error
+      )
+    }
+  }
+}
+
+tasks.named("preBuild") { dependsOn(fetchSherpaOnnx) }
+
 // Configure the Secrets Gradle Plugin to use .env and .env.example files
 // to match the convention used in Web projects.
 secrets {
@@ -101,6 +142,8 @@ dependencies {
   implementation(libs.androidx.room.ktx)
   implementation(libs.androidx.room.runtime)
   implementation(libs.coil.compose)
+  implementation(libs.commons.compress)
+  implementation(files(sherpaOnnxAar.asFile))
   implementation(libs.converter.moshi)
   implementation(libs.firebase.ai)
   // Real-time chat notifications (FCM data messages).
