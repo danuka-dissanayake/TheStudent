@@ -456,11 +456,23 @@ through **sherpa-onnx**, so it is natural, unlimited, private and works offline.
 
 **Runtime.** sherpa-onnx is not on Maven Central (k2-fsa publish it as a GitHub
 release asset only), so `app/build.gradle.kts` has a `fetchSherpaOnnx` task that
-downloads `sherpa-onnx-2.0.1.aar` (47 MB) into `app/libs/` on the first build and
+downloads `sherpa-onnx-1.13.2.aar` (54 MB) into `app/libs/` on the first build and
 is wired into `preBuild`; the file is git-ignored. If the machine has no access to
 GitHub the task fails with the exact URL to download by hand. `commons-compress`
 is pulled from Maven Central to unpack the `.tar.bz2` voice pack, because Android
 has no bzip2.
+
+**Pinned to 1.13.2, not the newest.** From **v2.0.0 sherpa-onnx dropped
+espeak-ng** (`--vits-data-dir` is "deprecated and ignored"), and a Piper voice
+cannot turn English into phonemes without it — 2.x expects an external
+phonemizer. 1.13.2 is the last line where `dataDir` still works, which is exactly
+what a Piper pack needs.
+
+**The AAR ships the Java API**, which configures through builders
+(`OfflineTtsVitsModelConfig.builder().setModel().setTokens().setDataDir()`),
+not through named-argument constructors — Kotlin named arguments would not
+compile against it. Synthesis is `tts.generate(sentence, 0, speed)` followed by
+`GeneratedAudio.save(path)`.
 
 **Voice pack.** Downloaded once, on the first call, from sherpa-onnx's `tts-models`
 release: `vits-piper-en_US-amy-medium-int8.tar.bz2` (20 MB — the same voice as the

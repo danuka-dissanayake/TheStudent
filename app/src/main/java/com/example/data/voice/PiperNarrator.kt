@@ -5,7 +5,6 @@ import android.media.MediaPlayer
 import android.os.Handler
 import android.os.Looper
 import android.util.Log
-import com.k2fsa.sherpa.onnx.GenerationConfig
 import com.k2fsa.sherpa.onnx.OfflineTts
 import com.k2fsa.sherpa.onnx.OfflineTtsConfig
 import com.k2fsa.sherpa.onnx.OfflineTtsModelConfig
@@ -122,13 +121,8 @@ class PiperNarrator(private val context: Context) {
                 if (token.get() != myToken) return@execute
                 val file = File(cacheDir, "line-$myToken-$index.wav")
                 val rendered = try {
-                    val audio = tts.generateWithConfigAndCallback(
-                        text = sentence,
-                        config = GenerationConfig(sid = 0, speed = SPEED, silenceScale = 0.2f),
-                        callback = { 1 }
-                    )
-                    audio.save(filename = file.absolutePath)
-                    file.length() > 1_000L
+                    val audio = tts.generate(sentence, 0, SPEED)
+                    audio.save(file.absolutePath) && file.length() > 1_000L
                 } catch (t: Throwable) {
                     Log.w(TAG, "Could not synthesise a line", t)
                     false
@@ -301,17 +295,22 @@ class PiperNarrator(private val context: Context) {
         val model = findModel() ?: return null
         val tokens = voiceDir.walkTopDown().firstOrNull { it.isFile && it.name == "tokens.txt" } ?: return null
         val data = findEspeakData() ?: return null
-        val config = OfflineTtsConfig(
-            model = OfflineTtsModelConfig(
-                vits = OfflineTtsVitsModelConfig(
-                    model = model.absolutePath,
-                    tokens = tokens.absolutePath,
-                    dataDir = data.absolutePath
-                ),
-                numThreads = 2
-            )
-        )
-        return OfflineTts(config = config)
+        // The AAR ships a Java API, so configuration is via builders. `dataDir`
+        // is the espeak-ng data: in 1.13.x it is what turns English text into
+        // phonemes for the voice, and it must be passed as a real path.
+        val vits = OfflineTtsVitsModelConfig.builder()
+            .setModel(model.absolutePath)
+            .setTokens(tokens.absolutePath)
+            .setDataDir(data.absolutePath)
+            .build()
+        val modelConfig = OfflineTtsModelConfig.builder()
+            .setVits(vits)
+            .setNumThreads(2)
+            .build()
+        val config = OfflineTtsConfig.builder()
+            .setModel(modelConfig)
+            .build()
+        return OfflineTts(config)
     }
 
     companion object {
