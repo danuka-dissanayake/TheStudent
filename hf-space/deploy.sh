@@ -209,4 +209,5 @@ SUBDOMAIN="$(printf '%s-%s' "${SPACE%%/*}" "${SPACE##*/}" \
 
 echo "==> done. The Space is rebuilding; then check:"
 echo "    curl -i https://${SUBDOMAIN}.hf.space/health        # 503 while loading, 200 when ready"
+echo "    curl -s https://${SUBDOMAIN}.hf.space/v1/models      # 200 with the model id"
 echo "    open https://huggingface.co/spaces/${SPACE}          # build logs"

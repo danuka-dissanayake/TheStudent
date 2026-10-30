@@ -54,28 +54,53 @@ _blocks = _build_ui()
 app = gr.mount_gradio_app(tutor_api.app, _blocks, path="/ui")
 
 
-if __name__ == "__main__":
-    # Two launch paths exist, and starting a second server is fatal:
-    #
-    #   * the Space platform may already serve this module (it detects the ASGI
-    #     `app` and binds GRADIO_SERVER_PORT itself) — then our bind fails with
-    #     "[Errno 98] address already in use" and the container exits 3;
-    #   * or nothing is serving it, and this block is the only server.
-    #
-    # So: try to bind, and if the port is taken, keep the process alive and let
-    # whoever holds it serve. Exiting here is what turned a working Space into a
-    # "runtime error" with a model that had already downloaded successfully.
-    import os
-    import sys
+def _port_is_free(port: int) -> bool:
+    """Can we bind this port right now?"""
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
+def _idle_forever(reason: str) -> None:
+    """Stay alive without serving, when someone else owns the port."""
     import threading
 
-    import uvicorn
+    print(f"[tutor] {reason}", flush=True)
+    print("[tutor] the platform's own server is serving this app; idling", flush=True)
+    threading.Event().wait()
+
+
+if __name__ == "__main__":
+    # Who serves this app is not ours to decide, and getting it wrong is fatal:
+    #
+    #   * the Gradio platform often binds GRADIO_SERVER_PORT itself, after
+    #     importing this module — and it binds it *before* `__main__` runs;
+    #   * uvicorn binds the socket after running lifespan startup, and on failure
+    #     it calls sys.exit(3) — so an `except OSError` never sees it, which is
+    #     why the previous fix still exited with code 3;
+    #   * meanwhile the loader thread has already started the 4.6 GB download, so
+    #     every crash also throws that progress away.
+    #
+    # So the port is probed *first*: free means nothing else is serving and this
+    # block should, taken means stay alive and serve nothing.
+    import os
 
     port = int(os.getenv("GRADIO_SERVER_PORT") or os.getenv("PORT") or "7860")
+    if not _port_is_free(port):
+        _idle_forever(f"port {port} is already in use")
+        raise SystemExit(0)
+
     try:
+        import uvicorn
+
         uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
-    except OSError as error:
-        print(f"[tutor] not starting a second server on {port}: {error}", flush=True)
-        print("[tutor] the platform's own server is serving this app", flush=True)
-        threading.Event().wait()
-        sys.exit(0)
+    except BaseException as error:  # noqa: BLE001 - SystemExit from uvicorn included
+        _idle_forever(f"server did not start on {port}: {error}")

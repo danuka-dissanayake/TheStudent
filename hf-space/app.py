@@ -464,18 +464,39 @@ async def chat_completions(request: Request):
     }
 
 
+def _port_is_free(port: int) -> bool:
+    """Can we bind this port right now?"""
+    import socket
+
+    probe = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    try:
+        probe.bind(("0.0.0.0", port))
+        return True
+    except OSError:
+        return False
+    finally:
+        probe.close()
+
+
 if __name__ == "__main__":
+    # Same rule as the Gradio entrypoint: whoever already owns the port keeps it,
+    # and this process stays alive rather than exiting — uvicorn turns a failed
+    # bind into sys.exit(3), which is reported as a runtime error.
     import sys
     import threading
 
-    import uvicorn
-
     port = int(os.getenv("PORT", "7860"))
+    if not _port_is_free(port):
+        print(f"[tutor] port {port} already in use; idling", flush=True)
+        threading.Event().wait()
+        sys.exit(0)
+
     try:
+        import uvicorn
+
         uvicorn.run(app, host="0.0.0.0", port=port)
-    except OSError as error:
-        # Something already serves this port — usually the platform. Staying alive
-        # beats exiting, which the platform reports as a runtime error.
-        print(f"[tutor] port {port} already served: {error}", flush=True)
+    except BaseException as error:  # noqa: BLE001 - SystemExit from uvicorn included
+        print(f"[tutor] server did not start: {error}", flush=True)
         threading.Event().wait()
         sys.exit(0)
