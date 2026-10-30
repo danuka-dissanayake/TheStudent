@@ -6,7 +6,6 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.Crossfade
-import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.infiniteRepeatable
@@ -26,7 +25,6 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -48,11 +46,9 @@ import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.MicOff
 import androidx.compose.material.icons.filled.CallMade
 import androidx.compose.material.icons.filled.Chat
-import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.MoreHoriz
 import androidx.compose.material.icons.filled.PlayArrow
-import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
@@ -94,7 +90,6 @@ import com.example.data.model.CallSummary
 import com.example.data.model.GrammarFix
 import com.example.data.model.TutorCallEntry
 import com.example.data.model.TutorLesson
-import com.example.data.model.TutorVoiceState
 import com.example.data.local.TheStudentPreferences
 import com.example.data.remote.TutorLessonCatalog
 import com.example.ui.components.AssistantVoiceState
@@ -168,12 +163,8 @@ fun AiTutorScreen(
     activeLessonId: String?,
     lessonStepIndex: Int,
     isLessonComplete: Boolean,
-    /** Miss Emma's voice pack: the call does not start until it is ready. */
-    tutorVoiceState: TutorVoiceState,
-    tutorVoiceProgress: Float,
-    onPrepareVoice: () -> Unit,
-    onRetryVoiceDownload: () -> Unit,
-    onRefreshVoiceState: () -> Unit,
+    /** Warms the speech engine as the screen opens, so the first line is instant. */
+    onWarmUpVoice: () -> Unit,
     onStartCall: () -> Unit,
     onEndCall: () -> Unit,
     /** Leave the tutor tab entirely (the idle screen's back button). */
@@ -212,14 +203,6 @@ fun AiTutorScreen(
     }
 
     fun startWithPermission() {
-        // No conversation until the real voice is on the phone: the card below
-        // shows the download, and tapping the microphone simply starts (or
-        // retries) it. This is the one place that decides.
-        if (tutorVoiceState != TutorVoiceState.READY) {
-            if (tutorVoiceState == TutorVoiceState.FAILED) onRetryVoiceDownload()
-            else onPrepareVoice()
-            return
-        }
         val granted = ContextCompat.checkSelfPermission(
             context,
             Manifest.permission.RECORD_AUDIO
@@ -227,13 +210,10 @@ fun AiTutorScreen(
         if (granted) onStartCall() else micPermission.launch(Manifest.permission.RECORD_AUDIO)
     }
 
-    // Opening the screen re-reads the voice pack, then starts the download if it
-    // is genuinely missing — so the student is never waiting on their own tap,
-    // and a stale state can never leave the card up.
+    // The engine loads its voice on the first call, which is exactly where a
+    // pause is most obvious. Warm it while the student is still reading.
     LaunchedEffect(consentGiven) {
-        if (!consentGiven) return@LaunchedEffect
-        onRefreshVoiceState()
-        if (tutorVoiceState == TutorVoiceState.MISSING) onPrepareVoice()
+        if (consentGiven) onWarmUpVoice()
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("ai_voice_tutor_screen")) {
@@ -287,10 +267,6 @@ fun AiTutorScreen(
                 studentName = studentName,
                 scenario = currentScenario,
                 lesson = lesson,
-                voiceState = tutorVoiceState,
-                voiceProgress = tutorVoiceProgress,
-                onPrepareVoice = onPrepareVoice,
-                onRetryVoice = onRetryVoiceDownload,
                 onMic = { startWithPermission() },
                 onMenu = {
                     menuLessons = activeLessonId != null
@@ -493,10 +469,6 @@ private fun IdleContent(
     studentName: String,
     scenario: String,
     lesson: TutorLesson?,
-    voiceState: TutorVoiceState,
-    voiceProgress: Float,
-    onPrepareVoice: () -> Unit,
-    onRetryVoice: () -> Unit,
     onMic: () -> Unit,
     onMenu: () -> Unit,
     onExit: () -> Unit,
@@ -557,47 +529,27 @@ private fun IdleContent(
                 )
                 Spacer(Modifier.weight(0.55f))
 
-                // Until the voice is on the phone there is nothing to choose
-                // between — both cards would lead to the same silent call. The
-                // download card takes their place, so the sheet still fits
-                // without scrolling. When the pack lands, the card fades away and
-                // the two modes fade in underneath it.
-                Crossfade(
-                    targetState = voiceState == TutorVoiceState.READY,
-                    animationSpec = tween(320),
-                    label = "voice_ready"
-                ) { ready ->
-                    if (ready) {
-                        Row(
-                            horizontalArrangement = Arrangement.spacedBy(11.dp),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            ModeCard(
-                                icon = Icons.Default.Chat,
-                                tint = Brand,
-                                title = "Free conversation",
-                                subtitle = "Speak freely and let Miss Emma correct you as you talk",
-                                onClick = onMic,
-                                modifier = Modifier.weight(1f)
-                            )
-                            ModeCard(
-                                icon = Icons.Default.PlayArrow,
-                                tint = Warm,
-                                title = lesson?.title ?: "Guided lesson",
-                                subtitle = lesson?.goal
-                                    ?: "Pick a lesson and I will teach one point, step by step",
-                                onClick = onPickLesson,
-                                modifier = Modifier.weight(1f)
-                            )
-                        }
-                    } else {
-                        VoiceDownloadCard(
-                            state = voiceState,
-                            progress = voiceProgress,
-                            onStart = onPrepareVoice,
-                            onRetry = onRetryVoice
-                        )
-                    }
+                Row(
+                    horizontalArrangement = Arrangement.spacedBy(11.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    ModeCard(
+                        icon = Icons.Default.Chat,
+                        tint = Brand,
+                        title = "Free conversation",
+                        subtitle = "Speak freely and let Miss Emma correct you as you talk",
+                        onClick = onMic,
+                        modifier = Modifier.weight(1f)
+                    )
+                    ModeCard(
+                        icon = Icons.Default.PlayArrow,
+                        tint = Warm,
+                        title = lesson?.title ?: "Guided lesson",
+                        subtitle = lesson?.goal
+                            ?: "Pick a lesson and I will teach one point, step by step",
+                        onClick = onPickLesson,
+                        modifier = Modifier.weight(1f)
+                    )
                 }
 
                 Spacer(Modifier.weight(0.3f))
@@ -608,178 +560,10 @@ private fun IdleContent(
             state = AssistantVoiceState.IDLE,
             phase = CallPhase.IDLE,
             isMuted = false,
-            caption = when (voiceState) {
-                TutorVoiceState.READY -> "Tap to speak"
-                TutorVoiceState.DOWNLOADING -> "Preparing Miss Emma's voice…"
-                TutorVoiceState.UNPACKING -> "Almost ready…"
-                TutorVoiceState.FAILED -> "Tap to try the download again"
-                TutorVoiceState.MISSING -> "Tap to download her voice"
-            },
+            caption = "Tap to speak",
             onMic = onMic,
             onLongPress = null
         )
-    }
-}
-
-/**
- * The one-time voice download, as a card instead of a snackbar.
- *
- * Shown in place of the two mode cards until [TutorVoiceState.READY]: the size
- * up front, a real progress bar driven by the download itself, the percentage on
- * the right, and a retry when it fails. Tapping it while idle starts the
- * download; there is no way to skip it into a conversation, because the whole
- * point is that Miss Emma never speaks with the phone's default voice.
- */
-@Composable
-private fun VoiceDownloadCard(
-    state: TutorVoiceState,
-    progress: Float,
-    onStart: () -> Unit,
-    onRetry: () -> Unit
-) {
-    val failed = state == TutorVoiceState.FAILED
-    val busy = state == TutorVoiceState.DOWNLOADING || state == TutorVoiceState.UNPACKING
-    val shown = progress.coerceIn(0f, 1f)
-    val percent = (shown * 100f).toInt()
-
-    val title = when (state) {
-        TutorVoiceState.FAILED -> "Download did not finish"
-        TutorVoiceState.UNPACKING -> "Almost ready…"
-        TutorVoiceState.DOWNLOADING -> "Downloading her voice"
-        else -> "Her real voice, once"
-    }
-    val subtitle = when (state) {
-        TutorVoiceState.FAILED -> "Check your connection and try again — it only takes a minute."
-        TutorVoiceState.UNPACKING -> "Unpacking so she can speak offline from now on."
-        TutorVoiceState.DOWNLOADING -> "${percent}% of 20 MB · speaking offline after this"
-        else -> "20 MB, one time. After that she speaks naturally even without internet."
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(22.dp))
-            .background(CardCream)
-            .border(1.dp, Color(0xCCFFFFFF), RoundedCornerShape(22.dp))
-            .clickable(onClick = if (failed) onRetry else onStart)
-            .padding(horizontal = 16.dp, vertical = 15.dp)
-            .testTag("tutor_voice_download")
-    ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            // icon chip: a waveform while idle, an arrow into the phone while
-            // downloading, a warning when it fails
-            Box(
-                modifier = Modifier
-                    .size(38.dp)
-                    .clip(RoundedCornerShape(13.dp))
-                    .background(
-                        if (failed) Warm.copy(alpha = 0.16f) else Brand.copy(alpha = 0.13f)
-                    ),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = when {
-                        failed -> Icons.Default.Refresh
-                        busy -> Icons.Default.GraphicEq
-                        else -> Icons.Default.Download
-                    },
-                    contentDescription = null,
-                    tint = if (failed) Warm else Brand,
-                    modifier = Modifier.size(19.dp)
-                )
-            }
-            Spacer(Modifier.width(12.dp))
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = title,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 15.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Ink
-                )
-                Spacer(Modifier.height(3.dp))
-                Text(
-                    text = subtitle,
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 12.sp,
-                    lineHeight = 16.sp,
-                    color = Muted
-                )
-            }
-            if (failed) {
-                Spacer(Modifier.width(10.dp))
-                Box(
-                    modifier = Modifier
-                        .clip(CircleShape)
-                        .background(Brand)
-                        .clickable(onClick = onRetry)
-                        .padding(horizontal = 14.dp, vertical = 8.dp)
-                ) {
-                    Text(
-                        text = "Retry",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.5.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = Color.White
-                    )
-                }
-            } else if (state == TutorVoiceState.DOWNLOADING && shown > 0f) {
-                Text(
-                    text = "$percent%",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 13.sp,
-                    fontWeight = FontWeight.ExtraBold,
-                    color = BrandDeep
-                )
-            }
-        }
-
-        if (!failed) {
-            Spacer(Modifier.height(13.dp))
-            // A hand-drawn bar rather than LinearProgressIndicator: 8 dp tall with
-            // a rounded cap, and it fills as the bytes arrive.
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(8.dp)
-                    .clip(CircleShape)
-                    .background(Color(0xFFE3EFE9))
-            ) {
-                val unpacking = state == TutorVoiceState.UNPACKING
-                val unknown = state == TutorVoiceState.DOWNLOADING && shown <= 0f
-                if (unpacking || unknown) {
-                    // The server did not send a content length, or we are
-                    // unpacking 20 MB of bz2 — both are "working", neither has a
-                    // number, so slide a bar rather than lie with a stuck 0/100%.
-                    val slide by rememberInfiniteTransition(label = "voice_unknown")
-                        .animateFloat(
-                            initialValue = 0f,
-                            targetValue = 1f,
-                            animationSpec = infiniteRepeatable(
-                                animation = tween(1_150, easing = LinearEasing),
-                                repeatMode = RepeatMode.Restart
-                            ),
-                            label = "voice_unknown_x"
-                        )
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(0.34f)
-                            .fillMaxHeight()
-                            .offset(x = (slide * 250).dp)
-                            .clip(CircleShape)
-                            .background(Brush.horizontalGradient(listOf(Fresh, BrandDeep)))
-                    )
-                } else {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(shown.coerceAtLeast(0.02f))
-                            .fillMaxHeight()
-                            .clip(CircleShape)
-                            .background(Brush.horizontalGradient(listOf(Fresh, BrandDeep)))
-                    )
-                }
-            }
-        }
     }
 }
 

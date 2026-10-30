@@ -4,12 +4,13 @@ import android.app.Application
 import android.content.Context
 import android.net.Uri
 import android.provider.OpenableColumns
+import android.media.AudioAttributes
 import android.speech.tts.TextToSpeech
 import android.util.Log
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.local.TheStudentDatabase
-import com.example.data.voice.PiperNarrator
+import com.example.data.voice.TutorSpeech
 import com.example.data.local.ChatCrypto
 import com.example.data.local.ChatAttachmentStore
 import com.example.data.local.ChatMediaPrep
@@ -176,17 +177,6 @@ data class TheStudentUiState(
     val isLessonComplete: Boolean = false,
     /** CEFR level the tutor aims at; raised from the profile once known. */
     val tutorLevel: String = "B1",
-    /**
-     * Miss Emma's on-device voice pack.
-     *
-     * The tutor does not start a call until this is [TutorVoiceState.READY]:
-     * hearing a robotic system voice on the first sentence, and a natural one on
-     * the second, is worse than waiting twenty seconds once. The idle screen
-     * shows a download card while it is in flight.
-     */
-    val tutorVoiceState: TutorVoiceState = TutorVoiceState.MISSING,
-    /** Download progress, 0..1. Reaches 1 again while the pack is unpacking. */
-    val tutorVoiceProgress: Float = 0f,
 
     // Multimodal AI Study Assistant (ChatGPT / Gemini style)
     val isAiAssistantOpen: Boolean = false,
@@ -325,17 +315,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var aiAssistantJob: Job? = null
     private var ocrJob: Job? = null
     private var tts: TextToSpeech? = null
-
-    /**
-     * Miss Emma's on-device neural voice (Piper / sherpa-onnx).
-     *
-     * It is optional by design: the 20 MB voice pack is fetched on first use, and
-     * until it is on disk — or on a phone where the native runtime cannot load —
-     * every `speak` path falls back to the system engine, so a call never loses
-     * its voice because a download failed.
-     */
-    private val piper = PiperNarrator(application.applicationContext)
-    private var piperJob: Job? = null
     private var isTtsInitialized = false
     private var speechRecognizer: SpeechRecognizer? = null
     /** How much of the call stays on screen; a long call scrolls, it does not grow forever. */
@@ -382,6 +361,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Prefix that marks a text-to-speech utterance as belonging to the call. */
     private val callUtterancePrefix = "tutor-call-"
+
+    /**
+     * Speaking pace. 1.0 is the engine's own idea of "normal", which is a
+     * newsreader; a tutor on a call sits a shade under that, and drops further
+     * for corrections.
+     */
+    private val TUTOR_RATE = 0.98f
+    private val TUTOR_RATE_SLOW = 0.90f
 
     private val _uiState = MutableStateFlow(TheStudentUiState())
     val uiState: StateFlow<TheStudentUiState> = _uiState.asStateFlow()
@@ -554,7 +541,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             engine.voice = best
             // A touch of lift and a calmer rate: it is a tutor, and a flat
             // default voice is what makes synthetic speech sound robotic.
-            engine.setPitch(1.06f)
+            engine.setPitch(1.04f)
             Log.d("TheStudentViewModel", "Tutor voice: ${best.name} (${best.locale})")
         } catch (e: Exception) {
             Log.w("TheStudentViewModel", "Could not select tutor voice", e)
@@ -564,7 +551,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     private fun applyWarmFallback(engine: TextToSpeech) {
         try {
-            engine.setPitch(1.10f)
+            engine.setPitch(1.08f)
         } catch (_: Exception) {
         }
     }
@@ -590,9 +577,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             Voice.QUALITY_NORMAL -> 8
             else -> 0
         }
-        // Newer engines publish their neural voices over the network; they sound
-        // far more human, and the call already needs the network for the model.
-        if (features.any { it.contains("network") }) score += 14
+        // Newer engines publish neural voices over the network: they sound more
+        // human but cost a round trip before the first syllable, which on a call
+        // is a stall. The bonus is modest so a high-quality local voice can win.
+        if (features.any { it.contains("network") }) score += 10
 
         score += when (voice.locale?.country?.uppercase(Locale.US)) {
             "US" -> 8
@@ -703,7 +691,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             val engine = tts ?: return
             engine.language = Locale.US
             applyNarratorVoice(engine)
-            engine.setSpeechRate(0.97f) // Slightly relaxed rate for language learning
+            // Speech attributes matter as much as the voice: they tell Android
+            // this is a spoken conversation, which routes it to the media stream,
+            // lets other audio duck instead of stopping, and stops the "phone
+            // call" audio mode from chopping the first syllable.
+            try {
+                engine.setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_SPEECH)
+                        .build()
+                )
+            } catch (_: Exception) {
+            }
+            engine.setSpeechRate(TUTOR_RATE)
             tts?.setOnUtteranceProgressListener(object : UtteranceProgressListener() {
                 override fun onStart(utteranceId: String?) {
                     _uiState.update {
@@ -3964,14 +3965,34 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
     }
 
-    fun speakText(text: String) {
-        if (tts == null) {
-            initTts()
-        }
-        if (isTtsInitialized && tts != null) {
-            tts?.stop()
-            tts?.speak(text, TextToSpeech.QUEUE_FLUSH, null, "thestudent_tts_id")
+    /**
+     * Read something out that is not a call turn: a corrected sentence, a
+     * replay, a hint.
+     *
+     * It goes through the same shaping as a turn ([TutorSpeech.linesOf]) and,
+     * when [slow], at the correction rate — hearing a fix a fraction slower than
+     * the conversation is the difference between noticing it and missing it.
+     */
+    fun speakText(text: String, slow: Boolean = false) {
+        if (tts == null) initTts()
+        val engine = tts ?: return
+        if (!isTtsInitialized) return
+        val units = TutorSpeech.linesOf(text)
+        if (units.isEmpty()) return
+        tutorSpeechSeq++
+        val seq = tutorSpeechSeq
+        pendingTutorSentences = 0
+        try {
+            engine.stop()
+            engine.setSpeechRate(if (slow) TUTOR_RATE_SLOW else TUTOR_RATE)
+            units.forEachIndexed { index, unit ->
+                val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
+                engine.speak(unit, mode, null, "$callUtterancePrefix$seq-$index")
+            }
+            engine.setSpeechRate(TUTOR_RATE)
             _uiState.update { it.copy(isTtsSpeaking = true) }
+        } catch (_: Exception) {
+            _uiState.update { it.copy(isTtsSpeaking = false) }
         }
     }
 
@@ -3981,7 +4002,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         tutorSpeechSeq++
         pendingTutorSentences = 0
         tts?.stop()
-        piper.stop()
         _uiState.update { it.copy(isTtsSpeaking = false) }
     }
 
@@ -4062,13 +4082,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun startTutorCall() {
         val state = _uiState.value
         if (state.callPhase == CallPhase.LIVE || state.callPhase == CallPhase.CONNECTING) return
-        // The call waits for the real voice. Nothing starts on the phone's
-        // default engine and then switches mid-conversation.
-        if (!piper.isReady()) {
-            prepareTutorVoice()
-            return
-        }
-
         initTts()
         initSpeechRecognizer()
         conversationTurns.clear()
@@ -4221,7 +4234,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         tutorSpeechSeq++
         pendingTutorSentences = 0
         try { tts?.stop() } catch (_: Exception) {}
-        piper.stop()
         _uiState.update {
             it.copy(voiceAssistantState = AssistantVoiceState.LISTENING, isTtsSpeaking = false)
         }
@@ -4261,7 +4273,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /** Re-hear the corrected sentence without restarting the call loop. */
     fun speakGrammarFix() {
         val fix = _uiState.value.callFix ?: return
-        speakText(fix.corrected)
+        speakText(fix.corrected, slow = true)
     }
 
     private fun startCallClock() {
@@ -4342,202 +4354,40 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     }
 
     /**
-     * Download and load Miss Emma's voice, once.
+     * Warm the engine before it is needed.
      *
-     * This is the **only** place a call is allowed to get its voice from. It is
-     * idempotent: opening the tutor screen, tapping the microphone or tapping the
-     * card all land here, and a second tap while the download is running does
-     * nothing. Progress is published in the UiState so the idle screen can show
-     * a real progress bar instead of a snackbar.
+     * Text-to-speech spends its first call loading the voice into memory — a few
+     * hundred milliseconds that, in a call, land exactly where the pause is most
+     * obvious: right after the tutor decides to answer. The tutor screen calls
+     * this as soon as it opens, so the opening line comes out immediately.
      */
-    fun prepareTutorVoice() {
-        if (piperJob?.isActive == true) return
-        if (piper.isReady()) {
-            _uiState.update {
-                it.copy(tutorVoiceState = TutorVoiceState.READY, tutorVoiceProgress = 1f)
-            }
-            return
-        }
-        piperJob = viewModelScope.launch(Dispatchers.IO) {
-            val resuming = piper.isDownloaded()
-            _uiState.update {
-                it.copy(
-                    tutorVoiceState = if (resuming) TutorVoiceState.UNPACKING else TutorVoiceState.DOWNLOADING,
-                    tutorVoiceProgress = if (resuming) 1f else 0f
-                )
-            }
-            // Progress arrives from the download loop, at most once per percent:
-            // writing the UiState on every 64 KB chunk would recompose the idle
-            // screen a thousand times for a 20 MB file.
-            var lastStep = -1
-            val ready = piper.prepare { fraction ->
-                val step = if (fraction < 0f) 101 else (fraction * 100f).toInt()
-                if (step == lastStep) return@prepare
-                lastStep = step
-                _uiState.update { state ->
-                    state.copy(
-                        tutorVoiceState = if (fraction < 0f) {
-                            TutorVoiceState.UNPACKING
-                        } else {
-                            TutorVoiceState.DOWNLOADING
-                        },
-                        tutorVoiceProgress = if (fraction < 0f) 1f else fraction.coerceIn(0f, 1f)
-                    )
-                }
-            }
-            _uiState.update {
-                it.copy(
-                    // "Loaded" is the truth to report, not "the download
-                    // returned true": a pack that was already on disk needs no
-                    // download at all.
-                    tutorVoiceState = when {
-                        piper.isReady() -> TutorVoiceState.READY
-                        ready -> TutorVoiceState.READY
-                        else -> TutorVoiceState.FAILED
-                    },
-                    tutorVoiceProgress = if (piper.isReady() || ready) 1f else 0f
-                )
-            }
-            if (!ready) {
-                Log.w("TheStudentViewModel", "Tutor voice pack could not be prepared")
-            }
-        }
+    fun warmUpTutorVoice() {
+        initTts()
     }
 
     /**
-     * Re-read the voice pack from disk.
+     * Speak a turn, one spoken unit at a time.
      *
-     * Called every time the tutor screen opens. Without it a state left behind by
-     * an older process — or a `FAILED` that was really just a slow unpack — keeps
-     * the download card on screen even though the voice is already loaded. If the
-     * engine is alive, the card must be gone.
-     */
-    fun refreshTutorVoiceState() {
-        if (piperJob?.isActive == true) return
-        val ready = piper.isReady()
-        _uiState.update { state ->
-            when {
-                ready && state.tutorVoiceState != TutorVoiceState.READY ->
-                    state.copy(tutorVoiceState = TutorVoiceState.READY, tutorVoiceProgress = 1f)
-                !ready && state.tutorVoiceState == TutorVoiceState.READY ->
-                    state.copy(tutorVoiceState = TutorVoiceState.MISSING, tutorVoiceProgress = 0f)
-                else -> state
-            }
-        }
-    }
-
-    /** The card's "Try again": clear the failed state and restart the download. */
-    fun retryTutorVoiceDownload() {
-        piperJob?.cancel()
-        piperJob = null
-        _uiState.update {
-            it.copy(tutorVoiceState = TutorVoiceState.MISSING, tutorVoiceProgress = 0f)
-        }
-        prepareTutorVoice()
-    }
-
-    /**
-     * Speak through Piper.
+     * Two things happen here that make the phone's own engine sound like a person
+     * on a call rather than a reader:
      *
-     * Mirrors the system-engine path: the same sequence guard means an interrupt
-     * (which bumps [tutorSpeechSeq] and stops the narrator) cannot hand the turn
-     * back a second time.
-     */
-    private fun speakWithPiper(sentences: List<String>) {
-        tutorSpeechSeq++
-        val seq = tutorSpeechSeq
-        pendingTutorSentences = sentences.size
-        try { tts?.stop() } catch (_: Exception) {}
-        piper.speak(
-            sentences = sentences,
-            onStart = {
-                if (seq != tutorSpeechSeq) return@speak
-                _uiState.update {
-                    it.copy(voiceAssistantState = AssistantVoiceState.SPEAKING, isTtsSpeaking = true)
-                }
-            },
-            onSentenceDone = {
-                if (seq != tutorSpeechSeq) return@speak
-                pendingTutorSentences = (pendingTutorSentences - 1).coerceAtLeast(0)
-                if (pendingTutorSentences == 0) {
-                    _uiState.update {
-                        it.copy(voiceAssistantState = AssistantVoiceState.IDLE, isTtsSpeaking = false)
-                    }
-                    onTutorSpeechFinished()
-                }
-            },
-            onError = {
-                if (seq != tutorSpeechSeq) return@speak
-                pendingTutorSentences = 0
-                // The neural engine gave up mid-answer: carry on with the phone's
-                // voice rather than leaving the call silent.
-                val rest = _uiState.value.callTutorLine
-                if (rest.isNotBlank()) {
-                    speakTutorSentencesWithSystemVoice(rest)
-                } else {
-                    onTutorSpeechFinished()
-                }
-            }
-        )
-    }
-
-    /**
-     * The pre-Piper sentence loop, kept as the fallback for [speakWithPiper].
-     */
-    private fun speakTutorSentencesWithSystemVoice(text: String) {
-        val engine = tts
-        if (engine == null || !isTtsInitialized) {
-            onTutorSpeechFinished()
-            return
-        }
-        val sentences = text.trim().split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-        if (sentences.isEmpty()) {
-            onTutorSpeechFinished()
-            return
-        }
-        tutorSpeechSeq++
-        val seq = tutorSpeechSeq
-        pendingTutorSentences = sentences.size
-        try {
-            engine.stop()
-            sentences.forEachIndexed { index, sentence ->
-                val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                engine.speak(sentence, mode, null, "$callUtterancePrefix$seq-$index")
-            }
-        } catch (_: Exception) {
-            pendingTutorSentences = 0
-            onTutorSpeechFinished()
-        }
-    }
-
-    /**
-     * Speak a turn sentence by sentence.
+     *  - the reply is cut into short units at its own punctuation
+     *    ([TutorSpeech.linesOf]), which is what gives each line a melody instead
+     *    of a monotone run-on;
+     *  - the units are queued back to back with `QUEUE_ADD`, so the engine starts
+     *    on the first one while the rest are still being handed over. The
+     *    sequence number tags every utterance so an interrupt can invalidate
+     *    whatever is still queued.
      *
-     * Queuing each sentence separately means the student hears the first one
-     * while the rest is still being handed to the engine — the difference
-     * between a call and a voicemail. The sequence number tags every utterance so
-     * an interrupt can invalidate whatever is still queued.
+     * [slow] drops the rate a little: corrections and re-reads are the two moments
+     * a learner needs to hear every word, and the contrast is itself a cue.
      */
-    private fun speakTutorSentences(text: String) {
-        val clean = text.trim()
-        if (clean.isEmpty()) {
+    private fun speakTutorSentences(text: String, slow: Boolean = false) {
+        val units = TutorSpeech.linesOf(text)
+        if (units.isEmpty()) {
             onTutorSpeechFinished()
             return
         }
-        val sentences = clean.split(Regex("(?<=[.!?])\\s+"))
-            .map { it.trim() }
-            .filter { it.isNotEmpty() }
-            .ifEmpty { listOf(clean) }
-
-        // The neural voice speaks first when it is ready; the sentence loop, the
-        // interrupt rules and the "your turn" hand-back stay exactly the same.
-        if (piper.isReady()) {
-            speakWithPiper(sentences)
-            return
-        }
-
         val engine = tts
         if (engine == null || !isTtsInitialized) {
             // No voice engine on this device: keep the call usable as captions.
@@ -4548,13 +4398,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
         tutorSpeechSeq++
         val seq = tutorSpeechSeq
-        pendingTutorSentences = sentences.size
+        pendingTutorSentences = units.size
         try {
             engine.stop()
-            sentences.forEachIndexed { index, sentence ->
+            // Rate is captured per utterance, so it can change from one line to
+            // the next without restarting the engine.
+            engine.setSpeechRate(if (slow) TUTOR_RATE_SLOW else TUTOR_RATE)
+            units.forEachIndexed { index, unit ->
                 val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                engine.speak(sentence, mode, null, "$callUtterancePrefix$seq-$index")
+                engine.speak(unit, mode, null, "$callUtterancePrefix$seq-$index")
             }
+            engine.setSpeechRate(TUTOR_RATE)
         } catch (_: Exception) {
             pendingTutorSentences = 0
             onTutorSpeechFinished()

@@ -48,7 +48,8 @@ import kotlinx.coroutines.launch
 //  this is a page of TheStudent, not a different product.
 //
 //  Everything it says is about *this screen*: the microphone, the transcript,
-//  the one-time voice download. Nothing about how the backend is built.
+//  transcription and what leaves the phone. Nothing about how the backend is
+//  built.
 // ─────────────────────────────────────────────────────────────────────────────
 
 private val ConsentInk = Color(0xFF0F172A)
@@ -81,10 +82,10 @@ private val CLAUSES = listOf(
             "record in TheStudent."
     ),
     Clause(
-        title = "The one-time download",
-        body = "The first call downloads Miss Emma's natural voice — about 20 MB — " +
-            "so she can speak without an internet connection afterwards. It lives " +
-            "in this app's storage and is removed if you clear the app's data."
+        title = "Her voice",
+        body = "Miss Emma speaks with your phone's own voice engine, so audio never " +
+            "leaves the device to be generated. Nothing extra is downloaded, and " +
+            "the voice works offline."
     ),
     Clause(
         title = "What we never do",
@@ -208,8 +209,8 @@ fun TutorConsentScreen(
                     Spacer(Modifier.height(18.dp))
                     Text(
                         text = "Miss Emma is a speaking partner, not a recording app. " +
-                            "Please read this once — it is short, and it explains the " +
-                            "only four things this screen does with your data.",
+                            "Please read this once — it is short, and it explains " +
+                            "everything this screen does with your data.",
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 14.5.sp,
                         lineHeight = 21.sp,

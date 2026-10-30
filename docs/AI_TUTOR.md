@@ -589,3 +589,44 @@ finished. So: the screen re-reads the pack on entry (`refreshTutorVoiceState`),
 value, unpacking and unknown-length downloads show a sliding bar instead of a
 stuck percentage, and the card fades out through a 320 ms `Crossfade` as the two
 mode cards fade in.
+
+### 11.14 Round 19i — back to the system voice, tuned for conversation
+
+**Piper is gone.** `PiperNarrator`, the sherpa-onnx AAR fetch in
+`app/build.gradle.kts`, the `commons-compress` dependency, the
+`TutorVoiceState`/`tutorVoiceProgress` fields, the download card and its gating
+are all removed. The APK shrinks by the runtime + a 20 MB model download, and
+there is nothing to prepare before a call. §11.10–11.13 describe the on-device
+engine that used to be here; they are kept as history, not as current behaviour.
+
+**What replaced it is a better use of the engine the phone already has:**
+
+- **`data/voice/TutorSpeech.kt`** — a pure function that turns a written reply
+  into spoken units. It strips markdown, bullets, emoji and dashes (a voice that
+  reads "asterisk" is not a tutor), turns `…` into a comma, splits long sentences
+  at their own commas and re-joins them into units of at most ~95 characters, and
+  guarantees every unit ends with punctuation so the engine can read a melody
+  into it. Short units with real endings are what make a synthetic voice sound
+  *interested* instead of flat — an engine picks its intonation per utterance.
+- **Two rates.** `TUTOR_RATE = 0.98` for conversation, `TUTOR_RATE_SLOW = 0.90`
+  for corrections and replays (`speakText(..., slow = true)`). The contrast is
+  itself a cue: the fix is the one line you hear clearly.
+- **Warm engine.** `warmUpTutorVoice()` runs as the tutor screen opens, because
+  the first `speak` call is where the voice is loaded into memory and that pause
+  lands exactly where the tutor deciding to answer already has one.
+- **Speech audio attributes.** `USAGE_MEDIA` + `CONTENT_TYPE_SPEECH`, so the
+  voice is routed as speech media, other audio ducks instead of stopping, and the
+  system does not clip the first syllable.
+- **Voice choice kept and refined.** `applyNarratorVoice` still scores every
+  English voice (female `+60`, male `−70`, quality tiers, `en-US`/`en-GB`), pitch
+  `1.04`, with `1.08` as the fallback when no suitable voice exists. The
+  network-voice bonus dropped to `+10`: a neural streaming voice is worth a
+  little, but not a round trip before the first syllable of every call.
+- **Turn-taking unchanged.** Sentences are queued with `QUEUE_ADD` against a
+  `QUEUE_FLUSH` first line, `pendingTutorSentences` counts them down in
+  `onDone`, `onTutorSpeechFinished` hands the floor back, and `tutorSpeechSeq`
+  still invalidates anything an interrupt left behind.
+
+The consent screen's "one-time download" clause now says the voice is generated
+by the phone's own engine, so nothing is downloaded and nothing extra leaves the
+device.
