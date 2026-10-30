@@ -828,6 +828,10 @@ private fun LiveContent(
             isMuted = isMuted,
             caption = when {
                 isMuted -> "Microphone off — tap to turn it back on"
+                // In a drill the student has one job, and the caption is where
+                // they look while the mic is open.
+                voiceState == AssistantVoiceState.LISTENING && review != null ->
+                    "Say the sentence above — tap when you have finished"
                 voiceState == AssistantVoiceState.SPEAKING -> "Tap to interrupt"
                 voiceState == AssistantVoiceState.THINKING -> "Thinking… tap to hear the last line again"
                 // The recogniser restarts itself mid-turn now, so the caption has
