@@ -51,8 +51,11 @@
  * Configuration (backend/config.secrets.php - server-side only, never in git)
  * --------------------------------------------------------------------------
  *   define('ASSISTANT_SSO_SECRET',  '<64+ random hex characters>');
- *   define('ASSISTANT_WEB_ORIGIN',  'https://your-production-domain.example');
+ *   define('ASSISTANT_WEB_ORIGIN',  'https://chatbot-liart-rho-81.vercel.app');
  *   define('ASSISTANT_EXCHANGE_PATH', '/api/app-auth'); // optional
+ *
+ * ASSISTANT_WEB_ORIGIN defaults to the value above in config.php. It MUST stay
+ * identical to WebAssistantConfig.PRODUCTION_ORIGIN in the Android app.
  *
  * The SAME ASSISTANT_SSO_SECRET must be set on the website's server. Generate
  * it with `php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'`.

@@ -108,7 +108,7 @@ Success:
   "status": "success",
   "message": "Assistant sign-in code issued.",
   "code": "<64 hex chars>",
-  "exchange_url": "https://<stable-domain>/api/app-auth",
+  "exchange_url": "https://chatbot-liart-rho-81.vercel.app/api/app-auth",
   "sub": "42",
   "expires_in": 90
 }
@@ -184,11 +184,16 @@ fails.
    php -r 'echo bin2hex(random_bytes(32)), PHP_EOL;'
    ```
    One for `APP_KEY` (existing), one for `ASSISTANT_SSO_SECRET`. **Never reuse.**
-3. Set `ASSISTANT_WEB_ORIGIN` to the **stable production HTTPS origin only** —
-   no path, no trailing slash, never a Vercel preview/deployment URL.
-4. Set the identical origin as `WebAssistantConfig.DEFAULT_BASE_URL` (or via
-   `TheStudentViewModel.setWebAssistantBaseUrl()`). **The two hosts MUST match**:
-   the app refuses to POST a code to any other host.
+3. The shipped origin is **`https://chatbot-liart-rho-81.vercel.app`** (no path,
+   no trailing slash). `backend/config.php` already defaults
+   `ASSISTANT_WEB_ORIGIN` to it, and `config.secrets.example.php` sets the same
+   value. No domain edit is needed for this build. Never use a Vercel preview /
+   unique deployment URL here.
+4. It is already identical to `WebAssistantConfig.PRODUCTION_ORIGIN` /
+   `DEFAULT_BASE_URL` in the Android app. **The two hosts MUST match**: the app
+   refuses to POST a code to any other host. If you ever move the site to a
+   custom domain, change both constants together (and the runtime override from
+   `setWebAssistantBaseUrl()`, if one was persisted on a device).
 5. Put the same `ASSISTANT_SSO_SECRET` in the website server's environment.
 6. Deploy `backend/api/assistant_session.php`. The tables are created on the
    first request.
@@ -231,7 +236,7 @@ one-way `window.postMessage` for the guest identity hint still works.
 >    `application/x-www-form-urlencoded` POST body. Reject everything else
 >    (405 for GET, 400 for missing fields). The code MUST NOT appear in a URL,
 >    query string, log, cookie value, or client-side JS.
-> 2. Calls `POST https://<php-host>/api/assistant_session.php?action=exchange`
+> 2. Calls `POST https://app.quizontal.site/api/assistant_session.php?action=exchange`
 >    **from server code** with JSON `{code, code_verifier, state}` and headers
 >    `X-TheStudent-Timestamp` (unix seconds), `X-TheStudent-Nonce` (random),
 >    `X-TheStudent-Signature` = lowercase hex
@@ -265,8 +270,9 @@ one-way `window.postMessage` for the guest identity hint still works.
 >    created; sign the website session out if `active === false`.
 >
 > Environment: `ASSISTANT_SSO_SECRET` (identical 64-hex value to the PHP server),
-> `THESTUDENT_API_BASE` (e.g. `https://app.quizontal.site`). Keep the production
-> origin identical to the app's embedded base URL; the app will refuse to POST a
+> `THESTUDENT_API_BASE=https://app.quizontal.site`. The site itself MUST be served
+> at the pinned origin `https://chatbot-liart-rho-81.vercel.app` (identical to the
+> app's `WebAssistantConfig.PRODUCTION_ORIGIN`); the app will refuse to POST a
 > code to any other host.
 
 ## 8. Test checklist on a real phone

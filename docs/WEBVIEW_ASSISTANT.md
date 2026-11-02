@@ -74,28 +74,36 @@ It sits above the bottom navigation, not on top of it.
 
 ---
 
-## 3. ⚠ Change this URL before shipping
+## 3. The pinned production URL
 
-`WebAssistantConfig.DEFAULT_BASE_URL` is currently
+`WebAssistantConfig.PRODUCTION_ORIGIN` / `DEFAULT_BASE_URL` is fixed to
 
 ```
-https://chatbot-liart-rho-81.vercel.app/
+https://chatbot-liart-rho-81.vercel.app
+https://chatbot-liart-rho-81.vercel.app/   (DEFAULT_BASE_URL)
 ```
 
-That matches Vercel's `project-{hash}-{scope}.vercel.app` **immutable
-deployment URL** pattern. It will keep working, but it will **never show a newer
-build** — every site update you make would be invisible to installed apps.
-Use a production domain (`chatbot.vercel.app`) or your custom domain.
+This is the URL the app ships with — **not a placeholder**. It is a Vercel
+`*.vercel.app` **project** domain, so it follows the latest production deploy.
+Only *unique deployment* URLs (`project-{hash}-{scope}.vercel.app`) are
+immutable snapshots; that is not what this is.
 
-Two ways to change it without a full rebuild:
+The same value is the default for `ASSISTANT_WEB_ORIGIN` in
+`backend/config.php` and is set in `backend/config.secrets.example.php`. The two
+hosts must stay identical: the app refuses to POST a live SSO code to any other
+origin and falls back to guest mode. See `docs/ASSISTANT_SSO.md`.
 
-1. **Build time:** change `DEFAULT_BASE_URL` in `WebAssistantConfig.kt`.
+Two ways to change it without a full rebuild, if you later attach a custom
+domain (remember to change the PHP origin too):
+
+1. **Build time:** change `PRODUCTION_ORIGIN` in `WebAssistantConfig.kt`.
 2. **Runtime:** call `viewModel.setWebAssistantBaseUrl("https://your.domain/")`
    from a config response (for example from `verifySessionWithBackend()`), or
    add a tiny `backend/api/assistant_config.php` returning `{"url":"..."}` and
    call the setter with it. The value is stored in
    `TheStudentPreferences.webAssistantBaseUrl` and read on the next cold start.
-   Only HTTPS is accepted; invalid values fall back to the default.
+   Only HTTPS is accepted; invalid/blank values fall back to `DEFAULT_BASE_URL`.
+   Clearing that stored override restores the pinned URL above.
 
 ---
 
@@ -104,7 +112,7 @@ Two ways to change it without a full rebuild:
 The app loads:
 
 ```
-https://<your-domain>/?app=android&theme=dark|light&q=<url-encoded question>
+https://chatbot-liart-rho-81.vercel.app/?app=android&theme=dark|light&q=<url-encoded question>
 ```
 
 ### 4.1 Embed mode — `?app=android`

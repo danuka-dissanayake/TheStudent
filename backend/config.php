@@ -142,6 +142,20 @@ if (!defined('DB_USER'))     { define('DB_USER', ''); }
 if (!defined('DB_PASS'))     { define('DB_PASS', ''); }
 
 // ---------------------------------------------------------------------------
+// Assistant SSO: the web origin is NOT a secret, so it has a shipped default.
+// It MUST stay identical to WebAssistantConfig.PRODUCTION_ORIGIN in the Android
+// app. The app refuses to POST a live one-time code to any other host.
+// The HMAC secret (ASSISTANT_SSO_SECRET) is deliberately NOT defaulted here -
+// it must come from config.secrets.php / the server environment.
+// ---------------------------------------------------------------------------
+if (!defined('ASSISTANT_WEB_ORIGIN')) {
+    define('ASSISTANT_WEB_ORIGIN', 'https://chatbot-liart-rho-81.vercel.app');
+}
+if (!defined('ASSISTANT_EXCHANGE_PATH')) {
+    define('ASSISTANT_EXCHANGE_PATH', '/api/app-auth');
+}
+
+// ---------------------------------------------------------------------------
 // Fail closed when the deployment is not configured
 // ---------------------------------------------------------------------------
 $__tsMissing = [];

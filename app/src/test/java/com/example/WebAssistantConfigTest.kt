@@ -93,6 +93,35 @@ class WebAssistantConfigTest {
     }
 
     @Test
+    fun `the pinned production url is the shipped default and a valid sso origin`() {
+        assertEquals(
+            "https://chatbot-liart-rho-81.vercel.app",
+            WebAssistantConfig.PRODUCTION_ORIGIN
+        )
+        assertEquals(
+            "https://chatbot-liart-rho-81.vercel.app/",
+            WebAssistantConfig.DEFAULT_BASE_URL
+        )
+        assertEquals(
+            WebAssistantConfig.PRODUCTION_ORIGIN,
+            WebAssistantConfig.originOf(WebAssistantConfig.DEFAULT_BASE_URL)
+        )
+        assertTrue(
+            WebAssistantConfig.isAllowedExchangeUrl(
+                "https://chatbot-liart-rho-81.vercel.app/api/app-auth",
+                WebAssistantConfig.DEFAULT_BASE_URL
+            )
+        )
+        // A different Vercel deployment must not receive a live code.
+        assertFalse(
+            WebAssistantConfig.isAllowedExchangeUrl(
+                "https://chatbot-abc123-team.vercel.app/api/app-auth",
+                WebAssistantConfig.DEFAULT_BASE_URL
+            )
+        )
+    }
+
+    @Test
     fun `bridge origin is an exact https origin with no path or wildcard`() {
         assertEquals(
             "https://chat.example.com",

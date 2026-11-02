@@ -442,7 +442,9 @@ the older native `AiAssistantScreen`. Key files:
   states, back handling, same-host navigation lock, file chooser, lifecycle
 - `ui/components/AssistantFab.kt` — one global floating button, hidden on
   Chats, full-screen pages, dialogs, a live tutor call and the assistant itself
-- `data/local/WebAssistantConfig.kt` — HTTPS-only base URL, host allowlist,
+- `data/local/WebAssistantConfig.kt` — pinned production origin
+  `PRODUCTION_ORIGIN = https://chatbot-liart-rho-81.vercel.app` and
+  `DEFAULT_BASE_URL` derived from it, HTTPS-only host allowlist,
   `?app=android&theme=&q=` page URL, exact `originOf()` for the bridge
   allowlist, and `isAllowedExchangeUrl()` for the SSO POST
 - `data/local/AssistantHandshake.kt`, `data/remote/AssistantSessionClient.kt` —

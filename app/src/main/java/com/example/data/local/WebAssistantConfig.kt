@@ -13,19 +13,25 @@ import java.net.URLEncoder
 object WebAssistantConfig {
 
     /**
-     * Point this at a STABLE production domain before shipping.
+     * The chosen production origin of the AI assistant website. There is NO
+     * placeholder here: this is the URL the app ships with.
      *
-     * The value below is a Vercel *deployment* URL (`project-{hash}-{scope}`).
-     * Vercel deployment URLs are immutable snapshots: they keep working, but they
-     * never show a newer build. A production domain (`project.vercel.app`) or a
-     * custom domain follows the latest deploy. It can also be changed at runtime
-     * without an app update with `TheStudentViewModel.setWebAssistantBaseUrl()`.
+     * It is a Vercel `*.vercel.app` **project** domain, so it follows the latest
+     * production deploy. (Only unique deployment URLs of the form
+     * `project-{hash}-{scope}.vercel.app` are immutable snapshots.) If a custom
+     * domain replaces it later, change this value AND `ASSISTANT_WEB_ORIGIN` in
+     * `backend/config.secrets.php` together — they must be identical, otherwise
+     * the app deliberately refuses to POST a live one-time code and falls back
+     * to guest mode.
      *
-     * SSO: this host MUST equal `ASSISTANT_WEB_ORIGIN` in
-     * `backend/config.secrets.php`. The app refuses to POST a live one-time code
-     * to any other host (see `isAllowedExchangeUrl` and docs/ASSISTANT_SSO.md).
+     * Can still be overridden at runtime without a rebuild via
+     * `TheStudentViewModel.setWebAssistantBaseUrl()`; only HTTPS is accepted
+     * and invalid values fall back to [DEFAULT_BASE_URL].
      */
-    const val DEFAULT_BASE_URL = "https://chatbot-liart-rho-81.vercel.app/"
+    const val PRODUCTION_ORIGIN = "https://chatbot-liart-rho-81.vercel.app"
+
+    /** Single source of truth for [PRODUCTION_ORIGIN]: origin + trailing slash. */
+    const val DEFAULT_BASE_URL = PRODUCTION_ORIGIN + "/"
 
     const val APP_MODE = "android"
 

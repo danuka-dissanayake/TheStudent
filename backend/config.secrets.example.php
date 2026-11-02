@@ -79,7 +79,10 @@ define('ASSISTANT_SSO_SECRET', 'REPLACE_WITH_64_HEX_CHARACTERS_DIFFERENT_FROM_AP
 // The STABLE production origin of the AI assistant website (no path, no
 // trailing slash). It must be HTTPS and must be the exact origin allow-listed
 // by WebAssistantConfig / addWebMessageListener. Never a preview deployment URL.
-define('ASSISTANT_WEB_ORIGIN', 'https://your-production-domain.example');
+// MUST match WebAssistantConfig.PRODUCTION_ORIGIN in the Android app.
+// config.php already defaults this to the same value; override it here only if
+// you move the site to a custom domain (then change PRODUCTION_ORIGIN too).
+define('ASSISTANT_WEB_ORIGIN', 'https://chatbot-liart-rho-81.vercel.app');
 
 // Website route that receives the POSTed one-time code (default is fine).
 define('ASSISTANT_EXCHANGE_PATH', '/api/app-auth');
