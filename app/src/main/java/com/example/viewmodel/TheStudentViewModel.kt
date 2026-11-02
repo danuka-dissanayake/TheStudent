@@ -922,7 +922,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
              * finished stretch is appended without tearing the session down;
              * the app's own adaptive pause still decides when the turn is over.
              */
-            override fun onSegmentResults(segmentResults: Bundle?) {
+            // NOTE: the platform declares this parameter as a non-null Bundle.
+            // Declaring Bundle? here makes Kotlin report "overrides nothing",
+            // so the segmented-session callback never compiles.
+            override fun onSegmentResults(segmentResults: Bundle) {
                 if (!isCurrent() || !dictationActive) return
                 segmentedSessionActive = true
                 val verdict = readVerdict(segmentResults)
@@ -5636,7 +5639,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         )
                         putExtra(
                             RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
-                            1_500
+                            1_500L
                         )
                     }
                     // The silence-length hints are deliberately NOT set.
