@@ -33,8 +33,9 @@ data class ReviewItem(
  *    went. This is the difference between a tutor and a stranger with a script.
  *
  * Kept in its own small SharedPreferences file rather than the session store:
- * none of it is authentication, none of it is sensitive, and a student who signs
- * out should not lose the sentences they have been practising.
+ * none of it is authentication, and keeping it separate means [clearAll] can
+ * erase exactly this student's level, facts and sentences on sign-out — a
+ * shared phone must not hand the next student somebody else's practice record.
  */
 class TutorProgressStore(context: Context) {
 
@@ -50,6 +51,29 @@ class TutorProgressStore(context: Context) {
     var lastCallNote: String?
         get() = prefs.getString(KEY_LAST_CALL, null)
         set(value) = prefs.edit().putString(KEY_LAST_CALL, value).apply()
+
+    /**
+     * Consecutive calls with evidence strong enough to move the CEFR level.
+     * One good turn must not re-grade a student; two whole calls may.
+     */
+    var goodCallStreak: Int
+        get() = prefs.getInt(KEY_GOOD_STREAK, 0)
+        set(value) = prefs.edit().putInt(KEY_GOOD_STREAK, value).apply()
+
+    var weakCallStreak: Int
+        get() = prefs.getInt(KEY_WEAK_STREAK, 0)
+        set(value) = prefs.edit().putInt(KEY_WEAK_STREAK, value).apply()
+
+    /**
+     * Wipe the tutor's per-student data on sign-out.
+     *
+     * Level, remembered facts and review sentences live in their own preferences
+     * file, which the session store does not clear. On a shared phone the next
+     * student must not inherit "your exam is on Tuesday" or somebody else's B2.
+     */
+    fun clearAll() {
+        prefs.edit().clear().apply()
+    }
 
     // ── reviews ─────────────────────────────────────────────────────────────
 
@@ -75,12 +99,15 @@ class TutorProgressStore(context: Context) {
         val all = readReviews().toMutableList()
         useful.forEach { fix ->
             val index = all.indexOfFirst { it.right.equals(fix.corrected, ignoreCase = true) }
+            // A mistake that came back is evidence the ladder was too generous:
+            // start again tomorrow with zero successes rather than pretending
+            // the learner had already mastered it.
             val fresh = ReviewItem(
                 wrong = fix.original,
                 right = fix.corrected,
                 rule = fix.rule,
                 dueAt = now + ONE_DAY,
-                successes = if (index >= 0) all[index].successes else 0
+                successes = 0
             )
             if (index >= 0) all[index] = fresh else all.add(fresh)
         }
@@ -132,6 +159,7 @@ class TutorProgressStore(context: Context) {
     fun addMemory(text: String) {
         val fact = text.trim().trim('"', '.', ' ').take(90)
         if (fact.length < 4) return
+        if (SENSITIVE.containsMatchIn(fact)) return
         val existing = memory().toMutableList()
         val alreadyKnown = existing.any { known ->
             known.equals(fact, ignoreCase = true) ||
@@ -145,7 +173,11 @@ class TutorProgressStore(context: Context) {
     }
 
     fun forgetMemory() {
-        prefs.edit().remove(KEY_MEMORY).apply()
+        prefs.edit()
+            .remove(KEY_MEMORY)
+            .remove(KEY_GOOD_STREAK)
+            .remove(KEY_WEAK_STREAK)
+            .apply()
     }
 
     // ── storage ─────────────────────────────────────────────────────────────
@@ -191,6 +223,20 @@ class TutorProgressStore(context: Context) {
         private const val KEY_LAST_CALL = "tutor_last_call"
         private const val KEY_REVIEWS = "tutor_reviews"
         private const val KEY_MEMORY = "tutor_memory"
+        private const val KEY_GOOD_STREAK = "tutor_good_streak"
+        private const val KEY_WEAK_STREAK = "tutor_weak_streak"
+
+        /**
+         * The tutor may remember a hobby or an exam, never anything a student
+         * would not want written down. The model is told the same thing; this
+         * is the local backstop.
+         */
+        private val SENSITIVE = Regex(
+            "\\b(?:phone|mobile|address|password|religion|muslim|hindu|" +
+                "catholic|buddhist|sick|illness|disease|depress|anxiety|therapy|" +
+                "medicine|doctor|hospital|birthday|date of birth|live at|my age)\\b",
+            RegexOption.IGNORE_CASE
+        )
 
         const val DEFAULT_LEVEL = "B1"
         val CEFR_LADDER = listOf("A2", "B1", "B2")

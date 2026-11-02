@@ -692,7 +692,9 @@ class MainActivity : ComponentActivity() {
                                                             onSelectScenario = { viewModel.selectVoiceScenario(it) },
                                                             onSelectLesson = { viewModel.selectTutorLesson(it) },
                                                             onDismissSummary = { viewModel.dismissCallSummary() },
-                                                            onShowSnackbar = { viewModel.showSnackbar(it) }
+                                                            onShowSnackbar = { viewModel.showSnackbar(it) },
+                                                            onTutorOpened = { viewModel.refreshTutorProgress() },
+                                                            onForgetMemory = { viewModel.forgetTutorMemory() }
                                                         )
                                                     }
                                                     TheStudentNavTab.PROFILE -> {

@@ -181,6 +181,15 @@ object TutorSpeech {
         return out
     }
 
+    /**
+     * The same cleaning, exposed for the tutor's reply guard.
+     *
+     * [TutorCoach] needs to remove markdown, bullets, emoji and dashes before it
+     * decides how many sentences a reply has, so both the guard and the speech
+     * engine see exactly the same words.
+     */
+    fun cleanForSpeech(text: String): String = clean(text)
+
     /** Strip everything a reader would silently ignore but a voice would read. */
     private fun clean(text: String): String {
         var out = text

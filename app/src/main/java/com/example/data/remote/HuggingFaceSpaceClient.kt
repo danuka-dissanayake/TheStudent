@@ -14,7 +14,13 @@ import java.util.concurrent.TimeUnit
 
 sealed class HfApiResponse {
     data class Success(val text: String, val latencyMs: Long) : HfApiResponse()
-    data class Error(val message: String, val isAuthError: Boolean = false, val isSleepingOrOffline: Boolean = false) : HfApiResponse()
+    data class Error(
+        val message: String,
+        val isAuthError: Boolean = false,
+        val isSleepingOrOffline: Boolean = false,
+        /** The answer took too long for a live call; the local tutor took over. */
+        val isTimeout: Boolean = false
+    ) : HfApiResponse()
 }
 
 class HuggingFaceSpaceClient {
@@ -53,7 +59,14 @@ Your guidelines:
         systemPrompt: String = SYSTEM_PROMPT,
         maxTokens: Int = 250,
         temperature: Double = 0.7,
-        cleanForSpeech: Boolean = true
+        cleanForSpeech: Boolean = true,
+        /**
+         * A hard ceiling for the whole request. A live speaking call cannot wait
+         * 35 seconds for a sleepy free Space: past ~1 s of dead air the call
+         * feels broken, so the tutor passes a few seconds and speaks a local
+         * answer instead. 0 keeps the default timeouts for non-call callers.
+         */
+        callTimeoutMs: Long = 0L
     ): HfApiResponse = withContext(Dispatchers.IO) {
         val startTime = System.currentTimeMillis()
         
@@ -114,7 +127,14 @@ Your guidelines:
             val request = requestBuilder.build()
             Log.d(TAG, "Calling HuggingFace Space endpoint: $endpointUrl (token present: ${token.isNotBlank()})")
 
-            val response = client.newCall(request).execute()
+            // callTimeout covers connect + write + read together, which is what
+            // matters on a call: the student hears one gap, not three separate ones.
+            val httpClient = if (callTimeoutMs > 0) {
+                client.newBuilder().callTimeout(callTimeoutMs, TimeUnit.MILLISECONDS).build()
+            } else {
+                client
+            }
+            val response = httpClient.newCall(request).execute()
             val responseCode = response.code
             val responseBody = response.body?.string().orEmpty()
 
@@ -159,9 +179,18 @@ Your guidelines:
             }
         } catch (e: Exception) {
             Log.w(TAG, "Exception calling HF space: ${e.message}", e)
+            val timedOut = e is java.net.SocketTimeoutException ||
+                e is java.io.InterruptedIOException ||
+                e.message?.contains("timeout", ignoreCase = true) == true ||
+                e.message?.contains("timed out", ignoreCase = true) == true
             HfApiResponse.Error(
-                message = "Could not reach Hugging Face Space (${e.localizedMessage ?: "Network error"}).",
-                isSleepingOrOffline = true
+                message = if (timedOut) {
+                    "The tutor took too long to answer; keeping the call going locally."
+                } else {
+                    "Could not reach Hugging Face Space (${e.localizedMessage ?: "Network error"})."
+                },
+                isSleepingOrOffline = true,
+                isTimeout = timedOut
             )
         }
     }

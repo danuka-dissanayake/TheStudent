@@ -179,6 +179,10 @@ fun AiTutorScreen(
     onSelectLesson: (TutorLesson?) -> Unit,
     onDismissSummary: () -> Unit,
     onShowSnackbar: (String) -> Unit,
+    /** Refresh the level, due reviews and last-call line when the tab opens. */
+    onTutorOpened: () -> Unit = {},
+    /** Erase the facts the tutor remembered between calls (⋯ menu). */
+    onForgetMemory: () -> Unit = {},
     /** A "say it properly" moment in progress: warm-up review or a drill. */
     review: TutorReviewState? = null,
     /** Sentences from earlier calls waiting to be practised. */
@@ -224,7 +228,10 @@ fun AiTutorScreen(
     // The engine loads its voice on the first call, which is exactly where a
     // pause is most obvious. Warm it while the student is still reading.
     LaunchedEffect(consentGiven) {
-        if (consentGiven) onWarmUpVoice()
+        if (consentGiven) {
+            onTutorOpened()
+            onWarmUpVoice()
+        }
     }
 
     Box(modifier = modifier.fillMaxSize().testTag("ai_voice_tutor_screen")) {
@@ -284,6 +291,12 @@ fun AiTutorScreen(
                 dueReviews = dueReviews,
                 lastCallNote = lastCallNote,
                 onMic = { startWithPermission() },
+                // "Free conversation" must actually be free conversation: it
+                // clears the guided lesson left over from the previous call.
+                onFreeTalk = {
+                    onSelectLesson(null)
+                    startWithPermission()
+                },
                 onMenu = {
                     menuLessons = activeLessonId != null
                     menuOpen = true
@@ -317,6 +330,7 @@ fun AiTutorScreen(
                 if (!onCall) startWithPermission()
             },
             onEndCall = { menuOpen = false; onEndCall() },
+            onForgetMemory = { menuOpen = false; onForgetMemory() },
             onDismiss = { menuOpen = false }
         )
     }
@@ -488,6 +502,7 @@ private fun IdleContent(
     dueReviews: Int,
     lastCallNote: String,
     onMic: () -> Unit,
+    onFreeTalk: () -> Unit,
     onMenu: () -> Unit,
     onExit: () -> Unit,
     onPickLesson: () -> Unit
@@ -560,7 +575,7 @@ private fun IdleContent(
                         tint = Brand,
                         title = "Free conversation",
                         subtitle = "Speak freely and let Miss Emma correct you as you talk",
-                        onClick = onMic,
+                        onClick = onFreeTalk,
                         modifier = Modifier.weight(1f)
                     )
                     ModeCard(
@@ -1866,6 +1881,7 @@ private fun TutorMenuSheet(
     onSelectScenario: (String) -> Unit,
     onSelectLesson: (TutorLesson?) -> Unit,
     onEndCall: () -> Unit,
+    onForgetMemory: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
@@ -1942,9 +1958,21 @@ private fun TutorMenuSheet(
                 }
             }
 
-            if (onCall) {
-                Spacer(Modifier.height(12.dp))
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+            Spacer(Modifier.height(12.dp))
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                TextButton(onClick = onForgetMemory) {
+                    Text(
+                        "Forget what she remembers",
+                        color = Muted,
+                        fontSize = 13.sp,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                }
+                if (onCall) {
                     TextButton(onClick = onEndCall) {
                         Text("End call", color = Warm, fontSize = 14.5.sp, fontWeight = FontWeight.Bold)
                     }

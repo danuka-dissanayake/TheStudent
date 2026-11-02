@@ -72,14 +72,18 @@ private val CLAUSES = listOf(
     Clause(
         title = "Your words, not your voice",
         body = "Your phone turns what you say into text. Miss Emma reads that text; " +
-            "the sound of your voice stays on your device."
+            "the sound of your voice stays on your device. Speech-to-text is not " +
+            "perfect — an accent or a noisy room can change a word — so a correction " +
+            "is a suggestion, never a mark against you."
     ),
     Clause(
         title = "What leaves your phone",
         body = "Each sentence you say is sent to the app's AI service so she can reply " +
             "and point out one correction. Your turns, call length and speaking " +
             "minutes are saved with your account, exactly like any other practice " +
-            "record in TheStudent."
+            "record in TheStudent. She may also remember one or two ordinary facts " +
+            "you tell her — an exam, a hobby, a town — so the next call can pick up " +
+            "where this one ended."
     ),
     Clause(
         title = "Her voice",
@@ -95,8 +99,10 @@ private val CLAUSES = listOf(
     ),
     Clause(
         title = "Your choices",
-        body = "Mute or end a call at any time. Decline below and nothing changes: " +
-            "this screen simply waits for you to come back."
+        body = "Mute or end a call at any time. Tap the ⋯ menu and choose " +
+            "\"Forget what she remembers\" to erase those facts, and signing out " +
+            "clears your level and practice sentences too. Decline below and nothing " +
+            "changes: this screen simply waits for you to come back."
     )
 )
 

@@ -3,7 +3,13 @@
 `app/src/main/java/com/example/ui/screens/AiTutorScreen.kt` (screen) ·
 `TheStudentViewModel` (call engine) · `data/remote/TutorTurnPrompt.kt`,
 `EnglishGrammarRules.kt`, `TutorLessonCatalog.kt` (brain) ·
-`data/model/TutorCallModels.kt` (shape)
+`data/model/TutorCallModels.kt` (shape) ·
+`data/voice/TutorCoach.kt` (research-backed decision layer)
+
+> **Read §12 last, not first.** Sections 1–11 are the design history, including
+> superseded rounds (Piper, tap-only barge-in, count-based silence ladder).
+> §12 is the behaviour the code implements today, and
+> `docs/AI_TUTOR_RESEARCH.md` is the research and rationale behind it.
 
 ---
 
@@ -201,11 +207,12 @@ degrades to captions only, which still exercises the reading and the corrections
   has no speaking rule yet. Adding one would need a `speaking:{date}` ref key so
   the daily cap and the one-award-per-ref rule still hold.
 - The CEFR level is a state field (`tutorLevel`, default B1); it should come from
-  the academic profile once that is wired to the tutor.
+  the academic profile once that is wired to the tutor. It now needs six turns of
+  evidence in **two consecutive calls** before it moves (§12).
 
 ---
 
-## 10. Checking a change
+## 10. Checking a change (historical — see §12 for the current checklist)
 
 1. Start a call on a device with a microphone → the opener is heard within ~2 s.
 2. Say "I go to the beach yesterday" → the correction strip appears before the
@@ -764,3 +771,94 @@ Cost of all ten: no new dependency. `org.json` and `AudioRecord` are platform
 APIs, and every heuristic is local, so the call still works with no network at
 all; the model only adds what it is uniquely good at (conversation, `NOTE`, a
 contextual `WORD`).
+
+---
+
+## 12. Round 21 — the researched tutor (current behaviour)
+
+The request for this round was explicitly *not* styling: "first identify how an
+AI english tutor should act", then fix the logic so students can practise
+smoothly. The research is in `docs/AI_TUTOR_RESEARCH.md`; the short version is a
+**tutor contract**: short contingent turns with exactly one question, real wait
+time, selective feedback, self-repair before modelling, ASR transcripts treated
+as untrusted, a hard latency budget, and lesson steps earned by evidence.
+
+All of those decisions now live in `data/voice/TutorCoach.kt`, a pure Kotlin
+object with JVM unit tests (`app/src/test/java/com/example/TutorCoachTest.kt`).
+The ViewModel owns only the Android lifecycle; it asks the Coach what to do.
+
+### 12.1 Turn-taking (the "smoothly" part)
+
+| Before | Now |
+| --- | --- |
+| 35 s read timeout on the free Space | 6.5 s `callTimeoutMs`; on timeout the local tutor answers and the call continues |
+| `speakText` reused the call utterance prefix, so "Hear it"/replay called `onTutorSpeechFinished` and reopened the mic while the model was still thinking; the next turn was dropped | `tutor-preview-` prefix with its own `onDone`/`onError` path; it hands the floor back only when no reply is in flight |
+| `onError` from TTS had no utterance-sequence guard | both `onDone` and `onError` ignore stale utterances, so an interrupted answer cannot wipe the dictation buffer |
+| A student speaking during THINKING was silently discarded | the in-flight reply is cancelled, the words become the new turn, and `toggleVoiceListening` during THINKING takes the floor |
+| A fixed 2.8 s pause ended every turn | adaptive endpointing: 4.6 s when the buffer ends mid-thought, 2 s otherwise, plus a 30 s max turn |
+| A cancelled recogniser had a one-shot discard flag, so a late `onError` + `onResults` could submit a duplicate turn | per-session recognition generation; every callback checks it is still current |
+| Miss 3 = "Take your time.", miss 7 = hang-up | time-based ladder: silent until 14 s, then a narrowing either/or question, then a sentence starter, then a polite hang-up after ~60 s. No generic encouragement, no re-showing the old correction card |
+
+### 12.2 Pedagogy
+
+- **One question, one reaction.** `TutorCoach.shapeReply()` is applied to *every*
+  tutor line (model, offline, opener, nudge): strips markdown, stage directions
+  and think-tags, drops generic praise, keeps at most one statement plus one
+  question, ensures the line ends in `?`, and swaps any question already asked in
+  the call. `TutorTurnPrompt.system()` tells the model the same thing and passes
+  the list of asked questions.
+- **Feedback mode.** Free conversation gets **one** explicit correction card per
+  call; the model is told to use quiet recasts inside `SAY` instead. Grammar
+  Doctor and the *Practise* step of a lesson get up to three explicit fixes plus
+  an invitation to say the sentence again (self-repair first).
+- **ASR safety.** `TutorCoach.canCorrect()` refuses fragments, doubled words and
+  other likely transcription artefacts; `plausibleFix()` insists on a minimal
+  edit. `WordUpgrades` no longer fires on bare words like "good" or "great".
+  `EnglishGrammarRules` no longer turns "I have went yesterday" into "I had
+  went", "good in the morning" into "good at the morning", or "Do you know
+  about …" into an error; `a hour` → `an hour`; and `"Wait."` / `"Okay."` are
+  finally recognised as stop requests / backchannels.
+- **Parser.** `TutorTurnPrompt.parse()` is stateful: a wrapped line continues
+  the label above it, so a two-line `NOTE:` is remembered rather than read aloud,
+  and bold/lowercase labels still parse.
+- **Lessons.** `lessonProgress()` advances on evidence (≥4 words, or a scaffold
+  after two short attempts), and the tutor's reply is built for the step the
+  student is *moving into* rather than the one just answered. The last step gets
+  a wrap-up turn; offline answers follow the step script.
+- **Honest progress.** `cleanTurnPercent` counts wrong *turns*; a level change
+  needs ≥6 turns of clean connected speech (or ≥4 turns of difficulty) in two
+  consecutive calls. A repeated mistake restarts its spaced-repetition ladder.
+- **Memory and consent.** The model is told to store only stable, non-sensitive
+  facts; `TutorProgressStore` filters them locally. Consent v2 discloses
+  remembered facts and ASR limits, the ⋯ menu has **Forget what she remembers**,
+  and sign-out clears the tutor's level, facts, reviews and speaking minutes.
+
+### 12.3 Checking a change (current)
+
+1. Open the tutor tab → level, due reviews and last-call line are refreshed.
+2. Tap **Free conversation** → the previous guided lesson is cleared; the opener
+   is one short reaction plus one question.
+3. Say "I go to the beach yesterday" → one correction card while the words are
+   warm. **Hear it** and **Say it** still work after the model's reply arrives.
+4. Say "mm-hmm" while she is speaking → it is a backchannel, not a turn. Say
+   "Wait." → she stops and reopens the mic without answering.
+5. Pause mid-sentence on "… and then" → the mic stays open for ~4.6 s instead of
+   committing a half sentence.
+6. Say nothing → **no tutor speech for ~14 s**, then an easier either/or question,
+   then a sentence starter, then a polite hang-up. No "Take your time."
+7. Force flight mode / a private Space → the answer comes from the local tutor
+   within ~6.5 s, is short, refers to a word the student said, and asks one fresh
+   question. The transcript keeps running.
+8. Start speaking while she is "thinking" → her old answer never plays; the new
+   words are answered.
+9. Pick a **guided lesson** → steps advance only after a real attempt; a one-word
+   answer gets a scaffold, not a new step; the last step wraps up.
+10. Ask the same thing twice → the tutor never repeats a question, and the
+    summary's "clean turns" counts every repeated mistake.
+11. ⋯ → **Forget what she remembers**, then sign out → no level, facts or review
+    sentences carry over to the next account.
+12. Hang up → summary, activity row, and a level that only moves after two
+    evidence-backed calls.
+
+Unit tests (run in Android Studio / `./gradlew :app:testDebugUnitTest`):
+`TutorCoachTest`, `TutorTurnPromptTest`, `EnglishGrammarRulesTest`.

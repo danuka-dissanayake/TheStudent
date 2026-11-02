@@ -16,6 +16,9 @@ import com.example.data.voice.ScenarioCheck
 import com.example.data.voice.TutorDrill
 import com.example.data.voice.TutorProgressStore
 import com.example.data.voice.TutorScenarioRubric
+import com.example.data.voice.TutorCoach
+import com.example.data.voice.TutorCoach.FeedbackMode
+import com.example.data.voice.TutorCoach.SilenceAction
 import com.example.data.voice.TutorSpeech
 import com.example.data.voice.WordUpgrades
 import com.example.data.local.ChatCrypto
@@ -366,6 +369,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var callTimerJob: Job? = null
     private var callTurnJob: Job? = null
     private var endOfSpeechWatchdog: Job? = null
+    /** The model answer for the current turn: cancelled when the student barges in. */
+    private var tutorReplyJob: Job? = null
+    /** Bumped whenever a reply (or a call) is abandoned, so late answers stay silent. */
+    private var tutorReplySeq = 0
+    /** Normalised questions already asked in this call. */
+    private val askedQuestions = LinkedHashSet<String>()
+    /** Silence is measured in milliseconds, not in failed recogniser sessions. */
+    private var silenceStartedAt = 0L
+    private var silenceNudges = 0
+    /** Adaptive endpointing and lesson pacing. */
+    private var dictationStartedAt = 0L
+    private var turnsInStep = 0
+    private var currentFeedbackMode: FeedbackMode = FeedbackMode.FLUENCY
     private var tutorSpeechSeq = 0
     private var pendingTutorSentences = 0
     private var isTutorTurnInFlight = false
@@ -385,8 +401,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var dictationFinishing = false
     private var dictationBuffer: String = ""
     private var dictationJob: Job? = null
-    /** True after a commit, so a late callback from the closed session is ignored. */
-    private var discardingRecognition = false
+    /**
+     * A generation number for the recogniser session. Cancelling a session can
+     * deliver both a late onError and a late onResults, and a one-shot boolean
+     * only swallowed the first one — the second submitted a duplicate turn. Every
+     * callback now checks that it still belongs to the live generation.
+     */
+    private var recognitionGeneration = 0L
 
     // ── what the tutor remembers and practises ───────────────────────────────
     /** Level, due reviews, facts and the last-call line, all off the main state. */
@@ -432,6 +453,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Prefix that marks a text-to-speech utterance as belonging to the call. */
     private val callUtterancePrefix = "tutor-call-"
+    /**
+     * "Hear it" and replay are previews, not turns. They must never call
+     * [onTutorSpeechFinished] — doing so used to reopen the microphone while the
+     * model was still thinking, and the student's next turn was discarded.
+     */
+    private val previewUtterancePrefix = "tutor-preview-"
+    /** A live call never waits longer than this for a model answer. */
+    private val TUTOR_REPLY_TIMEOUT_MS = 6_500L
 
     /**
      * Speaking pace. 1.0 is the engine's own idea of "normal", which is a
@@ -442,27 +471,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private val TUTOR_RATE_SLOW = 0.90f
 
     /**
-     * How long a pause ends the student's turn.
-     *
-     * Long enough for a natural mid-sentence breath ("... and then, um, we went
-     * home"), short enough that a finished answer is not a dead line.
+     * Turn-taking budgets now live in [TutorCoach]: the endpoint pause is
+     * adaptive, the correction budget depends on fluency vs accuracy mode, and a
+     * hard 30 s ceiling stops a turn from running forever. Keeping one source of
+     * truth means the prompt, the offline tutor and the summary all agree.
      */
-    private val DICTATION_PAUSE_MS = 2_800L
 
     /** Sentences brought back from earlier calls at the start of a call. */
     private val MAX_WARM_UP_REVIEWS = 3
-
-    /**
-     * How many corrections a student sees inside one call.
-     *
-     * Research on corrective feedback is consistent: a handful, then stop. Past
-     * three the conversation becomes an audit, students speak less, and nothing
-     * extra is remembered. The rest are still recorded and appear in the summary.
-     */
-    private val MAX_CORRECTIONS_PER_CALL = 3
-
-    /** Better-words cards are encouragement, so a couple is plenty. */
-    private val MAX_UPGRADES_PER_CALL = 2
 
     private val _uiState = MutableStateFlow(TheStudentUiState())
     val uiState: StateFlow<TheStudentUiState> = _uiState.asStateFlow()
@@ -708,134 +724,153 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         if (speechRecognizer != null) return
         if (SpeechRecognizer.isRecognitionAvailable(getApplication())) {
             try {
-                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(getApplication()).apply {
-                    setRecognitionListener(object : RecognitionListener {
-                        override fun onReadyForSpeech(params: Bundle?) {
-                            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.LISTENING) }
-                        }
-
-                        override fun onBeginningOfSpeech() {
-                            // Words are coming again: the pause that would have
-                            // ended the turn is over.
-                            dictationJob?.cancel()
-                            // Pace is measured from the first sound of the turn,
-                            // not from the commit, so a slow thinker is not
-                            // recorded as a slow speaker.
-                            if (dictationActive && turnSpeechStartedAt == 0L) {
-                                turnSpeechStartedAt = System.currentTimeMillis()
-                            }
-                            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.LISTENING) }
-                        }
-
-                        override fun onRmsChanged(rmsdB: Float) {
-                            // Still not written to UiState — that caused the 60fps
-                            // recomposition lag this comment was written to prevent —
-                            // but the orb needs *something* live to react to, so the
-                            // level goes to its own small flow, throttled to ~14Hz.
-                            val now = System.currentTimeMillis()
-                            if (now - lastVoiceLevelAt < 70L) return
-                            lastVoiceLevelAt = now
-                            // RMS arrives in roughly -2..10 dBFS; anything under
-                            // about 0.06 is room noise and must not make the sphere
-                            // twitch while the student is thinking.
-                            val raw = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
-                            val shaped = if (raw < 0.06f) 0f else raw
-                            _voiceLevel.value =
-                                if (shaped > _voiceLevel.value) shaped else _voiceLevel.value * 0.9f
-                        }
-
-                        override fun onBufferReceived(buffer: ByteArray?) {}
-
-                        override fun onEndOfSpeech() {
-                            // A dictation session ends many times inside one turn;
-                            // going to "thinking" here would flicker the screen and
-                            // start a watchdog that cuts the student off.
-                            if (dictationActive) return
-                            _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.THINKING) }
-                            // Some devices stop the turn without ever delivering a
-                            // result; without this the call would wait forever.
-                            if (_uiState.value.callPhase != CallPhase.IDLE) startEndOfSpeechWatchdog()
-                        }
-
-                        override fun onError(error: Int) {
-                            if (discardingRecognition) {
-                                discardingRecognition = false
-                                return
-                            }
-                            if (dictationActive) {
-                                handleDictationError()
-                                return
-                            }
-                            // In a call a miss is not an exit: the line stays open and
-                            // the loop decides whether to retry, nudge or hang up.
-                            if (_uiState.value.callPhase == CallPhase.LIVE) {
-                                handleRecognitionMiss()
-                                return
-                            }
-                            // Don't override if already transitioned to processing
-                            if (_uiState.value.voiceAssistantState == AssistantVoiceState.LISTENING) {
-                                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
-                            }
-                        }
-
-                        override fun onResults(results: Bundle?) {
-                            val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val recognizedText = matches?.firstOrNull()
-                            awaitingTranscript = false
-                            endOfSpeechWatchdog?.cancel()
-                            if (discardingRecognition) {
-                                discardingRecognition = false
-                                return
-                            }
-                            if (dictationActive) {
-                                handleDictationSegment(recognizedText)
-                                return
-                            }
-                            if (!recognizedText.isNullOrBlank()) {
-                                if (_uiState.value.callPhase == CallPhase.LIVE) {
-                                    submitCallTurn(recognizedText)
-                                } else {
-                                    processUserVoiceInput(recognizedText)
-                                }
-                            } else if (_uiState.value.callPhase == CallPhase.LIVE) {
-                                handleRecognitionMiss()
-                            } else {
-                                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
-                            }
-                        }
-
-                        override fun onPartialResults(partialResults: Bundle?) {
-                            val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                            val partial = matches?.firstOrNull()
-                            if (!partial.isNullOrBlank()) {
-                                // A restarted session starts its partials from
-                                // scratch, so the preview is what has already been
-                                // heard plus the words in progress — never just the
-                                // last two words.
-                                val preview = if (dictationActive) {
-                                    mergeHeard(dictationBuffer, partial)
-                                } else {
-                                    partial
-                                }
-                                _uiState.update {
-                                    it.copy(
-                                        currentUserTranscript = preview,
-                                        // Live captions during a call: the student sees
-                                        // their own words while they are still speaking.
-                                        callStudentLine = if (it.callPhase == CallPhase.LIVE) preview else it.callStudentLine
-                                    )
-                                }
-                            }
-                        }
-
-                        override fun onEvent(eventType: Int, params: Bundle?) {}
-                    })
-                }
+                // The listener is installed per session in [beginRecognition],
+                // because each session needs its own generation number.
+                speechRecognizer = SpeechRecognizer.createSpeechRecognizer(getApplication())
             } catch (e: Exception) {
                 speechRecognizer = null
             }
         }
     }
+
+    /**
+     * Cancel the live session and make every callback it still owes us stale.
+     *
+     * Android may deliver an onError *and* an onResults from a cancelled
+     * session. A single boolean could only swallow one; the second one used to
+     * submit the same student turn twice.
+     */
+    private fun abandonRecognition() {
+        recognitionGeneration++
+        try {
+            speechRecognizer?.cancel()
+        } catch (_: Exception) {
+        }
+    }
+
+    /**
+     * One recogniser session, one generation. Callbacks from a session that was
+     * cancelled (commit, hang-up, mute, barge-in) fail [isCurrent] and are
+     * ignored, however many of them arrive and however late they are.
+     */
+    private fun tutorRecognitionListener(session: Long): RecognitionListener =
+        object : RecognitionListener {
+            private fun isCurrent(): Boolean = session == recognitionGeneration
+
+            override fun onReadyForSpeech(params: Bundle?) {
+                if (!isCurrent()) return
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.LISTENING) }
+            }
+
+            override fun onBeginningOfSpeech() {
+                if (!isCurrent()) return
+                // Words are coming again: the pause that would have ended the
+                // turn is over.
+                dictationJob?.cancel()
+                // Pace is measured from the first sound of the turn, not from
+                // the commit, so a slow thinker is not recorded as a slow speaker.
+                if (dictationActive && turnSpeechStartedAt == 0L) {
+                    turnSpeechStartedAt = System.currentTimeMillis()
+                }
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.LISTENING) }
+            }
+
+            override fun onRmsChanged(rmsdB: Float) {
+                if (!isCurrent()) return
+                // Still not written to UiState — that caused the 60fps
+                // recomposition lag this comment was written to prevent —
+                // but the orb needs *something* live to react to, so the
+                // level goes to its own small flow, throttled to ~14Hz.
+                val now = System.currentTimeMillis()
+                if (now - lastVoiceLevelAt < 70L) return
+                lastVoiceLevelAt = now
+                val raw = ((rmsdB + 2f) / 12f).coerceIn(0f, 1f)
+                val shaped = if (raw < 0.06f) 0f else raw
+                _voiceLevel.value =
+                    if (shaped > _voiceLevel.value) shaped else _voiceLevel.value * 0.9f
+            }
+
+            override fun onBufferReceived(buffer: ByteArray?) {}
+
+            override fun onEndOfSpeech() {
+                if (!isCurrent()) return
+                // A dictation session ends many times inside one turn;
+                // going to "thinking" here would flicker the screen and
+                // start a watchdog that cuts the student off.
+                if (dictationActive) return
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.THINKING) }
+                // Some devices stop the turn without ever delivering a result.
+                if (_uiState.value.callPhase != CallPhase.IDLE) startEndOfSpeechWatchdog()
+            }
+
+            override fun onError(error: Int) {
+                if (!isCurrent()) return
+                if (dictationActive) {
+                    handleDictationError()
+                    return
+                }
+                // In a call a miss is not an exit: the line stays open and
+                // the loop decides whether to retry, nudge or hang up.
+                if (_uiState.value.callPhase == CallPhase.LIVE) {
+                    handleRecognitionMiss()
+                    return
+                }
+                if (_uiState.value.voiceAssistantState == AssistantVoiceState.LISTENING) {
+                    _uiState.update {
+                        it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f)
+                    }
+                }
+            }
+
+            override fun onResults(results: Bundle?) {
+                if (!isCurrent()) return
+                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val recognizedText = matches?.firstOrNull()
+                awaitingTranscript = false
+                endOfSpeechWatchdog?.cancel()
+                if (dictationActive) {
+                    handleDictationSegment(recognizedText)
+                    return
+                }
+                if (!recognizedText.isNullOrBlank()) {
+                    if (_uiState.value.callPhase == CallPhase.LIVE) {
+                        submitCallTurn(recognizedText)
+                    } else {
+                        processUserVoiceInput(recognizedText)
+                    }
+                } else if (_uiState.value.callPhase == CallPhase.LIVE) {
+                    handleRecognitionMiss()
+                } else {
+                    _uiState.update {
+                        it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f)
+                    }
+                }
+            }
+
+            override fun onPartialResults(partialResults: Bundle?) {
+                if (!isCurrent()) return
+                val matches = partialResults?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+                val partial = matches?.firstOrNull()
+                if (!partial.isNullOrBlank()) {
+                    // A restarted session starts its partials from scratch, so
+                    // the preview is what has already been heard plus the words
+                    // in progress — never just the last two words.
+                    val preview = if (dictationActive) {
+                        mergeHeard(dictationBuffer, partial)
+                    } else {
+                        partial
+                    }
+                    _uiState.update {
+                        it.copy(
+                            currentUserTranscript = preview,
+                            callStudentLine = if (it.callPhase == CallPhase.LIVE) preview else it.callStudentLine
+                        )
+                    }
+                }
+            }
+
+            override fun onEvent(eventType: Int, params: Bundle?) {}
+        }
 
     override fun onInit(status: Int) {
         if (status == TextToSpeech.SUCCESS) {
@@ -864,21 +899,55 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                             isTtsSpeaking = true
                         )
                     }
-                    // Only while she is talking: the microphone belongs to the
-                    // student's turn at every other moment.
-                    startBargeIn()
+                    // Barge-in belongs to a real tutor turn only. A "Hear it"
+                    // replay or a replay of an old line must not open a second
+                    // microphone while the tutor is still speaking.
+                    if (utteranceId?.startsWith(callUtterancePrefix) == true) startBargeIn()
                 }
 
                 override fun onDone(utteranceId: String?) {
                     viewModelScope.launch(Dispatchers.Main) {
-                        val callLine = utteranceId?.startsWith(callUtterancePrefix) == true
+                        val id = utteranceId.orEmpty()
+                        val preview = id.startsWith(previewUtterancePrefix)
+                        val callLine = id.startsWith(callUtterancePrefix)
+                        if (preview) {
+                            // A newer tutor answer may have cut this preview
+                            // short; its late callback must not hand the floor
+                            // back in the middle of that answer.
+                            val seq = id
+                                .removePrefix(previewUtterancePrefix)
+                                .substringBefore('-')
+                                .toIntOrNull()
+                            if (seq != null && seq != tutorSpeechSeq) return@launch
+                            // A preview never resumes the call loop on its own.
+                            // It may hand the floor back, but only when no answer
+                            // is being generated and no drill owns the floor.
+                            stopBargeIn()
+                            _uiState.update {
+                                it.copy(
+                                    voiceAssistantState = AssistantVoiceState.IDLE,
+                                    isTtsSpeaking = false
+                                )
+                            }
+                            val state = _uiState.value
+                            when {
+                                state.callPhase == CallPhase.LIVE && !state.isCallMuted &&
+                                    !isTutorTurnInFlight && drillTarget == null &&
+                                    !dictationActive -> scheduleListening(350)
+                                state.callPhase != CallPhase.LIVE && state.isHandsFreeActive -> {
+                                    delay(700)
+                                    startVoiceListening()
+                                }
+                            }
+                            return@launch
+                        }
                         if (callLine) {
                             // A sentence from an answer the student already
                             // interrupted must not resume the loop.
-                            val seq = utteranceId
-                                ?.removePrefix(callUtterancePrefix)
-                                ?.substringBefore('-')
-                                ?.toIntOrNull()
+                            val seq = id
+                                .removePrefix(callUtterancePrefix)
+                                .substringBefore('-')
+                                .toIntOrNull()
                             if (seq != null && seq != tutorSpeechSeq) return@launch
                             pendingTutorSentences = (pendingTutorSentences - 1).coerceAtLeast(0)
                             if (pendingTutorSentences > 0) return@launch
@@ -895,30 +964,44 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                                 isTtsSpeaking = false
                             )
                         }
-                        val state = _uiState.value
-                        if (state.callPhase == CallPhase.LIVE && !state.isCallMuted) {
-                            // A preview (a corrected sentence, a lesson line) read
-                            // during a call still hands the turn back afterwards.
-                            scheduleListening(650)
-                        } else if (state.isHandsFreeActive) {
-                            delay(800)
-                            startVoiceListening()
-                        }
                     }
                 }
 
                 override fun onError(utteranceId: String?) {
                     stopBargeIn()
-                    val callLine = utteranceId?.startsWith(callUtterancePrefix) == true
+                    val id = utteranceId.orEmpty()
+                    val callLine = id.startsWith(callUtterancePrefix)
                     _uiState.update {
                         it.copy(
                             voiceAssistantState = AssistantVoiceState.IDLE,
                             isTtsSpeaking = false
                         )
                     }
+                    if (id.startsWith(previewUtterancePrefix)) {
+                        val seq = id
+                            .removePrefix(previewUtterancePrefix)
+                            .substringBefore('-')
+                            .toIntOrNull()
+                        if (seq != null && seq != tutorSpeechSeq) return
+                        val state = _uiState.value
+                        if (state.callPhase == CallPhase.LIVE && !state.isCallMuted &&
+                            !isTutorTurnInFlight && drillTarget == null && !dictationActive
+                        ) {
+                            scheduleListening(350)
+                        }
+                        return
+                    }
                     if (callLine) {
                         // The engine gave up mid-answer; never strand the call in
                         // "speaking" — hand the turn back like a finished sentence.
+                        // The sequence guard matters here too: a stale error from
+                        // an interrupted answer used to restart listening in the
+                        // middle of the student's next turn and wipe its words.
+                        val seq = id
+                            .removePrefix(callUtterancePrefix)
+                            .substringBefore('-')
+                            .toIntOrNull()
+                        if (seq != null && seq != tutorSpeechSeq) return
                         pendingTutorSentences = 0
                         onTutorSpeechFinished()
                     }
@@ -3855,6 +3938,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 runCatching { TheStudentChatClient.unregisterDevice(serverUrl, token) }
             }
             preferences.logout()
+            // The tutor's level, remembered facts, review sentences and spoken
+            // minutes are per-student data. They live outside the session store,
+            // so a shared phone would otherwise hand the next student the
+            // previous one's "your exam is on Tuesday" and their CEFR level.
+            if (_uiState.value.callPhase != CallPhase.IDLE) endTutorCall()
+            progressStore.clearAll()
+            preferences.clearSpeakingStats()
+            askedQuestions.clear()
+            conversationTurns.clear()
+            _uiState.update {
+                it.copy(
+                    tutorLevel = TutorProgressStore.DEFAULT_LEVEL,
+                    tutorDueReviews = 0,
+                    tutorLastCallNote = "",
+                    callPhase = CallPhase.IDLE,
+                    callSummary = null,
+                    callTranscript = emptyList(),
+                    callFix = null
+                )
+            }
             stopChatSync()
             ChatCrypto.clearSessionCache()
             // Chat history is device storage: a different student signing in on
@@ -4135,15 +4238,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         if (!isTtsInitialized) return
         val units = TutorSpeech.linesOf(text)
         if (units.isEmpty()) return
+        // A preview is NOT a call turn. It used to reuse the call prefix, so its
+        // onDone called onTutorSpeechFinished() and reopened the microphone
+        // while the model was still generating; the student's next turn was then
+        // dropped by isTutorTurnInFlight. A separate prefix gives it its own
+        // completion path (see onInit).
         tutorSpeechSeq++
         val seq = tutorSpeechSeq
         pendingTutorSentences = 0
+        stopBargeIn()
         try {
             engine.stop()
             engine.setSpeechRate(if (slow) TUTOR_RATE_SLOW else TUTOR_RATE)
             units.forEachIndexed { index, unit ->
                 val mode = if (index == 0) TextToSpeech.QUEUE_FLUSH else TextToSpeech.QUEUE_ADD
-                engine.speak(unit, mode, null, "$callUtterancePrefix$seq-$index")
+                engine.speak(unit, mode, null, "$previewUtterancePrefix$seq-$index")
             }
             engine.setSpeechRate(TUTOR_RATE)
             _uiState.update { it.copy(isTtsSpeaking = true) }
@@ -4242,6 +4351,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         initTts()
         initSpeechRecognizer()
         conversationTurns.clear()
+        tutorReplyJob?.cancel()
+        tutorReplyJob = null
+        tutorReplySeq++
         recognitionMisses = 0
         isTutorTurnInFlight = false
         awaitingTranscript = false
@@ -4250,7 +4362,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationFinishing = false
         dictationBuffer = ""
         dictationJob?.cancel()
-        discardingRecognition = false
+        abandonRecognition()
         tutorSpeechSeq++
 
         // A new call starts from a clean slate: budget, drills, memory of what
@@ -4272,6 +4384,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         reviewedCorrectly = 0
         reviewsAsked = 0
         levelAtCallStart = progressStore.level
+        askedQuestions.clear()
+        silenceStartedAt = 0L
+        silenceNudges = 0
+        dictationStartedAt = 0L
+        turnsInStep = 0
+        currentFeedbackMode = TutorCoach.feedbackMode(
+            scenario = state.currentScenario,
+            stepName = TutorLessonCatalog.find(state.activeLessonId)?.step(0)?.name
+        )
         bargeInMonitor.resetForCall()
         reviewQueue.clear()
         reviewQueue.addAll(progressStore.dueReviews(limit = MAX_WARM_UP_REVIEWS))
@@ -4372,6 +4493,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         callTimerJob?.cancel()
         callTurnJob?.cancel()
         endOfSpeechWatchdog?.cancel()
+        tutorReplyJob?.cancel()
+        tutorReplyJob = null
+        tutorReplySeq++
+        afterSpeech = null
         tutorSpeechSeq++
         pendingTutorSentences = 0
         awaitingTranscript = false
@@ -4382,26 +4507,21 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationFinishing = false
         dictationBuffer = ""
         dictationJob?.cancel()
-        discardingRecognition = true
         try { tts?.stop() } catch (_: Exception) {}
-        try { speechRecognizer?.cancel() } catch (_: Exception) {}
+        abandonRecognition()
 
         bargeInMonitor.stop()
 
-        // Only a sentence that was actually wrong makes a turn "not clean"; a
-        // better word for a correct sentence is a bonus, not a deduction.
-        // One wrong sentence is one unclean turn, even if the local pass and the
-        // model both corrected it.
+        // Only a turn that was actually wrong is "not clean"; a better word for
+        // a correct sentence is a bonus, not a deduction. Count TURNS, not
+        // sentence strings: repeating the same mistake five times is five
+        // unclean turns, not one.
         val wrongTurns = state.callFixes
             .filter { it.isUseful }
-            .map { it.original.lowercase(Locale.US) }
+            .map { it.turnIndex }
             .distinct()
-            .size
-        val cleanPercent = if (state.callTurns == 0) {
-            0
-        } else {
-            ((state.callTurns - wrongTurns).coerceAtLeast(0) * 100) / state.callTurns
-        }
+            .count { it > 0 }
+        val cleanPercent = TutorCoach.cleanPercent(state.callTurns, wrongTurns)
         val studentLines = state.callTranscript
             .filter { it.role == TutorCallEntry.Role.STUDENT }
             .map { it.text }
@@ -4416,11 +4536,29 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 .containsMatchIn(it.lowercase(Locale.US))
         }
 
-        // Level moves on evidence from this call, never on a single sentence:
-        // it takes consistently clean, slightly longer, connected speech to go
-        // up, and sustained difficulty to come back down.
-        val nextLevel = nextTutorLevel(levelAtCallStart, cleanPercent, avgWords, usedComplex)
-        if (nextLevel != levelAtCallStart) progressStore.level = nextLevel
+        // A level is a claim about a learner, not a reward for one good turn.
+        // TutorCoach requires at least six turns of clean, connected speech (or
+        // four turns of sustained difficulty), and the streak requires the same
+        // evidence in two consecutive calls before the level actually moves.
+        val trend = TutorCoach.levelTrend(
+            TutorCoach.CallEvidence(state.callTurns, cleanPercent, avgWords, usedComplex)
+        )
+        val goodStreak = if (trend > 0) progressStore.goodCallStreak + 1 else 0
+        val weakStreak = if (trend < 0) progressStore.weakCallStreak + 1 else 0
+        progressStore.goodCallStreak = goodStreak.coerceAtMost(2)
+        progressStore.weakCallStreak = weakStreak.coerceAtMost(2)
+        val ladder = TutorProgressStore.CEFR_LADDER
+        val index = ladder.indexOf(levelAtCallStart).let { if (it < 0) 1 else it }
+        val nextLevel = when {
+            goodStreak >= 2 && index < ladder.lastIndex -> ladder[index + 1]
+            weakStreak >= 2 && index > 0 -> ladder[index - 1]
+            else -> levelAtCallStart
+        }
+        if (nextLevel != levelAtCallStart) {
+            progressStore.level = nextLevel
+            progressStore.goodCallStreak = 0
+            progressStore.weakCallStreak = 0
+        }
         progressStore.saveCorrections(state.callFixes)
 
         val checks = TutorScenarioRubric.evaluate(state.currentScenario, studentLines, state.callTurns)
@@ -4482,30 +4620,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         reason?.let { showSnackbar(it) }
     }
 
-    /**
-     * Where the level should sit after this call.
-     *
-     * Deliberately slow and evidence-based: up needs 80% clean turns, at least
-     * nine words a turn and some connected speech; down needs both a low clean
-     * rate and short turns. A student who has one bad call stays where they are.
-     */
-    private fun nextTutorLevel(
-        current: String,
-        cleanPercent: Int,
-        avgWords: Double,
-        usedComplex: Boolean
-    ): String {
-        val ladder = TutorProgressStore.CEFR_LADDER
-        val index = ladder.indexOf(current).let { if (it < 0) 1 else it }
-        val goUp = cleanPercent >= 80 && avgWords >= 9 && usedComplex && index < ladder.lastIndex
-        val goDown = cleanPercent < 50 && avgWords < 6 && index > 0
-        return when {
-            goUp -> ladder[index + 1]
-            goDown -> ladder[index - 1]
-            else -> ladder[index]
-        }
-    }
-
     /** One line for the idle screen: what to do next, not what happened. */
     private fun nextStepNote(
         scenario: String,
@@ -4552,8 +4666,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             dictationFinishing = false
             dictationBuffer = ""
             dictationJob?.cancel()
-            discardingRecognition = true
-            try { speechRecognizer?.cancel() } catch (_: Exception) {}
+            abandonRecognition()
             if (_uiState.value.voiceAssistantState == AssistantVoiceState.LISTENING ||
                 _uiState.value.voiceAssistantState == AssistantVoiceState.THINKING
             ) {
@@ -4575,6 +4688,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     fun interruptTutor() {
         val phase = _uiState.value.callPhase
         if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) return
+        // Taking the floor by hand cancels anything still being generated, and
+        // drops a pending drill/lesson hand-over that belongs to the old turn.
+        tutorReplyJob?.cancel()
+        tutorReplyJob = null
+        tutorReplySeq++
+        isTutorTurnInFlight = false
+        afterSpeech = null
         tutorSpeechSeq++
         pendingTutorSentences = 0
         try { tts?.stop() } catch (_: Exception) {}
@@ -4594,6 +4714,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             )
         }
         val live = _uiState.value.callPhase == CallPhase.LIVE
+        turnsInStep = 0
+        if (live) {
+            tutorReplyJob?.cancel()
+            tutorReplyJob = null
+            tutorReplySeq++
+            isTutorTurnInFlight = false
+            afterSpeech = null
+        }
         if (lesson != null) {
             if (live) {
                 // Mid-call lesson change is a fresh start, announced out loud.
@@ -4610,7 +4738,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 // own opener is this teacher line. Saying it here would duplicate it.
             }
         } else {
-            showSnackbar("Free conversation")
+            // Idle: the screen opens the call itself. A snackbar here was just
+            // noise over the greeting that was about to be spoken.
         }
     }
 
@@ -4671,11 +4800,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         word: String?,
         starters: List<String>,
         status: String
-    ) {
+    ): String {
         // A slow answer can arrive after the student hung up. Speaking it would
         // start a call the student already ended, so late turns are dropped.
         val phase = _uiState.value.callPhase
-        if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) return
+        if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) return ""
+
+        // Every line the tutor speaks goes through the same guard: one short
+        // reaction, exactly one question, no praise, no markdown, and never a
+        // question this call has already heard. Model answers, offline answers,
+        // openers and silence nudges all land here.
+        val shaped = TutorCoach.shapeReply(say, askedQuestions)
+        val spoken = shaped.speech
+        rememberQuestion(shaped.question)
 
         // Corrections belong to the student, never to the tutor. A fix is only
         // shown when it was produced *from* the sentence the student just said;
@@ -4689,7 +4826,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 candidate.isWorthShowing
         }
         // The correction budget covers the whole call, not just the local pass:
-        // a model fix arriving after three cards must not smuggle in a fourth.
+        // a model fix arriving after the limit must not smuggle in another card.
         val safeFix = validatedFix?.let { acceptForDisplay(it) } ?: validatedFix?.takeIf {
             // Already counted earlier (the local fix and the model fix are the
             // same sentence), so it is still the one the student is looking at.
@@ -4700,37 +4837,57 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
 
         _uiState.update { state ->
+            val visibleFix = safeFix ?: state.callFix
             state.copy(
-                callTutorLine = say,
-                currentAiResponseText = say,
-                callFix = safeFix,
-                callFixes = if (safeFix != null &&
-                    state.callFixes.none {
-                        it.corrected.equals(safeFix.corrected, ignoreCase = true) &&
-                            it.upgradeTo.equals(safeFix.upgradeTo, ignoreCase = true)
-                    }
+                callTutorLine = spoken,
+                currentAiResponseText = spoken,
+                // Keep the card already on screen. Clearing callFix here used to
+                // disable "Hear it" and "Say it" the moment the model replied.
+                callFix = visibleFix,
+                callWords = if (word != null &&
+                    state.callWords.none { it.equals(word, ignoreCase = true) }
                 ) {
-                    state.callFixes + safeFix
-                } else {
-                    state.callFixes
-                },
-                callWords = if (word != null && state.callWords.none { it.equals(word, ignoreCase = true) }) {
                     state.callWords + word
                 } else {
                     state.callWords
                 },
-                currentGrammarTip = safeFix?.let { "Better: \"${it.corrected}\"  ·  ${it.rule}" }
-                    ?: state.currentGrammarTip,
+                currentGrammarTip = visibleFix?.let {
+                    "Better: \"${it.corrected}\"  ·  ${it.rule}"
+                } ?: state.currentGrammarTip,
                 currentVocabularyHighlight = word ?: state.currentVocabularyHighlight,
                 suggestedVoicePills = starters.ifEmpty { state.suggestedVoicePills },
                 hfStatusMessage = status,
                 voiceAssistantState = AssistantVoiceState.SPEAKING,
                 isTtsSpeaking = true,
                 callTranscript = (state.callTranscript +
-                    TutorCallEntry(TutorCallEntry.Role.TUTOR, say)).takeLast(MAX_TRANSCRIPT_LINES)
+                    TutorCallEntry(TutorCallEntry.Role.TUTOR, spoken)).takeLast(MAX_TRANSCRIPT_LINES)
             )
         }
-        speakTutorSentences(say)
+        speakTutorSentences(spoken)
+        return spoken
+    }
+
+    /** Remember a question, keeping only the recent ones to compare against. */
+    private fun rememberQuestion(question: String) {
+        if (question.isBlank()) return
+        askedQuestions.add(question)
+        while (askedQuestions.size > 12) askedQuestions.remove(askedQuestions.first())
+    }
+
+    /** Record a correction in the summary even when its card was not shown. */
+    private fun recordCallFix(fix: GrammarFix?) {
+        if (fix == null) return
+        _uiState.update { state ->
+            if (state.callFixes.any {
+                    it.corrected.equals(fix.corrected, ignoreCase = true) &&
+                        it.upgradeTo.equals(fix.upgradeTo, ignoreCase = true)
+                }
+            ) {
+                state
+            } else {
+                state.copy(callFixes = state.callFixes + fix)
+            }
+        }
     }
 
     /**
@@ -4821,6 +4978,11 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             state.isCallMuted -> {
                 _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
             }
+            // A student who already barged in is speaking: reopening the
+            // microphone here would reset their dictation buffer mid-sentence.
+            dictationActive -> {
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.LISTENING) }
+            }
             else -> scheduleListening(450)
         }
     }
@@ -4836,18 +4998,22 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun acceptForDisplay(fix: GrammarFix?): GrammarFix? {
         if (fix == null || !fix.isWorthShowing) return null
+        // Never correct a fragment the recogniser probably mangled.
+        if (!TutorCoach.canCorrect(fix.original, currentFeedbackMode)) return null
         val key = fix.corrected.lowercase(Locale.US).trim() + "|" +
             fix.upgradeTo.lowercase(Locale.US).trim()
         // The same fix arrives twice — local first, then from the model. It has
         // already spent its budget, so show it without counting it again.
         if (key in shownFixKeys) return fix
         if (fix.isUseful) {
-            if (correctionsShown >= MAX_CORRECTIONS_PER_CALL) return null
+            // Fluency work gets one card (the rest become quiet recasts in the
+            // tutor's reply); a focused drill may show three.
+            if (correctionsShown >= TutorCoach.maxCorrections(currentFeedbackMode)) return null
             if (fix.rule.isNotBlank() && fix.rule in shownRules) return null
             correctionsShown++
             if (fix.rule.isNotBlank()) shownRules.add(fix.rule)
         } else {
-            if (upgradesShown >= MAX_UPGRADES_PER_CALL) return null
+            if (upgradesShown >= TutorCoach.maxUpgrades()) return null
             upgradesShown++
         }
         shownFixKeys.add(key)
@@ -4864,8 +5030,17 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * is a mistake, "very good" is not.
      */
     private fun localFixFor(sentence: String, turnIndex: Int): GrammarFix? {
+        // ASR is least reliable on short accented utterances. Silence is the
+        // correct feedback when we cannot trust the words we heard.
+        if (!TutorCoach.canCorrect(sentence, currentFeedbackMode)) return null
         val grammar = EnglishGrammarRules.check(sentence)
-        val upgrade = WordUpgrades.suggest(sentence)
+        // One piece of feedback per turn: a better word is only worth a card
+        // when the sentence did not also need a grammar fix.
+        val upgrade = if (grammar == null && TutorCoach.wordCount(sentence) >= 6) {
+            WordUpgrades.suggest(sentence)
+        } else {
+            null
+        }
         if (grammar == null && upgrade == null) return null
         return GrammarFix(
             original = sentence,
@@ -4901,7 +5076,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             !sameWordsAs(candidate, original) &&
             !sameWordsAs(candidate, rule) &&
             isCloseTo(candidate, original) &&
-            candidate.length <= original.length * 3
+            // A minimal edit keeps the student's words. A rewrite is the model
+            // answering with its own sentence, not a correction.
+            TutorCoach.plausibleFix(original, candidate)
         val validUpgrade = !upgradeFrom.isNullOrBlank() && !upgradeTo.isNullOrBlank() &&
             !upgradeFrom.equals(upgradeTo, ignoreCase = true)
         if (!validCorrection && !validUpgrade) return null
@@ -4972,6 +5149,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             _uiState.update { it.copy(callPhase = CallPhase.LIVE) }
         }
         if (EnglishGrammarRules.isStopRequest(trimmed)) {
+            tutorReplyJob?.cancel()
+            tutorReplySeq++
+            isTutorTurnInFlight = false
             tutorSpeechSeq++
             pendingTutorSentences = 0
             try { tts?.stop() } catch (_: Exception) {}
@@ -4984,19 +5164,52 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         ) {
             return
         }
-        if (isTutorTurnInFlight) return
+
+        // The student started talking while the tutor was still thinking. A
+        // reply for the *old* turn is no longer wanted: cancel it and answer the
+        // words we actually heard, instead of dropping them on the floor (which
+        // is what the old isTutorTurnInFlight early-return did).
+        if (isTutorTurnInFlight) {
+            tutorReplyJob?.cancel()
+            tutorReplyJob = null
+            tutorReplySeq++
+            isTutorTurnInFlight = false
+            afterSpeech = null
+            tutorSpeechSeq++
+            pendingTutorSentences = 0
+            try { tts?.stop() } catch (_: Exception) {}
+        } else if (state.voiceAssistantState == AssistantVoiceState.SPEAKING) {
+            // A typed turn (or a recognised one that beat the audio) interrupts
+            // the tutor the same way speech would.
+            stopSpeaking()
+        }
 
         isTutorTurnInFlight = true
         recognitionMisses = 0
+        silenceStartedAt = 0L
+        silenceNudges = 0
         interruptedByVoice = false
         awaitingTranscript = false
         endOfSpeechWatchdog?.cancel()
-        // A typed turn (or a recognised one that beat the audio) interrupts the
-        // tutor the same way speech would: the sentence in progress stops, and
-        // its stale callbacks can no longer reopen the microphone.
-        if (state.voiceAssistantState == AssistantVoiceState.SPEAKING) stopSpeaking()
 
         val turnIndex = state.callTurns + 1
+        val words = TutorCoach.wordCount(trimmed)
+        val lessonState = TutorLessonCatalog.find(state.activeLessonId)
+        val progress = TutorCoach.lessonProgress(
+            currentIndex = state.lessonStepIndex,
+            stepCount = lessonState?.stepCount ?: 0,
+            studentWords = words,
+            turnsInStep = turnsInStep,
+            alreadyComplete = state.isLessonComplete
+        )
+        // The reply belongs to the step being opened, so its feedback mode (and
+        // its correction budget) follows that step, not the one just answered.
+        val replyStep = if (state.isLessonComplete) null else lessonState?.step(progress.targetIndex)
+        currentFeedbackMode = TutorCoach.feedbackMode(
+            scenario = state.currentScenario,
+            stepName = replyStep?.name,
+            drillActive = drillActive
+        )
         val localFix = localFixFor(trimmed, turnIndex)
         // Everything is recorded; only the first few get a card.
         val displayFix = acceptForDisplay(localFix)
@@ -5013,9 +5226,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 callTranscript = (it.callTranscript +
                     TutorCallEntry(TutorCallEntry.Role.STUDENT, trimmed) +
                     listOfNotNull(
-                        // The same sentence pattern repeating every few turns is
-                        // the most common thing a learner does; showing the same
-                        // yellow card again and again buries the conversation.
                         displayFix
                             ?.takeIf { fix ->
                                 it.callFixes.none {
@@ -5040,33 +5250,34 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             )
         }
 
-        viewModelScope.launch {
-            val current = _uiState.value
-            val lesson = if (current.isLessonComplete) {
-                null
-            } else {
-                TutorLessonCatalog.find(current.activeLessonId)
-            }
-            val scenario = current.currentScenario
-            val stepIndex = current.lessonStepIndex
+        // Decide where the lesson goes BEFORE asking for the reply. The tutor's
+        // answer is the first line of the step the student is moving into; using
+        // the step they just answered was an off-by-one that repeated the Teach
+        // step instead of opening Model.
+        val wrapUp = progress.completed && !state.isLessonComplete
+        val lessonForPrompt = if (state.isLessonComplete || progress.completed) null else lessonState
+        val targetStep = if (state.isLessonComplete) null else lessonState?.step(progress.targetIndex)
+        val starters = targetStep?.starters.orEmpty()
+        val mySeq = ++tutorReplySeq
 
+        tutorReplyJob = viewModelScope.launch {
             val response = huggingFaceClient.getChatCompletion(
                 userMessage = TutorTurnPrompt.userMessage(trimmed),
-                conversationHistory = conversationTurns,
-                customToken = current.customHfToken.takeIf { it.isNotBlank() },
-                customBaseUrl = current.customHfBaseUrl.takeIf { it.isNotBlank() },
+                conversationHistory = conversationTurns.toList(),
+                customToken = state.customHfToken.takeIf { it.isNotBlank() },
+                customBaseUrl = state.customHfBaseUrl.takeIf { it.isNotBlank() },
                 systemPrompt = TutorTurnPrompt.system(
-                    scenario = scenario,
-                    lesson = lesson,
-                    stepIndex = stepIndex,
-                    level = current.tutorLevel,
-                    // What this student told the tutor on earlier calls, so a
-                    // call can start with "how did the exam go?" instead of
-                    // "tell me about yourself" for the tenth time.
+                    scenario = state.currentScenario,
+                    lesson = lessonForPrompt,
+                    stepIndex = progress.targetIndex,
+                    level = state.tutorLevel,
                     knownFacts = progressStore.memory(),
+                    askedQuestions = askedQuestions.toList(),
+                    mode = currentFeedbackMode,
+                    wrapUp = wrapUp,
                     // The mistake the student has now made twice — the point at
                     // which a real teacher stops letting it pass.
-                    focusRule = current.callFixes
+                    focusRule = state.callFixes
                         .filter { it.isUseful && it.rule.isNotBlank() }
                         .groupingBy { it.rule }
                         .eachCount()
@@ -5075,16 +5286,33 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         ?.key
                         .orEmpty()
                 ),
-                maxTokens = 200,
-                temperature = 0.6,
-                cleanForSpeech = false
+                maxTokens = 160,
+                temperature = 0.55,
+                cleanForSpeech = false,
+                // A free Space that takes 35 s to wake up is not allowed to
+                // hold a live call in dead air. The local tutor answers instead.
+                callTimeoutMs = TUTOR_REPLY_TIMEOUT_MS
             )
 
-            val starters = lesson?.step(stepIndex)?.starters.orEmpty()
+            // Hang-up, mute, a new topic or a barge-in can all make this reply
+            // irrelevant while the model is thinking. Only the newest one speaks.
+            val phase = _uiState.value.callPhase
+            if (mySeq != tutorReplySeq ||
+                (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING)
+            ) {
+                isTutorTurnInFlight = false
+                return@launch
+            }
+
+            var modelFix: GrammarFix? = null
+            var word: String? = null
+            var note: String? = null
+            var rawSay = ""
+            var status = ""
             when (response) {
                 is HfApiResponse.Success -> {
                     val turn = TutorTurnPrompt.parse(response.text)
-                    val modelFix = modelFixFor(
+                    modelFix = modelFixFor(
                         say = turn.say,
                         corrected = turn.fixCorrected,
                         rule = turn.rule.orEmpty(),
@@ -5093,59 +5321,71 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         upgradeFrom = turn.upgradeFrom,
                         upgradeTo = turn.upgradeTo
                     )
-                    appendConversationTurn(trimmed, turn.say)
-                    // What the student told us about themselves is worth keeping;
-                    // the next call can ask how the exam went.
-                    turn.note?.takeIf { it.isNotBlank() }?.let { progressStore.addMemory(it) }
-                    deliverTutorTurn(
-                        say = turn.say,
-                        // A model that echoed the sentence back is agreeing with it,
-                        // which must not be shown as a correction.
-                        fix = modelFix,
-                        word = turn.word,
-                        starters = starters,
-                        status = "Connected (${response.latencyMs}ms)"
-                    )
+                    word = turn.word
+                    note = turn.note
+                    rawSay = turn.say
+                    status = "Connected (${response.latencyMs}ms)"
                 }
                 is HfApiResponse.Error -> {
-                    val fallback = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
-                    val nextStep = lesson?.step(stepIndex + 1)
-                    val say = when {
-                        nextStep != null -> nextStep.teacherLine
-                        lesson != null -> "That is the end of this lesson. Well done. " +
-                            "Let's keep talking freely. What else would you like to practise?"
-                        else -> fallback.spokenText
+                    // No canned lecture: the offline reply is short, contingent
+                    // on the student's words, follows the lesson step and asks
+                    // one fresh question.
+                    rawSay = TutorCoach.localReply(
+                        studentText = trimmed,
+                        scenario = state.currentScenario,
+                        asked = askedQuestions,
+                        lessonStep = targetStep,
+                        turnsInStep = turnsInStep,
+                        wrapUp = wrapUp
+                    ).speech
+                    status = when {
+                        response.isTimeout -> "Answer took too long — local tutor kept the call going"
+                        response.isAuthError -> "Private space: token required (local tutor active)"
+                        response.isSleepingOrOffline -> "Space asleep — local tutor keeping the call going"
+                        else -> "Local tutor mode"
                     }
-                    appendConversationTurn(trimmed, say)
-                    deliverTutorTurn(
-                        say = say,
-                        fix = localFix,
-                        word = if (lesson != null) null else fallback.vocabularyHighlight?.substringBefore(" /"),
-                        starters = (nextStep?.starters ?: fallback.suggestedReplyPills),
-                        status = when {
-                            response.isAuthError -> "Private space: token required (local tutor active)"
-                            response.isSleepingOrOffline -> "Space asleep — local tutor keeping the call going"
-                            else -> "Local tutor mode"
-                        }
-                    )
                 }
             }
 
-            advanceLesson()
+            recordCallFix(modelFix)
+            note?.takeIf { it.isNotBlank() }?.let { progressStore.addMemory(it) }
+            val spoken = deliverTutorTurn(
+                say = rawSay,
+                // A model that echoed the sentence back is agreeing with it,
+                // which must not be shown as a correction.
+                fix = modelFix,
+                word = word,
+                starters = starters,
+                status = status
+            )
+            if (spoken.isNotBlank()) {
+                appendConversationTurn(trimmed, spoken)
+                applyLessonProgress(progress)
+            }
             isTutorTurnInFlight = false
+            tutorReplyJob = null
         }
     }
 
-    /** Move the lesson plan forward one step after every answered turn. */
-    private fun advanceLesson() {
+    /**
+     * Apply the evidence-based lesson decision after the tutor's reply.
+     *
+     * A step is earned by an attempt (four words or more), or by a scaffold
+     * after two very short attempts. The lesson is complete only when the last
+     * step has actually been answered.
+     */
+    private fun applyLessonProgress(progress: TutorCoach.LessonProgress) {
         val state = _uiState.value
         val lesson = TutorLessonCatalog.find(state.activeLessonId) ?: return
-        if (state.isLessonComplete) return
-        val next = state.lessonStepIndex + 1
-        if (next >= lesson.stepCount) {
-            _uiState.update { it.copy(isLessonComplete = true, lessonStepIndex = lesson.stepCount - 1) }
-        } else {
-            _uiState.update { it.copy(lessonStepIndex = next) }
+        when {
+            progress.completed -> _uiState.update {
+                it.copy(isLessonComplete = true, lessonStepIndex = lesson.stepCount - 1)
+            }
+            progress.advanced -> {
+                turnsInStep = 0
+                _uiState.update { it.copy(lessonStepIndex = progress.targetIndex) }
+            }
+            else -> turnsInStep++
         }
     }
 
@@ -5175,46 +5415,52 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             bargeInFalseStarts++
             if (bargeInFalseStarts >= 2) bargeInMonitor.disableForCall()
         }
-        when {
-            recognitionMisses >= 7 -> endTutorCall(
+
+        // A miss is not a reason to talk at the student. Wait-time research puts
+        // useful thinking time at 3–5 s minimum; a tutor that fills ten seconds
+        // of silence with "Take your time" replaces the learner's retrieval
+        // practice with a demonstration. So the ladder is measured in seconds:
+        // stay quiet, then narrow the question, then offer a sentence to start
+        // with, and hang up only after a genuinely long silence.
+        val now = System.currentTimeMillis()
+        if (silenceStartedAt == 0L) silenceStartedAt = now
+        val elapsed = now - silenceStartedAt
+        when (TutorCoach.silenceAction(elapsed, silenceNudges)) {
+            SilenceAction.SILENT_RETRY -> {
+                _uiState.update {
+                    it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f)
+                }
+                scheduleListening(700L)
+            }
+            SilenceAction.EASIER_QUESTION -> {
+                silenceNudges++
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+                deliverTutorTurn(
+                    say = TutorCoach.easierQuestion(state.currentScenario, askedQuestions),
+                    fix = null,
+                    word = null,
+                    starters = state.suggestedVoicePills,
+                    status = state.hfStatusMessage
+                )
+            }
+            SilenceAction.SENTENCE_STARTER -> {
+                silenceNudges++
+                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
+                deliverTutorTurn(
+                    say = TutorCoach.scaffoldLine(
+                        scenario = state.currentScenario,
+                        asked = askedQuestions,
+                        starter = state.suggestedVoicePills.firstOrNull()
+                    ),
+                    fix = null,
+                    word = null,
+                    starters = state.suggestedVoicePills,
+                    status = state.hfStatusMessage
+                )
+            }
+            SilenceAction.END_CALL -> endTutorCall(
                 "I'll let you go for now. Tap the mic whenever you want to try again."
             )
-            recognitionMisses >= 6 -> {
-                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
-                deliverTutorTurn(
-                    say = "I'll wait. Take all the time you need.",
-                    fix = state.callFix,
-                    word = null,
-                    starters = state.suggestedVoicePills,
-                    status = state.hfStatusMessage
-                )
-            }
-            recognitionMisses >= 4 -> {
-                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
-                deliverTutorTurn(
-                    say = "I'm still here whenever you're ready.",
-                    fix = state.callFix,
-                    word = null,
-                    starters = state.suggestedVoicePills,
-                    status = state.hfStatusMessage
-                )
-            }
-            recognitionMisses >= 3 -> {
-                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE) }
-                deliverTutorTurn(
-                    say = "Take your time.",
-                    fix = state.callFix,
-                    word = null,
-                    starters = state.suggestedVoicePills,
-                    status = state.hfStatusMessage
-                )
-            }
-            else -> {
-                // One or two misses is normal — a cough, a noisy room, a false
-                // start. Reopen the microphone without saying anything at all.
-                _uiState.update { it.copy(voiceAssistantState = AssistantVoiceState.IDLE, micRmsDb = 0f) }
-                scheduleListening(if (recognitionMisses == 1) 700L else 1_400L)
-            }
         }
     }
 
@@ -5250,6 +5496,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationFinishing = false
         dictationJob?.cancel()
         turnSpeechStartedAt = 0L
+        dictationStartedAt = System.currentTimeMillis()
         // If the tutor has just asked the student to produce a particular
         // sentence, this session is a drill and its words are judged, not
         // answered.
@@ -5265,7 +5512,6 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * the words already collected; this only owns the recogniser session.
      */
     private fun beginRecognition() {
-        discardingRecognition = false
         if (SpeechRecognizer.isRecognitionAvailable(getApplication())) {
             if (speechRecognizer == null) {
                 initSpeechRecognizer()
@@ -5283,6 +5529,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
                 }
                 awaitingTranscript = true
+                // A fresh session owns a fresh generation: any callback still
+                // owed by a cancelled session is now stale by construction.
+                val session = ++recognitionGeneration
+                speechRecognizer?.setRecognitionListener(tutorRecognitionListener(session))
                 speechRecognizer?.startListening(intent)
                 _uiState.update {
                     it.copy(
@@ -5343,6 +5593,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * timer sends what was heard.
      */
     private fun handleDictationSegment(recognizedText: String?) {
+        // A turn cannot run forever: a shy learner who keeps adding one word
+        // must still get an answer. 30 s is the voice-agent ceiling, not a
+        // timeout on their speaking.
+        if (dictationStartedAt > 0L &&
+            System.currentTimeMillis() - dictationStartedAt >= TutorCoach.MAX_TURN_MS
+        ) {
+            val wordsSoFar = dictationBuffer
+            if (wordsSoFar.isNotBlank()) {
+                dictationBuffer = mergeHeard(wordsSoFar, recognizedText.orEmpty())
+            }
+            commitDictation()
+            return
+        }
         val text = recognizedText?.trim().orEmpty()
         if (text.isNotEmpty()) {
             dictationBuffer = mergeHeard(dictationBuffer, text)
@@ -5398,7 +5661,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         if (!dictationActive || _uiState.value.isCallMuted) return
         viewModelScope.launch {
             delay(delayMs)
-            if (dictationActive && !_uiState.value.isCallMuted) beginRecognition()
+            if (!dictationActive || _uiState.value.isCallMuted) return@launch
+            if (dictationStartedAt > 0L &&
+                System.currentTimeMillis() - dictationStartedAt >= TutorCoach.MAX_TURN_MS
+            ) {
+                commitDictation()
+                return@launch
+            }
+            beginRecognition()
         }
     }
 
@@ -5411,8 +5681,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      */
     private fun scheduleDictationCommit() {
         dictationJob?.cancel()
+        // Adaptive endpointing: "... and then" or a two-word fragment gets a
+        // longer pause than a sentence that already sounds complete. A fixed
+        // 2.8 s cut learners off while they were planning the next clause.
+        val pause = TutorCoach.endpointDelayMs(dictationBuffer)
         dictationJob = viewModelScope.launch {
-            delay(DICTATION_PAUSE_MS)
+            delay(pause)
             if (dictationActive && !dictationFinishing) commitDictation()
         }
     }
@@ -5429,10 +5703,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationActive = false
         dictationFinishing = false
         dictationJob?.cancel()
-        discardingRecognition = true
-        try {
-            speechRecognizer?.cancel()
-        } catch (_: Exception) {}
+        abandonRecognition()
+        dictationStartedAt = 0L
         val text = dictationBuffer.trim()
         dictationBuffer = ""
         _voiceLevel.value = 0f
@@ -5640,7 +5912,19 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             when (_uiState.value.voiceAssistantState) {
                 AssistantVoiceState.SPEAKING -> interruptTutor()
                 AssistantVoiceState.LISTENING -> stopVoiceListening()
-                AssistantVoiceState.THINKING -> Unit
+                AssistantVoiceState.THINKING -> {
+                    // "I want to speak now" during a slow model answer. The old
+                    // reply is abandoned and the microphone opens; the words the
+                    // student says become the new turn instead of being lost.
+                    if (!drillActive) {
+                        tutorReplyJob?.cancel()
+                        tutorReplyJob = null
+                        tutorReplySeq++
+                        isTutorTurnInFlight = false
+                        afterSpeech = null
+                        startVoiceListening()
+                    }
+                }
                 AssistantVoiceState.IDLE -> startVoiceListening()
             }
             return
@@ -5692,29 +5976,39 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
             when (response) {
                 is HfApiResponse.Success -> {
-                    appendConversationTurn(trimmed, response.text)
+                    // Even the older voice-assistant path obeys the two-sentence,
+                    // one-question contract instead of reading a paragraph aloud.
+                    val spoken = TutorCoach.shapeReply(response.text).speech
+                    appendConversationTurn(trimmed, spoken)
                     
                     val localAnalysis = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
                     _uiState.update {
                         it.copy(
-                            currentAiResponseText = response.text,
+                            currentAiResponseText = spoken,
                             currentGrammarTip = localAnalysis.grammarTip,
                             currentVocabularyHighlight = localAnalysis.vocabularyHighlight,
                             suggestedVoicePills = localAnalysis.suggestedReplyPills,
                             hfStatusMessage = "Connected to Gemma / Qwen (${response.latencyMs}ms)"
                         )
                     }
-                    speakText(response.text)
+                    speakText(spoken)
                     repository.recordLanguagePractice("AI Voice ($scenario)", "Active Speech")
                 }
                 is HfApiResponse.Error -> {
-                    // Fallback to high quality educational engine
+                    // Fallback to a short, contingent local reply.
                     val fallback = EnglishVoiceTutorEngine.generateLocalConversationalResponse(trimmed, scenario)
-                    appendConversationTurn(trimmed, fallback.spokenText)
+                    val spoken = TutorCoach.shapeReply(
+                        TutorCoach.localReply(
+                            studentText = trimmed,
+                            scenario = scenario,
+                            asked = emptySet()
+                        ).speech
+                    ).speech
+                    appendConversationTurn(trimmed, spoken)
 
                     _uiState.update {
                         it.copy(
-                            currentAiResponseText = fallback.spokenText,
+                            currentAiResponseText = spoken,
                             currentGrammarTip = fallback.grammarTip,
                             currentVocabularyHighlight = fallback.vocabularyHighlight,
                             suggestedVoicePills = fallback.suggestedReplyPills,
@@ -5726,7 +6020,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                                 "Local Tutor Mode"
                         )
                     }
-                    speakText(fallback.spokenText)
+                    speakText(spoken)
 
                     if (response.isAuthError) {
                         showSnackbar("Hugging Face Space is private. Add your HF_API_TOKEN in Settings.")
@@ -5740,6 +6034,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val starter = EnglishVoiceTutorEngine.getStarterGreeting(scenario)
         val live = _uiState.value.callPhase == CallPhase.LIVE
         stopSpeaking()
+        if (live) {
+            tutorReplyJob?.cancel()
+            tutorReplyJob = null
+            tutorReplySeq++
+            isTutorTurnInFlight = false
+            afterSpeech = null
+        }
         _uiState.update {
             it.copy(
                 currentScenario = scenario,
@@ -5758,15 +6059,33 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         }
         // Off a call the UI starts one straight away, and startTutorCall speaks the
         // opener for the topic that was just chosen; speaking here as well would
-        // play the same greeting twice.
-        if (live) speakText(starter.spokenText)
+        // play the same greeting twice. Mid-call the change is a real tutor turn,
+        // so it goes in the transcript and hands the floor back when it finishes.
+        if (live) {
+            deliverTutorTurn(
+                say = starter.spokenText,
+                fix = null,
+                word = null,
+                starters = emptyList(),
+                status = _uiState.value.hfStatusMessage
+            )
+        }
     }
 
     fun replayCurrentAiResponse() {
+        // A drill owns the floor; replaying an old line over it would confuse
+        // the student about which sentence to produce.
+        if (drillActive || drillTarget != null) return
         val text = _uiState.value.currentAiResponseText
         if (text.isNotBlank()) {
             speakText(text)
         }
+    }
+
+    /** Erase the facts the tutor remembered between calls (⋯ menu). */
+    fun forgetTutorMemory() {
+        progressStore.forgetMemory()
+        showSnackbar("Miss Emma has forgotten the details she remembered about you.")
     }
 
     fun stopAiSpeech() {

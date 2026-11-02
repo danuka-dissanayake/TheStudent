@@ -173,6 +173,14 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getInt(KEY_SPEAKING_CALLS, 0)
         set(value) = prefs.edit().putInt(KEY_SPEAKING_CALLS, value).apply()
 
+    /** Speaking minutes belong to the account, not to the handset. */
+    fun clearSpeakingStats() {
+        prefs.edit()
+            .remove(KEY_SPEAKING_SECONDS)
+            .remove(KEY_SPEAKING_CALLS)
+            .apply()
+    }
+
     fun hasUsableSession(): Boolean {
         val token = sessionToken
         return !token.isNullOrBlank() && isLoggedIn
@@ -212,7 +220,8 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_CELEBRATED_RATING = "celebrated_rating_id"
         private const val KEY_SPEAKING_SECONDS = "tutor_speaking_seconds"
         private const val KEY_SPEAKING_CALLS = "tutor_speaking_calls"
-        private const val KEY_TUTOR_CONSENT = "tutor_consent_v1"
+        // v2: the disclosure now explains remembered facts and ASR limits.
+        private const val KEY_TUTOR_CONSENT = "tutor_consent_v2"
         private const val LAST_DISMISSALS_KEPT = 40
 
         const val ROLE_STUDENT = "student"

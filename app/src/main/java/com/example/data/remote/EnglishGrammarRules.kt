@@ -1,6 +1,7 @@
 package com.example.data.remote
 
 import com.example.data.model.GrammarFix
+import com.example.data.voice.TutorCoach
 
 /**
  * A local grammar checker for spoken English.
@@ -109,7 +110,6 @@ object EnglishGrammarRules {
         Triple("""\bmarried with\b""", "married to", "married with → married to"),
         Triple("""\bdepends? of\b""", "depends on", "depend of → depend on"),
         Triple("""\bafraid from\b""", "afraid of", "afraid from → afraid of"),
-        Triple("""\bgood in\b""", "good at", "good in → good at"),
         Triple("""\blisten music\b""", "listen to music", "listen music → listen to music"),
         Triple("""\bmore better\b""", "better", "more better → better"),
         Triple("""\bmost best\b""", "best", "most best → best"),
@@ -117,8 +117,7 @@ object EnglishGrammarRules {
         Triple("""\bI very like\b""", "I really like", "I very like → I really like"),
         Triple("""\bmy cousin (brother|sister)\b""", "my cousin", "cousin brother → cousin"),
         Triple("""\bwhat is your good name\b""", "what is your name", "good name → name"),
-        Triple("""\bI am having a doubt\b""", "I have a question", "doubt → question"),
-        Triple("""\bdo you know about\b""", "do you know", "know about → know")
+        Triple("""\bI am having a doubt\b""", "I have a question", "doubt → question")
     )
 
     /**
@@ -131,6 +130,10 @@ object EnglishGrammarRules {
     fun checkAll(sentence: String): List<GrammarFix> {
         val clean = sentence.trim()
         if (clean.length < 3) return emptyList()
+        // Speech-to-text is less reliable on accented, second-language speech.
+        // A doubled word or a one-word fragment is a transcription artefact,
+        // not a grammar mistake: never turn it into a correction.
+        if (TutorCoach.isUnreliableTranscript(clean)) return emptyList()
         val fixes = LinkedHashMap<String, GrammarFix>()
 
         fun record(rule: String, corrected: String) {
@@ -164,8 +167,16 @@ object EnglishGrammarRules {
                         .substring(match.range.last + 1)
                         .trimStart()
                         .startsWith("that", ignoreCase = true)
+                    // "I have went yesterday" is a participle problem, not a
+                    // past-marker one. Rules 1 and 2 own it; turning "have"
+                    // into "had" here produced the nonsense "I had went".
+                    val auxiliary = verb in setOf(
+                        "have", "has", "had", "am", "is", "are", "was", "were",
+                        "did", "do", "does", "will", "would", "can", "could",
+                        "should", "must", "been", "being"
+                    )
                     val past = baseToPast[base]
-                    if (past != null && past != verb && !followedByThat) {
+                    if (past != null && past != verb && !followedByThat && !auxiliary) {
                         val fixed = clean.substring(0, match.range.first) +
                             "$subject $past" +
                             clean.substring(match.range.last + 1)
@@ -243,7 +254,23 @@ object EnglishGrammarRules {
             .takeIf { it != clean }
             ?.let { record("a / an", it) }
 
+        Regex("""\ba\s+(hour|honest|honour|honor|heir)\b""", RegexOption.IGNORE_CASE)
+            .replace(clean) { m -> "an ${m.groupValues[1]}" }
+            .takeIf { it != clean }
+            ?.let { record("a / an", it) }
+
+        Regex("""\ban\s+(one|once|uniform|university|user|useful|european|unit)\b""", RegexOption.IGNORE_CASE)
+            .replace(clean) { m -> "a ${m.groupValues[1]}" }
+            .takeIf { it != clean }
+            ?.let { record("a / an", it) }
+
         // 6. Fixed phrases (prepositions, common Sri Lankan English).
+        // "I am good in maths" is a Sri Lankan transfer error; "good in the
+        // morning" is correct English, so only school subjects and skills match.
+        Regex("""\bgood in (maths|math|english|science|singing|drawing|sports?|it|coding|cricket)\b""", RegexOption.IGNORE_CASE)
+            .replace(clean) { m -> "good at ${m.groupValues[1]}" }
+            .takeIf { it != clean }
+            ?.let { record("good in → good at", it) }
         fixedPhrases.forEach { (pattern, replacement, rule) ->
             Regex(pattern, RegexOption.IGNORE_CASE)
                 .replace(clean, replacement)
@@ -288,7 +315,7 @@ object EnglishGrammarRules {
      * answer something the student never asked, so turn-taking skips them.
      */
     fun isBackchannel(sentence: String): Boolean {
-        val clean = sentence.trim().lowercase().trim('.', '!', ',', '?', ' ')
+        val clean = conversationWord(sentence)
         return clean in setOf(
             "mm", "mmm", "mhm", "mm hmm", "mm-hmm", "uh huh", "uh-huh", "hmm",
             "ok", "okay", "yeah", "yes", "yep", "ha", "aha", "right", "sure", "oh"
@@ -297,10 +324,20 @@ object EnglishGrammarRules {
 
     /** True when the student is asking to stop or wait, not to answer. */
     fun isStopRequest(sentence: String): Boolean {
-        val clean = sentence.trim().lowercase()
-        return clean in setOf("stop", "wait", "hold on", "one second", "give me a second") ||
-            clean.startsWith("stop ") || clean.startsWith("wait ")
+        // Recognised speech arrives punctuated ("Wait."), so the set check has
+        // to be punctuation-blind or a student can never stop the tutor.
+        val clean = conversationWord(sentence)
+        return clean in setOf(
+            "stop", "wait", "hold on", "one second", "one moment", "one minute",
+            "give me a second", "wait a second", "hold on a second"
+        ) || clean.startsWith("stop ") || clean.startsWith("wait ")
     }
+
+    /** Lower-case, punctuation-free, single-spaced form of a short utterance. */
+    private fun conversationWord(sentence: String): String =
+        sentence.trim().lowercase()
+            .trim('.', '!', ',', '?', ';', ':', ' ')
+            .replace(Regex("\\s+"), " ")
 
     /**
      * Replace the verb at the end of each match, keeping everything before it.

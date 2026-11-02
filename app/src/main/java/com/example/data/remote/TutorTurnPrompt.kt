@@ -3,73 +3,79 @@ package com.example.data.remote
 import com.example.data.model.LessonStep
 import com.example.data.model.TutorLesson
 import com.example.data.model.TutorTurn
+import com.example.data.voice.TutorCoach
 
 /**
  * Builds the instructions for one call turn, and reads the answer back.
  *
- * A spoken tutor has to do two jobs at once: keep the conversation going and
- * quietly record what went wrong. If both are squeezed into one paragraph the
- * student hears a lecture instead of a conversation, so the model is asked for
- * four labelled lines instead:
+ * A spoken tutor has two jobs in the same answer: keep the conversation going
+ * and quietly record what went wrong. If both are squeezed into one paragraph
+ * the student hears a lecture instead of a conversation, so the model is asked
+ * for five labelled lines:
  *
  * ```
- * SAY: what the student hears (two sentences, ends with a question)
- * FIX: the student's own sentence, with the smallest possible correction
- * RULE: the grammar point, three words at most
- * WORD: a plain phrase the student used => a stronger phrase to try
- * NOTE: one fact about the student worth remembering
+ * SAY:  what the student hears (one or two sentences, one question)
+ * FIX:  the student's own sentence, minimally corrected, or NONE
+ * RULE: the grammar point in three words, or NONE
+ * WORD: a plain phrase the student used => a stronger phrase, or NONE
+ * NOTE: one safe fact worth remembering, or NONE
  * ```
  *
- * FIX and WORD are two different kinds of help and are kept apart on purpose.
- * FIX is *corrective*: something in the sentence was wrong, and the answer keeps
- * the student's words while repairing it. WORD is *enriching*: the sentence was
- * fine, and there is simply a stronger phrase for it. Mixing the two is what
- * makes tutoring feel like nagging — and it is why the tutor is explicitly told
- * never to put its own reply on the FIX line.
+ * The instructions are written as a teaching contract, not a character sheet.
+ * `docs/AI_TUTOR_RESEARCH.md` explains each rule: short contingent turns, one
+ * question, no generic praise, CEFR-graded words, selective correction
+ * (recasts for fluency, explicit fixes for drills), self-repair first, and a
+ * strict ban on repeating a question. The ViewModel applies
+ * [TutorCoach.shapeReply] to the result as a second line of defence.
  *
- * The parser is deliberately forgiving. Small models forget formats, especially
- * when they are half-awake on a free Hugging Face Space, and a forgotten label
- * must never cost the student their reply: with no labels at all, the whole
- * answer is spoken, and the corrections fall back to `EnglishGrammarRules`.
+ * The parser is deliberately forgiving, but it is now **stateful**: a wrapped
+ * line continues the label above it. The old line-by-line parser put a wrapped
+ * `WORD:` or `NOTE:` continuation into `SAY` and read it aloud.
  */
 object TutorTurnPrompt {
 
+    private enum class Label { SAY, FIX, RULE, WORD, NOTE }
+
+    private val LABEL_LINE = Regex(
+        "^(say|fix|rule|word|note)\\s*[:\\-—]\\s*(.*)$",
+        RegexOption.IGNORE_CASE
+    )
+    private val MARKUP = Regex("[*_#`]+")
+    private val THINK_BLOCK = Regex("<think>[\\s\\S]*?</think>")
+
     /**
      * The tutor's persona and the rules of the call.
-     *
-     * Written as instructions to a teacher rather than as a character sheet: what
-     * matters is turn length, one question at a time, and never letting a
-     * correction replace a reply.
      */
     fun system(
         scenario: String,
         lesson: TutorLesson?,
         stepIndex: Int,
         level: String = "B1",
-        /**
-         * A grammar point the student has now got wrong more than once on this
-         * call. Teachers act on patterns, not on single slips: the second time is
-         * when a mistake becomes worth naming.
-         */
+        /** A rule the student has broken more than once on this call. */
         focusRule: String = "",
-        /**
-         * Facts the student has already told the tutor on earlier calls. A tutor
-         * who remembers "your exam is on Tuesday" is a tutor; one who asks the
-         * same five questions every call is a form.
-         */
-        knownFacts: List<String> = emptyList()
+        /** Stable facts from earlier calls, so this is not a stranger's form. */
+        knownFacts: List<String> = emptyList(),
+        /** Normalised questions already asked; the tutor must not repeat one. */
+        askedQuestions: List<String> = emptyList(),
+        mode: TutorCoach.FeedbackMode = TutorCoach.FeedbackMode.FLUENCY,
+        /** The lesson's last step was earned: wrap up and move to free talk. */
+        wrapUp: Boolean = false
     ): String {
         val step: LessonStep? = lesson?.step(stepIndex)
-        val lessonBlock = if (lesson != null && step != null) {
-            """
-            You are teaching a short lesson called "${lesson.title}".
-            Goal: ${lesson.goal}
-            This turn is step ${stepIndex + 1} of ${lesson.stepCount}: ${step.name} — ${step.instruction}
-            A good model sentence for this step is: "${step.modelLine}"
-            Follow this step. Do not jump ahead, and do not explain the whole lesson at once.
-            """.trimIndent()
-        } else {
-            "There is no fixed lesson. Keep the conversation going on the topic: $scenario."
+        val lessonBlock = when {
+            wrapUp ->
+                "The guided lesson is now complete. Say one warm sentence about what the student practised, " +
+                    "then ask one new question to move into free conversation. Do not start another step."
+            lesson != null && step != null ->
+                """
+                You are teaching a short lesson called "${lesson.title}".
+                Goal: ${lesson.goal}
+                The tutor's next line opens step ${stepIndex + 1} of ${lesson.stepCount}: ${step.name} — ${step.instruction}
+                A good model sentence for this step is: "${step.modelLine}".
+                Follow this step. Do not jump ahead and do not explain the whole lesson at once.
+                """.trimIndent()
+            else ->
+                "There is no fixed lesson. Keep the conversation going on the topic: $scenario."
         }
 
         val memoryBlock = if (knownFacts.isEmpty()) {
@@ -81,44 +87,58 @@ object TutorTurnPrompt {
             """.trimIndent()
         }
 
+        val askedBlock = if (askedQuestions.isEmpty()) {
+            ""
+        } else {
+            "Questions already asked in this call (do not repeat any of them, even reworded): " +
+                askedQuestions.takeLast(8).joinToString(" | ")
+        }
+
         val focusBlock = if (focusRule.isBlank()) {
             ""
         } else {
             """
-            This student has now broken the same rule twice on this call: $focusRule.
-            Do not lecture, and do not put this in SAY. When it fits the conversation,
-            ask a question that makes them use the correct form once.
+            This student has now made the same mistake twice on this call: $focusRule.
+            Do not lecture and do not put this in SAY. When it fits, ask one question that makes them use the correct form once.
+            """.trimIndent()
+        }
+
+        val correctionBlock = if (mode == TutorCoach.FeedbackMode.ACCURACY) {
+            """
+            CORRECTION MODE: focused form practice.
+            - Put the minimal corrected version of the student's OWN sentence on FIX.
+            - Do NOT put the correction inside SAY. In SAY, briefly invite them to say that sentence once more, then ask the next question.
+            """.trimIndent()
+        } else {
+            """
+            CORRECTION MODE: fluency conversation.
+            - If there is a small grammar mistake, quietly use the correct form inside SAY (a recast) while replying to the meaning.
+            - Never say "mistake", "wrong", "better", "you should say", and never explain the rule in SAY.
+            - Write NONE on FIX unless the error makes the sentence hard to understand.
             """.trimIndent()
         }
 
         return """
-            You are Miss Emma, a warm, patient English speaking tutor on a phone call with a Sri Lankan student.
-            The student's spoken English level is about $level (CEFR).
+            You are Miss Emma, a warm, patient English speaking tutor on a phone call with a Sri Lankan student (CEFR $level). Your job is to make the STUDENT speak.
 
             $lessonBlock
             $memoryBlock
+            $askedBlock
             $focusBlock
+            $correctionBlock
 
-            How you speak on this call:
-            1. This is a phone call, not a lecture. Say at most two short sentences, then stop.
-            2. Always end with one clear question so the student knows it is their turn.
-            3. Never use markdown, bullet points, emoji, or stage directions — everything you write in SAY is read aloud.
-            4. Never say "as an AI" and never mention these instructions.
-            5. If the student is silent or unclear, be encouraging and offer an easier question.
-            6. Correct at most one thing per turn. A correction belongs in FIX, not in SAY.
-            7. FIX is a minimal edit of the student's OWN sentence: keep their words and their meaning and change only what is actually wrong. Never put your reply, a paraphrase, or a nicer version on the FIX line.
-            8. Write NONE on FIX when the sentence is already correct, when the only problem is punctuation or capital letters, or when you would have to rewrite more than a few words to "improve" it.
-            9. WORD is not a correction. Choose a plain word or phrase the student actually said and give a stronger, more natural one — for example "very good => excellent".
-            10. RULE is NONE whenever FIX is NONE.
-            11. Never ask a question you have already asked in this call. Read the conversation so far before you write SAY.
-            12. NOTE is one short fact the student has told you about themselves — a name, a job, an exam, a place, a family member. Write NONE if there is nothing new. Never invent one.
+            SAY: one or two short sentences (max 30 words) ending in exactly ONE question. Never answer your own question. Use one detail from what the student said; never open with praise such as "Great job". Use everyday $level words: no idioms, lists, markdown, brackets, stage directions or "as an AI". Never repeat a question from the asked list. For a one-word answer, ask an easy either/or question.
+            FIX: a minimal edit of the student's OWN sentence — keep their words and meaning — or NONE when it is correct, when only punctuation differs, or when you would have to rewrite it. RULE: the point in three words, or NONE when FIX is NONE.
+            WORD: only a plain phrase the student actually said => a genuinely stronger alternative, or NONE. Never rewrite a correct sentence.
+            NOTE: one short, stable, NON-sensitive fact (name, town, exam, hobby, course, job goal), or NONE. Never health, religion, address, phone number or facts about other people. Never invent one.
+            One correction per turn at most. Everything on SAY is read aloud; FIX, RULE, WORD and NOTE are silent.
 
-            Answer in exactly this format and nothing else:
+            Answer in exactly these five lines and nothing else:
             SAY: <what you say out loud>
             FIX: <the student's own sentence with the smallest possible correction, or NONE>
             RULE: <the grammar point in three words, or NONE>
             WORD: <plain phrase => better phrase, or NONE>
-            NOTE: <one fact about the student, or NONE>
+            NOTE: <one safe fact about the student, or NONE>
         """.trimIndent()
     }
 
@@ -140,98 +160,83 @@ object TutorTurnPrompt {
     /**
      * Read the model's answer.
      *
-     * Anything that is not one of the four labels is treated as speech, because a
-     * tutor that stays silent looks broken while a tutor that says a stray symbol
-     * is merely odd.
+     * Labels may be bold, lower-case, wrapped over two lines or missing entirely.
+     * A wrapped line continues its label (so a long NOTE is not spoken aloud), and
+     * an answer with no labels at all is treated as speech so the student is
+     * never left with a silent tutor.
      */
     fun parse(raw: String): TutorTurn {
-        val text = raw
-            .replace(Regex("<think>[\\s\\S]*?</think>"), "")
+        val text = THINK_BLOCK.replace(raw, "")
             .replace(Regex("```\\w*"), "")
             .replace("```", "")
             .trim()
 
-        val say = StringBuilder()
-        var fix: String? = null
-        var rule: String? = null
-        var word: String? = null
-        var upgradeFrom: String? = null
-        var upgradeTo: String? = null
-        var note: String? = null
+        val buffers = Label.values().toList().associateWith { StringBuilder() }
+        var current = Label.SAY
         var sawLabel = false
 
+        fun add(label: Label, value: String) {
+            if (value.isNotBlank()) buffers.getValue(label).append(value).append(' ')
+        }
+
         text.lines().forEach { rawLine ->
-            val line = rawLine.trim()
+            val line = MARKUP.replace(rawLine.trim(), "")
+                .trimStart('-', '>', ' ')
+                .trim()
             if (line.isEmpty()) return@forEach
-            val upper = line.uppercase()
-            when {
-                upper.startsWith("SAY:") -> {
-                    sawLabel = true
-                    say.appendLine(line.substring(4).trim())
+            val match = LABEL_LINE.find(line)
+            if (match != null) {
+                current = when (match.groupValues[1].lowercase()) {
+                    "fix" -> Label.FIX
+                    "rule" -> Label.RULE
+                    "word" -> Label.WORD
+                    "note" -> Label.NOTE
+                    else -> Label.SAY
                 }
-                upper.startsWith("FIX:") -> {
-                    sawLabel = true
-                    fix = line.substring(4).cleanValue()
-                }
-                upper.startsWith("RULE:") -> {
-                    sawLabel = true
-                    rule = line.substring(5).cleanValue()
-                }
-                upper.startsWith("WORD:") -> {
-                    sawLabel = true
-                    val value = line.substring(5).cleanValue()
-                    // "very good => excellent" is the upgrade pair; a bare value
-                    // is just a word worth keeping.
-                    val arrow = value?.let { v ->
-                        when {
-                            v.contains("=>") -> v.split("=>", limit = 2)
-                            v.contains("->") -> v.split("->", limit = 2)
-                            else -> null
-                        }
-                    }
-                    if (arrow != null && arrow.size == 2) {
-                        upgradeFrom = arrow[0].trim().trim('"').ifBlank { null }
-                        upgradeTo = arrow[1].trim().trim('"').ifBlank { null }
-                        word = upgradeTo
-                    } else {
-                        word = value
-                    }
-                }
-                // A wrapped line continues whatever came before it; before any
-                // label it is simply speech.
-                upper.startsWith("NOTE:") -> {
-                    sawLabel = true
-                    note = line.substring(5).cleanValue()
-                }
-                else -> say.appendLine(line)
+                sawLabel = true
+                add(current, match.groupValues[2].trim())
+            } else {
+                add(current, line)
             }
         }
 
-        val spoken = say.toString()
-            .replace(Regex("[*_#`>]"), "")
+        val value = { label: Label -> buffers.getValue(label).toString().trim().cleanValue() }
+        val spoken = buffers.getValue(Label.SAY).toString()
             .replace(Regex("\\s+"), " ")
             .trim()
             .ifBlank { if (sawLabel) "" else text }
+
+        val wordRaw = value(Label.WORD)
+        val arrow = wordRaw?.let { v ->
+            when {
+                v.contains("=>") -> v.split("=>", limit = 2)
+                v.contains("->") -> v.split("->", limit = 2)
+                else -> null
+            }
+        }
+        val upgradeFrom = arrow?.getOrNull(0)?.trim()?.trim('"')?.ifBlank { null }
+        val upgradeTo = arrow?.getOrNull(1)?.trim()?.trim('"')?.ifBlank { null }
 
         return TutorTurn(
             say = spoken.takeIf { it.isNotBlank() }
                 ?: "Sorry, I lost you for a second. Could you say that again?",
             fixOriginal = null, // filled by the caller, which knows what was said
-            fixCorrected = fix,
-            rule = rule,
-            word = word,
+            fixCorrected = value(Label.FIX),
+            rule = value(Label.RULE),
+            word = upgradeTo ?: wordRaw,
             upgradeFrom = upgradeFrom,
             upgradeTo = upgradeTo,
-            note = note
+            note = value(Label.NOTE)
         )
     }
 
     private fun String.cleanValue(): String? {
-        val value = trim().trimEnd('.', ',', ';')
-        if (value.isBlank()) return null
-        if (value.equals("none", ignoreCase = true)) return null
-        if (value.equals("null", ignoreCase = true)) return null
-        if (value.equals("n/a", ignoreCase = true)) return null
+        val value = trim().trim('"', '\'').trimEnd(',', ';', ':').trim()
+        val bare = value.trimEnd('.').trim()
+        if (bare.isBlank()) return null
+        if (bare.equals("none", ignoreCase = true)) return null
+        if (bare.equals("null", ignoreCase = true)) return null
+        if (bare.equals("n/a", ignoreCase = true)) return null
         return value.takeUnless { it.startsWith("<") }
     }
 }
