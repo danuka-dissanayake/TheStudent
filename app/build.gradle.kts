@@ -96,6 +96,8 @@ dependencies {
   implementation("cz.adaptech.tesseract4android:tesseract4android:4.9.0")
   // implementation(libs.androidx.datastore.preferences)
   implementation(libs.androidx.lifecycle.runtime.compose)
+  // Origin-pinned WebView <-> app messaging (WebViewCompat.addWebMessageListener).
+  implementation(libs.androidx.webkit)
   implementation(libs.androidx.lifecycle.runtime.ktx)
   implementation(libs.androidx.lifecycle.viewmodel.compose)
   implementation(libs.androidx.navigation.compose)

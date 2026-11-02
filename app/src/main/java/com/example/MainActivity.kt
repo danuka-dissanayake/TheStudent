@@ -374,11 +374,22 @@ class MainActivity : ComponentActivity() {
                                 WebAssistantScreen(
                                     baseUrl = uiState.webAssistantBaseUrl,
                                     studentName = userProfile.name,
-                                    studentId = viewModel.preferences.userEmail,
+                                    // Opaque users.id (`sub`), never an email or
+                                    // a token. Only used as a display hint in
+                                    // the guest fallback; SSO uses the cookie.
+                                    studentId = uiState.webAssistantSubject,
                                     isDarkTheme = uiState.isDarkTheme,
                                     initialPrompt = uiState.webAssistantInitialPrompt,
+                                    authPending = uiState.webAssistantAuthPending,
+                                    authCode = uiState.webAssistantAuthCode,
+                                    exchangeUrl = uiState.webAssistantExchangeUrl,
+                                    authVerifier = uiState.webAssistantAuthVerifier,
+                                    authState = uiState.webAssistantAuthState,
+                                    authFailed = uiState.webAssistantAuthFailed,
                                     onClose = { viewModel.closeWebAssistant() },
-                                    onMessage = { viewModel.showSnackbar(it) }
+                                    onMessage = { viewModel.showSnackbar(it) },
+                                    onRetrySignIn = { viewModel.retryWebAssistantSignIn() },
+                                    onSessionExpired = { viewModel.onWebAssistantSessionExpired() }
                                 )
                             } else if (uiState.isAiAssistantOpen) {
                                 AiAssistantScreen(

@@ -93,6 +93,41 @@ class WebAssistantConfigTest {
     }
 
     @Test
+    fun `bridge origin is an exact https origin with no path or wildcard`() {
+        assertEquals(
+            "https://chat.example.com",
+            WebAssistantConfig.originOf("https://chat.example.com/ai/")
+        )
+        assertEquals(
+            "https://chat.example.com:8443",
+            WebAssistantConfig.originOf("https://chat.example.com:8443/")
+        )
+        assertFalse(WebAssistantConfig.originOf("https://chat.example.com/").contains("*"))
+        assertFalse(WebAssistantConfig.originOf("https://chat.example.com/").endsWith("/"))
+    }
+
+    @Test
+    fun `a live code is never posted to another host or over http`() {
+        val base = "https://chat.example.com/ai/"
+        assertTrue(
+            WebAssistantConfig.isAllowedExchangeUrl(
+                "https://chat.example.com/api/app-auth", base
+            )
+        )
+        assertFalse(
+            WebAssistantConfig.isAllowedExchangeUrl(
+                "https://evil.example.com/api/app-auth", base
+            )
+        )
+        assertFalse(
+            WebAssistantConfig.isAllowedExchangeUrl(
+                "http://chat.example.com/api/app-auth", base
+            )
+        )
+        assertFalse(WebAssistantConfig.isAllowedExchangeUrl(null, base))
+    }
+
+    @Test
     fun `identity script escapes names and never closes its own script`() {
         val script = WebAssistantConfig.identityScript(
             name = "A</script> \"Bro\"",

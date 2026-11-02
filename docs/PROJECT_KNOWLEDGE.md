@@ -443,13 +443,27 @@ the older native `AiAssistantScreen`. Key files:
 - `ui/components/AssistantFab.kt` — one global floating button, hidden on
   Chats, full-screen pages, dialogs, a live tutor call and the assistant itself
 - `data/local/WebAssistantConfig.kt` — HTTPS-only base URL, host allowlist,
-  `?app=android&theme=&q=` page URL and the identity `postMessage` script
+  `?app=android&theme=&q=` page URL, exact `originOf()` for the bridge
+  allowlist, and `isAllowedExchangeUrl()` for the SSO POST
+- `data/local/AssistantHandshake.kt`, `data/remote/AssistantSessionClient.kt` —
+  pure PKCE/state/form-body helpers and the OkHttp mint/revoke client
+- `backend/api/assistant_session.php` — one-time-code SSO endpoint
+  (`mint`, `exchange`, `validate`, `revoke`) with its own HMAC secret
 - `data/local/WebAssistantSession.kt` — cookie settings; cookies and web storage
   are cleared on sign-out so a shared phone cannot leak the previous chat
 - `TheStudentViewModel` — `isWebAssistantOpen`, `webAssistantBaseUrl`,
-  `webAssistantInitialPrompt`, `openWebAssistant()`, `setWebAssistantBaseUrl()`
+  `webAssistantInitialPrompt`, `openWebAssistant()`, SSO mint/re-mint/revoke,
+  `setWebAssistantBaseUrl()`
 
-The full setup, the **website contract** for `?app=android`, the warning about
-the immutable Vercel deployment URL, privacy/Play notes and the test checklist
-are in **`docs/WEBVIEW_ASSISTANT.md`**. The old native `AiAssistantScreen`
+Signed-in students are **silently logged into the website**: the app mints a
+90-second single-use code with our PHP backend, POSTs it in a request body via
+`WebView.postUrl`, and the website's server exchanges it server-to-server and
+sets an `HttpOnly; Secure; SameSite=Lax` cookie. The app's Bearer token never
+enters the WebView; `sub` is the opaque `users.id`. Website → app messages use
+`WebViewCompat.addWebMessageListener` with an exact origin allowlist and an
+event allowlist. Full contract, secrets, deployment steps, the copy-paste prompt
+for the website repo and the phone test checklist are in
+**`docs/ASSISTANT_SSO.md`**. The website contract for `?app=android`, the warning
+about the immutable Vercel deployment URL, privacy/Play notes and the general
+test checklist are in **`docs/WEBVIEW_ASSISTANT.md`**. The old native `AiAssistantScreen`
 remains in the tree but is unreachable, pending a cleanup pass.

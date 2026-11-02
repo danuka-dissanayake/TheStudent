@@ -29,6 +29,7 @@ import com.example.data.local.ChatMessageEntity
 import com.example.data.local.ChatVoiceRecorder
 import com.example.data.local.ChatSummaryRow
 import com.example.data.local.TheStudentPreferences
+import com.example.data.local.AssistantHandshake
 import com.example.data.local.WebAssistantConfig
 import com.example.data.local.WebAssistantSession
 import com.example.data.local.LearningActivityEntity
@@ -52,6 +53,7 @@ import com.example.data.remote.TheStudentAiStudyResponse
 import com.example.data.remote.TheStudentOcrEngine
 import com.example.data.remote.TheStudentStudyAiClient
 import com.example.data.remote.TheStudentAuthClient
+import com.example.data.remote.AssistantSessionClient
 import com.example.data.remote.AuthApiResult
 import com.example.data.remote.SessionValidation
 import com.example.data.remote.TheStudentChatClient
@@ -214,6 +216,19 @@ data class TheStudentUiState(
     val webAssistantBaseUrl: String = WebAssistantConfig.DEFAULT_BASE_URL,
     /** Optional first question handed to the website via its ?q= parameter. */
     val webAssistantInitialPrompt: String? = null,
+    /** True while the one-time SSO code is being minted; no WebView exists yet. */
+    val webAssistantAuthPending: Boolean = false,
+    /** Short-lived, single-use code. Held in memory only, never persisted. */
+    val webAssistantAuthCode: String? = null,
+    /** Website route that receives the POSTed code (same host as baseUrl). */
+    val webAssistantExchangeUrl: String? = null,
+    /** PKCE verifier + state for this one attempt. In memory only. */
+    val webAssistantAuthVerifier: String? = null,
+    val webAssistantAuthState: String? = null,
+    /** Opaque users.id (`sub`). Used only as a display/telemetry hint. */
+    val webAssistantSubject: String? = null,
+    /** Mint failed: open as a guest with a one-tap retry. */
+    val webAssistantAuthFailed: Boolean = false,
     val aiAssistantMessages: List<AiAssistantMessage> = emptyList(),
     val isAiAssistantGenerating: Boolean = false,
     val isAiReasoningActive: Boolean = false,
@@ -1586,6 +1601,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var chatPresenceJob: Job? = null
     private var chatMessagesJob: Job? = null
     private var profileJob: Job? = null
+    private var assistantAuthJob: Job? = null
+    private var lastAssistantAutoMintMs = 0L
+    private val assistantSessionClient = AssistantSessionClient()
 
     /** Set once the deployed chat API has been compared with this build. */
     private var chatServerVersionChecked = false
@@ -4010,12 +4028,20 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * `revokeOnServer` is skipped when the account no longer exists.
      */
     fun endSession(message: String, revokeOnServer: Boolean = true) {
+        assistantAuthJob?.cancel()
+        assistantAuthJob = null
         viewModelScope.launch {
             val token = preferences.sessionToken
             val serverUrl = serverUrlState.value
             // Stop pushes to this phone before the session disappears.
             if (!token.isNullOrBlank()) {
                 runCatching { TheStudentChatClient.unregisterDevice(serverUrl, token) }
+                // Sign the website out too, while the app token is still valid.
+                // This invalidates assistant sessions on every device, not just
+                // the cookies we are about to clear locally.
+                if (revokeOnServer) {
+                    runCatching { assistantSessionClient.revoke(serverUrl, token) }
+                }
             }
             preferences.logout()
             // The website keeps its chats in cookies / localStorage. On a shared
@@ -4075,7 +4101,16 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     isAuthenticated = false,
                     screenFlow = AppScreenFlow.AUTH,
                     isRegisterAuthMode = false,
-                    isOtpAuthMode = false
+                    isOtpAuthMode = false,
+                    isWebAssistantOpen = false,
+                    webAssistantInitialPrompt = null,
+                    webAssistantAuthPending = false,
+                    webAssistantAuthFailed = false,
+                    webAssistantAuthCode = null,
+                    webAssistantExchangeUrl = null,
+                    webAssistantAuthVerifier = null,
+                    webAssistantAuthState = null,
+                    webAssistantSubject = null
                 )
             }
             showSnackbar(message)
@@ -6418,6 +6453,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     /**
      * Open the website assistant inside the app. `prompt` becomes the site's
      * ?q= parameter, so "Ask AI" on a past paper still arrives with its question.
+     *
+     * Before the WebView exists we ask OUR OWN backend for a short-lived,
+     * single-use SSO code. The app session token is used only as a Bearer header
+     * to that first-party API — it never reaches the WebView.
      */
     fun openWebAssistant(prompt: String? = null) {
         _uiState.update {
@@ -6426,11 +6465,115 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 webAssistantInitialPrompt = prompt?.trim()?.takeIf { q -> q.isNotBlank() }
             )
         }
+        mintWebAssistantCode()
+    }
+
+    /** One-tap retry after a failed mint (explicit user action, never throttled). */
+    fun retryWebAssistantSignIn() = mintWebAssistantCode()
+
+    /**
+     * The website told us its cookie expired. Mint a brand-new one-time code,
+     * but rate-limit automatic retries: a broken website session must not be
+     * able to spin the app in a mint → POST → expire loop.
+     */
+    fun onWebAssistantSessionExpired() {
+        val now = android.os.SystemClock.elapsedRealtime()
+        if (now - lastAssistantAutoMintMs < 4_000L) return
+        lastAssistantAutoMintMs = now
+        mintWebAssistantCode()
+    }
+
+    private fun mintWebAssistantCode() {
+        assistantAuthJob?.cancel()
+        // Clear the previous attempt immediately: a code is single-use, and no
+        // stale verifier/state pair should survive a retry or account switch.
+        _uiState.update {
+            it.copy(
+                webAssistantAuthPending = true,
+                webAssistantAuthFailed = false,
+                webAssistantAuthCode = null,
+                webAssistantExchangeUrl = null,
+                webAssistantAuthVerifier = null,
+                webAssistantAuthState = null,
+                webAssistantSubject = null
+            )
+        }
+        assistantAuthJob = viewModelScope.launch {
+            val token = preferences.sessionToken
+            if (token.isNullOrBlank()) {
+                _uiState.update {
+                    it.copy(webAssistantAuthPending = false, webAssistantAuthFailed = true)
+                }
+                return@launch
+            }
+            val verifier = AssistantHandshake.newVerifier()
+            val state = AssistantHandshake.newState()
+            val challenge = AssistantHandshake.challengeFor(verifier)
+            val result = assistantSessionClient.mint(
+                serverUrlState.value,
+                token,
+                challenge,
+                state
+            )
+            when (result) {
+                is AssistantSessionClient.MintResult.Success -> {
+                    // Fail closed: never POST a live code to a host other than
+                    // the one we deliberately chose to embed.
+                    val sameHost = WebAssistantConfig.isAllowedExchangeUrl(
+                        result.exchangeUrl,
+                        _uiState.value.webAssistantBaseUrl
+                    )
+                    if (sameHost) {
+                        _uiState.update {
+                            it.copy(
+                                webAssistantAuthPending = false,
+                                webAssistantAuthFailed = false,
+                                webAssistantAuthCode = result.code,
+                                webAssistantExchangeUrl = result.exchangeUrl,
+                                webAssistantAuthVerifier = verifier,
+                                webAssistantAuthState = state,
+                                webAssistantSubject = result.subject
+                            )
+                        }
+                    } else {
+                        Log.w(
+                            "TheStudentViewModel",
+                            "Assistant exchange URL is not on the embedded host; using guest mode."
+                        )
+                        _uiState.update {
+                            it.copy(webAssistantAuthPending = false, webAssistantAuthFailed = true)
+                        }
+                    }
+                }
+                is AssistantSessionClient.MintResult.Failure -> {
+                    Log.w(
+                        "TheStudentViewModel",
+                        "Assistant SSO mint failed (authError=${result.isAuthError}): ${result.message}"
+                    )
+                    _uiState.update {
+                        it.copy(webAssistantAuthPending = false, webAssistantAuthFailed = true)
+                    }
+                }
+            }
+        }
     }
 
     fun closeWebAssistant() {
+        assistantAuthJob?.cancel()
+        assistantAuthJob = null
+        // Wipe the one-time material from memory as soon as the screen closes.
         _uiState.update {
-            it.copy(isWebAssistantOpen = false, webAssistantInitialPrompt = null)
+            it.copy(
+                isWebAssistantOpen = false,
+                webAssistantInitialPrompt = null,
+                webAssistantAuthPending = false,
+                webAssistantAuthFailed = false,
+                webAssistantAuthCode = null,
+                webAssistantExchangeUrl = null,
+                webAssistantAuthVerifier = null,
+                webAssistantAuthState = null,
+                webAssistantSubject = null
+            )
         }
     }
 
@@ -6442,6 +6585,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         val normalised = WebAssistantConfig.normaliseBaseUrl(url)
         preferences.webAssistantBaseUrl = normalised
         _uiState.update { it.copy(webAssistantBaseUrl = normalised) }
+        // A code minted for the old origin must never be POSTed to the new one.
+        if (_uiState.value.isWebAssistantOpen) mintWebAssistantCode()
     }
 
     fun setAiAssistantInput(text: String) {

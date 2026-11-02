@@ -124,10 +124,19 @@ On the site, read the query once and set an `isEmbedded` flag. When true:
   your backend. If you need social login, we would add a Custom Tab auth step
   and sync the cookie back.
 
-### 4.2 Student identity
+### 4.2 Student identity — now real single sign-on
 
-The app injects this after `onPageFinished` and again ~700 ms later (for SPA
-hydration):
+**Signed-in students are no longer identified by an injected JS object.** See
+`docs/ASSISTANT_SSO.md` for the full contract. In short: the app asks our PHP
+backend for a 90-second, single-use code, POSTs it in a request **body** to the
+website's `/api/app-auth` route, and the website's server exchanges it with our
+backend, provisions the account by the opaque `sub` (`users.id`) and sets its own
+`HttpOnly; Secure; SameSite=Lax; Path=/` session cookie. No app token, password
+or reusable credential ever reaches this WebView.
+
+The old `THESTUDENT_USER` injection below is now a **guest-mode fallback only**:
+it runs when no code could be minted (offline / backend not configured). In that
+case `userId` is an opaque numeric id, **not** an email.
 
 ```js
 (function () {
@@ -135,7 +144,7 @@ hydration):
     type: 'THESTUDENT_USER',
     source: 'android',
     name: '...',       // display name
-    userId: '...',     // signed-in email (swap for an opaque id if you prefer)
+    userId: '...',     // opaque users.id, never an email or token
     theme: 'light'     // or 'dark'
   };
   window.__THESTUDENT_USER__ = u;
@@ -143,29 +152,28 @@ hydration):
 })();
 ```
 
-On the site:
+On the site, use `name` for display only. **Never** use `userId` from JavaScript
+to grant access or to key the real account — the cookie is the only authentication
+source. Do not put a secret in the URL. Do not use `addJavascriptInterface`.
+
+### 4.3 Site → app messages (implemented, origin-pinned)
+
+The website may call, from the **main frame on the exact HTTPS production origin**:
 
 ```js
-// Read immediately (covers hydration), and listen for the late delivery.
-const user = window.__THESTUDENT_USER__ ?? null;
-window.addEventListener('message', (event) => {
-  if (event.origin !== window.location.origin) return;
-  if (event.data?.type === 'THESTUDENT_USER') applyUser(event.data);
-});
+if (window.TheStudentBridge) {
+  window.TheStudentBridge.onmessage = e => console.log(e.data); // {"ok":true}
+  window.TheStudentBridge.postMessage(JSON.stringify({ type: 'SESSION_EXPIRED' }));
+}
 ```
 
-Replace the "Guest" label with `name`, and use `userId` to scope chats to the
-app account. **Never put a secret in the URL** — only the display name and a
-non-secret account identifier are passed. If you need real authentication, mint
-a short-lived token on your backend and set it as a `Secure; HttpOnly` cookie
-before the page loads; do not use `addJavascriptInterface` with secrets.
-
-### 4.3 Site → app messages (not implemented yet)
-
-Only **native → web** messaging is wired today. If you later want the site to
-trigger "close" or "new chat" from a button, add a small `@JavascriptInterface`
-bridge with an explicit allowlist of message types. It is deliberately omitted
-now: a JS bridge is the most common WebView security mistake.
+Android uses `WebViewCompat.addWebMessageListener` with an exact origin
+allowlist, a `WEB_MESSAGE_LISTENER` feature gate, a main-frame + scheme + host
+re-check, a 4 KB size cap and an explicit event allowlist (`SESSION_READY`,
+`SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`, `SHARE_TEXT`). Unknown
+types and iframe messages are ignored; unsupported WebViews get **no bridge at
+all** (fail closed). There are no credential read/write events.
+`addJavascriptInterface` is never used.
 
 ### 4.4 Example embed-mode sketch (React / Next.js)
 
@@ -227,8 +235,14 @@ export function useAndroidEmbed() {
 - Delete the now-unreachable native `AiAssistantScreen` and its state/clients
   (kept in this pass on purpose).
 - Add a backend config endpoint so the domain can change remotely.
-- Optional: site → app JS bridge, Custom Tab auth for social login, offline
+- Full OIDC identity provider ("Sign in with TheStudent" for third parties) —
+  deliberately deferred; today's first-party code exchange is enough.
+- Optional: Custom Tab auth for social login on the *browser* site, offline
   caching / native share sheet.
+
+**Already done:** app ↔ web single sign-on and the origin-pinned site → app
+bridge. Setup, secrets, endpoint contract, the copy-paste prompt for the website
+repo and the phone test checklist are in **`docs/ASSISTANT_SSO.md`**.
 
 
 ---

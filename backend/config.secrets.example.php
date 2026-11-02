@@ -69,6 +69,21 @@ define('SMTP_FROM_NAME', 'TheStudent Security');
 // Comma separated allowed browser origins (the Android app needs none).
 define('ALLOWED_ORIGINS', 'https://app.quizontal.site');
 
+// --- Assistant single sign-on ------------------------------------------------
+// Dedicated secret shared ONLY between this PHP API and the AI assistant
+// website's server. Generate with: php -r "echo bin2hex(random_bytes(32));"
+// Do NOT reuse APP_KEY, and do NOT copy this into the app, an .env file, or
+// any client-side bundle - it authenticates server-to-server calls.
+define('ASSISTANT_SSO_SECRET', 'REPLACE_WITH_64_HEX_CHARACTERS_DIFFERENT_FROM_APP_KEY');
+
+// The STABLE production origin of the AI assistant website (no path, no
+// trailing slash). It must be HTTPS and must be the exact origin allow-listed
+// by WebAssistantConfig / addWebMessageListener. Never a preview deployment URL.
+define('ASSISTANT_WEB_ORIGIN', 'https://your-production-domain.example');
+
+// Website route that receives the POSTed one-time code (default is fine).
+define('ASSISTANT_EXCHANGE_PATH', '/api/app-auth');
+
 // --- Diagnostics -------------------------------------------------------------
 // Token for api/health.php?token=... — a read-only self-check that reports PHP
 // version, DB connectivity, missing tables/columns and the tail of the error log.
