@@ -79,6 +79,19 @@ class TheStudentPreferences(context: Context) {
         set(value) = prefs.edit().putString(KEY_SPEECH_TERMS, value.trim()).apply()
 
     /**
+     * Base URL of the website shown inside the app's AI assistant screen.
+     *
+     * Empty means "use WebAssistantConfig.DEFAULT_BASE_URL". Keeping it in
+     * preferences means the address can be changed at runtime from a backend
+     * config response instead of shipping a new APK every time the deployment
+     * domain changes. It is app configuration, not per-student data, so it is
+     * intentionally kept on sign-out.
+     */
+    var webAssistantBaseUrl: String
+        get() = prefs.getString(KEY_WEB_ASSISTANT_URL, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_WEB_ASSISTANT_URL, value.trim()).apply()
+
+    /**
      * The bearer token, decrypted on demand.
      * Reading it never fails hard: unreadable/rotated ciphertext simply means
      * the user has to sign in again.
@@ -250,6 +263,7 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_TUTOR_CONSENT = "tutor_consent_v2"
         private const val KEY_SPEECH_LOCALE = "tutor_speech_locale"
         private const val KEY_SPEECH_TERMS = "tutor_speech_terms"
+        private const val KEY_WEB_ASSISTANT_URL = "web_assistant_base_url"
         private const val LAST_DISMISSALS_KEPT = 40
 
         /** Only locales a phone's English recogniser actually ships with. */

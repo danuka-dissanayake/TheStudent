@@ -23,6 +23,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
@@ -32,6 +33,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.data.model.CallPhase
 import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
@@ -88,7 +90,7 @@ class MainActivity : ComponentActivity() {
             // Same for the account page: back must not drop the session or the tab.
             BackHandler(enabled = uiState.isAccountOpen) { viewModel.closeAccount() }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && !uiState.isAccountOpen && !uiState.isWebAssistantOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -365,6 +367,19 @@ class MainActivity : ComponentActivity() {
                                     onResetQuizAttempts = { viewModel.resetQuizAttempts(it) },
                                     onBack = { viewModel.closeAdminPanel() }
                                 )
+                            } else if (uiState.isWebAssistantOpen) {
+                                // The AI assistant is the student's website,
+                                // framed as a normal app screen. No browser
+                                // intent, no visible URL, native back/header.
+                                WebAssistantScreen(
+                                    baseUrl = uiState.webAssistantBaseUrl,
+                                    studentName = userProfile.name,
+                                    studentId = viewModel.preferences.userEmail,
+                                    isDarkTheme = uiState.isDarkTheme,
+                                    initialPrompt = uiState.webAssistantInitialPrompt,
+                                    onClose = { viewModel.closeWebAssistant() },
+                                    onMessage = { viewModel.showSnackbar(it) }
+                                )
                             } else if (uiState.isAiAssistantOpen) {
                                 AiAssistantScreen(
                                     userProfile = userProfile,
@@ -472,7 +487,7 @@ class MainActivity : ComponentActivity() {
                                                 coroutineScope.launch { drawerState.close() }
                                             },
                                             onOpenAiAssistant = {
-                                                viewModel.openAiAssistant()
+                                                viewModel.openWebAssistant()
                                                 coroutineScope.launch { drawerState.close() }
                                             },
                                             onOpenLanguageLab = {
@@ -562,6 +577,33 @@ class MainActivity : ComponentActivity() {
                                             }
                                         ) { innerPadding ->
                                         val bottomNavTopLinePadding = (innerPadding.calculateBottomPadding() - 18.dp).coerceAtLeast(0.dp)
+                                        // The FAB sits above the bottom nav, not on
+                                        // top of it. The difference between the
+                                        // real nav inset and the content box inset
+                                        // is the 18 dp the content overlaps by.
+                                        val assistantFabBottom =
+                                            (innerPadding.calculateBottomPadding() - bottomNavTopLinePadding) + 12.dp
+                                        // One app-wide assistant button. Chats,
+                                        // full-screen pages, dialogs, a live tutor
+                                        // call and the assistant itself all hide it.
+                                        val showAssistantFab = uiState.screenFlow == AppScreenFlow.MAIN &&
+                                            uiState.currentTab != TheStudentNavTab.CHAT &&
+                                            !uiState.isChatConversationOpen &&
+                                            !uiState.isWebAssistantOpen &&
+                                            !uiState.isAiAssistantOpen &&
+                                            !uiState.isExpOpen &&
+                                            !uiState.isProgressOpen &&
+                                            !uiState.isCourseCollectionOpen &&
+                                            !uiState.isAccountOpen &&
+                                            !uiState.isAcademicSetupOpen &&
+                                            !uiState.isLanguageLabOpen &&
+                                            !uiState.isAdminPanelOpen &&
+                                            !uiState.isSecurityPanelOpen &&
+                                            !uiState.isAuthDialogOpen &&
+                                            uiState.activePaperDetail == null &&
+                                            uiState.activeCourseDetail == null &&
+                                            uiState.callPhase != CallPhase.LIVE &&
+                                            uiState.callPhase != CallPhase.CONNECTING
                                         Box(
                                             modifier = Modifier
                                                 .fillMaxSize()
@@ -587,7 +629,7 @@ class MainActivity : ComponentActivity() {
                                                             isLoading = uiState.isLoadingContent,
                                                             onCourseClick = { viewModel.openCourseDetail(it) },
                                                             onPaperClick = { viewModel.openPaperDetail(it) },
-                                                            onOpenAiAssistant = { viewModel.openAiAssistant() },
+                                                            onOpenAiAssistant = { viewModel.openWebAssistant() },
                                                             onOpenLanguageLab = { viewModel.openLanguageLab(0) },
                                                             onOpenExp = { viewModel.openExp() },
                                                             quizProgress = quizProgress,
@@ -806,8 +848,13 @@ class MainActivity : ComponentActivity() {
                                         onDownloadScheme = { viewModel.downloadSchemeOffline(paper) },
                                         onAskAi = {
                                             viewModel.closePaperDetail()
-                                            viewModel.openAiAssistant()
-                                            viewModel.setAiAssistantInput("Can you guide me through ${paper.title} and explain key questions?")
+                                            // The website reads ?q= on its
+                                            // embedded layout and pre-fills the
+                                            // composer, so this entry point
+                                            // still arrives with its question.
+                                            viewModel.openWebAssistant(
+                                                "Can you guide me through ${paper.title} and explain key questions?"
+                                            )
                                         },
                                         onDismiss = { viewModel.closePaperDetail() }
                                     )
@@ -831,6 +878,14 @@ class MainActivity : ComponentActivity() {
                                     onSuccess = { message ->
                                         viewModel.showSnackbar(message)
                                     }
+                                )
+
+                                AssistantFab(
+                                    visible = showAssistantFab,
+                                    onClick = { viewModel.openWebAssistant() },
+                                    modifier = Modifier
+                                        .align(Alignment.BottomEnd)
+                                        .padding(end = 16.dp, bottom = assistantFabBottom)
                                 )
                             }
                         }

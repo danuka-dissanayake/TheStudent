@@ -429,3 +429,27 @@ The complete auth model, threat list and deployment runbook live in **`docs/AUTH
 Short version: server-issued roles only, hashed session tokens + HMAC OTPs, per-email/-IP throttles,
 enumeration-resistant login & reset, locked-down admin console and paper write APIs, and a Keystore-encrypted
 token on the device.
+
+---
+
+## 12. WebView AI assistant (current)
+
+The AI assistant shown from the app-wide floating button is the student's own
+website, rendered in a native-framed `WebView` — not a browser redirect and not
+the older native `AiAssistantScreen`. Key files:
+
+- `ui/screens/WebAssistantScreen.kt` — native header, loading/error/offline
+  states, back handling, same-host navigation lock, file chooser, lifecycle
+- `ui/components/AssistantFab.kt` — one global floating button, hidden on
+  Chats, full-screen pages, dialogs, a live tutor call and the assistant itself
+- `data/local/WebAssistantConfig.kt` — HTTPS-only base URL, host allowlist,
+  `?app=android&theme=&q=` page URL and the identity `postMessage` script
+- `data/local/WebAssistantSession.kt` — cookie settings; cookies and web storage
+  are cleared on sign-out so a shared phone cannot leak the previous chat
+- `TheStudentViewModel` — `isWebAssistantOpen`, `webAssistantBaseUrl`,
+  `webAssistantInitialPrompt`, `openWebAssistant()`, `setWebAssistantBaseUrl()`
+
+The full setup, the **website contract** for `?app=android`, the warning about
+the immutable Vercel deployment URL, privacy/Play notes and the test checklist
+are in **`docs/WEBVIEW_ASSISTANT.md`**. The old native `AiAssistantScreen`
+remains in the tree but is unreachable, pending a cleanup pass.

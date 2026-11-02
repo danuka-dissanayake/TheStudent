@@ -29,6 +29,8 @@ import com.example.data.local.ChatMessageEntity
 import com.example.data.local.ChatVoiceRecorder
 import com.example.data.local.ChatSummaryRow
 import com.example.data.local.TheStudentPreferences
+import com.example.data.local.WebAssistantConfig
+import com.example.data.local.WebAssistantSession
 import com.example.data.local.LearningActivityEntity
 import com.example.data.local.SavedCourseEntity
 import com.example.data.local.SavedPaperEntity
@@ -206,6 +208,12 @@ data class TheStudentUiState(
 
     // Multimodal AI Study Assistant (ChatGPT / Gemini style)
     val isAiAssistantOpen: Boolean = false,
+    /** The website AI assistant is open as a native-framed WebView screen. */
+    val isWebAssistantOpen: Boolean = false,
+    /** Where that WebView points. Changeable at runtime without an APK update. */
+    val webAssistantBaseUrl: String = WebAssistantConfig.DEFAULT_BASE_URL,
+    /** Optional first question handed to the website via its ?q= parameter. */
+    val webAssistantInitialPrompt: String? = null,
     val aiAssistantMessages: List<AiAssistantMessage> = emptyList(),
     val isAiAssistantGenerating: Boolean = false,
     val isAiReasoningActive: Boolean = false,
@@ -625,7 +633,10 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         _uiState.update {
             it.copy(
                 speechLocale = preferences.speechLocale,
-                speechTerms = preferences.speechTerms
+                speechTerms = preferences.speechTerms,
+                webAssistantBaseUrl = WebAssistantConfig.normaliseBaseUrl(
+                    preferences.webAssistantBaseUrl.takeIf { it.isNotBlank() }
+                )
             )
         }
         viewModelScope.launch(Dispatchers.IO) {
@@ -4007,6 +4018,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 runCatching { TheStudentChatClient.unregisterDevice(serverUrl, token) }
             }
             preferences.logout()
+            // The website keeps its chats in cookies / localStorage. On a shared
+            // phone the next student must not inherit the previous one's chat.
+            WebAssistantSession.clear(getApplication<Application>())
             // The tutor's level, remembered facts, review sentences and spoken
             // minutes are per-student data. They live outside the session store,
             // so a shared phone would otherwise hand the next student the
@@ -6399,6 +6413,35 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     fun closeAiAssistant() {
         _uiState.update { it.copy(isAiAssistantOpen = false) }
+    }
+
+    /**
+     * Open the website assistant inside the app. `prompt` becomes the site's
+     * ?q= parameter, so "Ask AI" on a past paper still arrives with its question.
+     */
+    fun openWebAssistant(prompt: String? = null) {
+        _uiState.update {
+            it.copy(
+                isWebAssistantOpen = true,
+                webAssistantInitialPrompt = prompt?.trim()?.takeIf { q -> q.isNotBlank() }
+            )
+        }
+    }
+
+    fun closeWebAssistant() {
+        _uiState.update {
+            it.copy(isWebAssistantOpen = false, webAssistantInitialPrompt = null)
+        }
+    }
+
+    /**
+     * Point the in-app assistant at a new stable domain without a rebuild.
+     * Only HTTPS is accepted; anything else falls back to the default.
+     */
+    fun setWebAssistantBaseUrl(url: String) {
+        val normalised = WebAssistantConfig.normaliseBaseUrl(url)
+        preferences.webAssistantBaseUrl = normalised
+        _uiState.update { it.copy(webAssistantBaseUrl = normalised) }
     }
 
     fun setAiAssistantInput(text: String) {
