@@ -52,6 +52,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
 import androidx.compose.material3.ModalBottomSheet
+import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -78,6 +79,7 @@ import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -108,6 +110,14 @@ import kotlinx.coroutines.flow.StateFlow
 // ─────────────────────────────────────────────────────────────────────────────
 
 private val Ink = Color(0xFF0F172A)          // TextPrimaryLight
+
+/** Short labels for the English varieties the recogniser can be told to expect. */
+private val SpeechLocaleLabels = mapOf(
+    "en-US" to "US",
+    "en-GB" to "UK",
+    "en-IN" to "India",
+    "en-AU" to "Australia"
+)
 private val Muted = Color(0xFF64748B)        // TextSecondaryLight
 private val Faint = Color(0xFF94A3B8)
 
@@ -183,6 +193,17 @@ fun AiTutorScreen(
     onTutorOpened: () -> Unit = {},
     /** Erase the facts the tutor remembered between calls (⋯ menu). */
     onForgetMemory: () -> Unit = {},
+    /** An uncertain transcript waiting for the student to check before it is sent. */
+    heardToConfirm: String? = null,
+    heardReason: String = "",
+    /** Send the checked words, or throw them away and listen again. */
+    onConfirmHeard: (String) -> Unit = {},
+    onRetryHeard: () -> Unit = {},
+    /** Speech-to-text settings in the ⋯ menu. */
+    speechLocale: String = "en-US",
+    speechTerms: String = "",
+    onSelectSpeechLocale: (String) -> Unit = {},
+    onChangeSpeechTerms: (String) -> Unit = {},
     /** A "say it properly" moment in progress: warm-up review or a drill. */
     review: TutorReviewState? = null,
     /** Sentences from earlier calls waiting to be practised. */
@@ -277,6 +298,10 @@ fun AiTutorScreen(
                 onHearFix = onHearFix,
                 onSayFix = onSayFix,
                 onCancelDrill = onCancelDrill,
+                heardToConfirm = heardToConfirm,
+                heardReason = heardReason,
+                onConfirmHeard = onConfirmHeard,
+                onRetryHeard = onRetryHeard,
                 onMenu = {
                     menuLessons = activeLessonId != null
                     menuOpen = true
@@ -331,6 +356,10 @@ fun AiTutorScreen(
             },
             onEndCall = { menuOpen = false; onEndCall() },
             onForgetMemory = { menuOpen = false; onForgetMemory() },
+            speechLocale = speechLocale,
+            speechTerms = speechTerms,
+            onSelectSpeechLocale = onSelectSpeechLocale,
+            onChangeSpeechTerms = onChangeSpeechTerms,
             onDismiss = { menuOpen = false }
         )
     }
@@ -701,6 +730,10 @@ private fun LiveContent(
     onHearFix: () -> Unit,
     onSayFix: () -> Unit,
     onCancelDrill: () -> Unit,
+    heardToConfirm: String?,
+    heardReason: String,
+    onConfirmHeard: (String) -> Unit,
+    onRetryHeard: () -> Unit,
     onMenu: () -> Unit,
     onBack: () -> Unit
 ) {
@@ -822,15 +855,26 @@ private fun LiveContent(
             Spacer(Modifier.height(4.dp))
         }
 
-        // A drill takes over the floor: it says exactly what to say, so the
-        // student never has to remember a sentence they heard a moment ago.
-        if (review != null) {
+        // A misheard short word belongs to the student to fix, not the tutor
+        // to grade. The check owns the floor until the words are confirmed; a
+        // drill card would otherwise sit on top of it.
+        if (heardToConfirm != null) {
+            HeardConfirmCard(
+                heard = heardToConfirm,
+                reason = heardReason,
+                onSend = onConfirmHeard,
+                onRetry = onRetryHeard
+            )
+        } else if (review != null) {
+            // A drill takes over the floor: it says exactly what to say, so the
+            // student never has to remember a sentence they heard a moment ago.
             DrillCard(review = review, onCancel = onCancelDrill)
         }
 
         // One button, whose meaning depends on whose turn it is. That is the whole
         // interaction: the student never has to find the right control mid-sentence.
         val micAction: () -> Unit = when {
+            heardToConfirm != null -> onRetryHeard
             isMuted -> onMic
             voiceState == AssistantVoiceState.SPEAKING -> onInterrupt
             voiceState == AssistantVoiceState.LISTENING -> onFinishTurn
@@ -842,6 +886,7 @@ private fun LiveContent(
             phase = callPhase,
             isMuted = isMuted,
             caption = when {
+                heardToConfirm != null -> "Check the words above — or tap to say it again"
                 isMuted -> "Microphone off — tap to turn it back on"
                 // In a drill the student has one job, and the caption is where
                 // they look while the mic is open.
@@ -988,6 +1033,78 @@ private fun TutorBubble(text: String) {
                 lineHeight = 21.sp,
                 color = Ink
             )
+        }
+    }
+}
+
+@Composable
+private fun HeardConfirmCard(
+    heard: String,
+    reason: String,
+    onSend: (String) -> Unit,
+    onRetry: () -> Unit
+) {
+    // Re-seeded whenever a new sentence arrives, so the student never edits a
+    // previous turn's words by accident.
+    var draft by remember(heard) { mutableStateOf(heard) }
+    Column(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp, vertical = 8.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(CardCream)
+            .border(1.dp, GlassEdge, RoundedCornerShape(18.dp))
+            .padding(14.dp)
+    ) {
+        Text(
+            text = "Did I hear you right?",
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = Ink
+        )
+        Spacer(Modifier.height(3.dp))
+        Text(
+            text = reason.ifBlank { "Check the little words before I answer." },
+            fontFamily = MaisonNeueFontFamily,
+            fontSize = 12.5.sp,
+            lineHeight = 17.sp,
+            color = Muted
+        )
+        Spacer(Modifier.height(10.dp))
+        OutlinedTextField(
+            value = draft,
+            onValueChange = { draft = it },
+            modifier = Modifier.fillMaxWidth(),
+            textStyle = TextStyle(
+                fontFamily = MaisonNeueFontFamily,
+                fontSize = 14.sp,
+                color = Ink
+            ),
+            maxLines = 3
+        )
+        Spacer(Modifier.height(6.dp))
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            TextButton(onClick = onRetry) {
+                Text(
+                    "Say it again",
+                    color = Muted,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            Spacer(Modifier.weight(1f))
+            TextButton(onClick = { onSend(draft) }) {
+                Text(
+                    "Send these words",
+                    color = BrandDeep,
+                    fontSize = 13.5.sp,
+                    fontWeight = FontWeight.Bold
+                )
+            }
         }
     }
 }
@@ -1882,10 +1999,15 @@ private fun TutorMenuSheet(
     onSelectLesson: (TutorLesson?) -> Unit,
     onEndCall: () -> Unit,
     onForgetMemory: () -> Unit,
+    speechLocale: String,
+    speechTerms: String,
+    onSelectSpeechLocale: (String) -> Unit,
+    onChangeSpeechTerms: (String) -> Unit,
     onDismiss: () -> Unit
 ) {
     val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     var showLessons by remember(startOnLessons) { mutableStateOf(startOnLessons) }
+    var showSpeechSettings by remember { mutableStateOf(false) }
 
     ModalBottomSheet(
         onDismissRequest = onDismiss,
@@ -1958,7 +2080,64 @@ private fun TutorMenuSheet(
                 }
             }
 
-            Spacer(Modifier.height(12.dp))
+            Spacer(Modifier.height(8.dp))
+            TextButton(onClick = { showSpeechSettings = !showSpeechSettings }) {
+                Text(
+                    if (showSpeechSettings) "Hide speech settings" else "Speech settings · accent & my words",
+                    color = BrandDeep,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold
+                )
+            }
+            if (showSpeechSettings) {
+                Text(
+                    "The English she should expect",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.Bold,
+                    color = Ink
+                )
+                Spacer(Modifier.height(4.dp))
+                Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    TheStudentPreferences.SPEECH_LOCALES.forEach { locale ->
+                        TextButton(onClick = { onSelectSpeechLocale(locale) }) {
+                            Text(
+                                SpeechLocaleLabels[locale] ?: locale,
+                                color = if (locale == speechLocale) BrandDeep else Muted,
+                                fontSize = 13.sp,
+                                fontWeight = if (locale == speechLocale) {
+                                    FontWeight.Bold
+                                } else {
+                                    FontWeight.SemiBold
+                                }
+                            )
+                        }
+                    }
+                }
+                Spacer(Modifier.height(6.dp))
+                OutlinedTextField(
+                    value = speechTerms,
+                    onValueChange = onChangeSpeechTerms,
+                    modifier = Modifier.fillMaxWidth(),
+                    label = { Text("Words she should recognise") },
+                    placeholder = { Text("Kandy, CEFR, past participle") },
+                    textStyle = TextStyle(
+                        fontFamily = MaisonNeueFontFamily,
+                        fontSize = 14.sp,
+                        color = Ink
+                    ),
+                    maxLines = 3
+                )
+                Spacer(Modifier.height(4.dp))
+                Text(
+                    "Separate with commas. Lesson words and her last question are added automatically.",
+                    fontFamily = MaisonNeueFontFamily,
+                    fontSize = 12.sp,
+                    lineHeight = 16.sp,
+                    color = Muted
+                )
+            }
+            Spacer(Modifier.height(4.dp))
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,

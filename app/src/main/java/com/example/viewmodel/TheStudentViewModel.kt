@@ -19,6 +19,7 @@ import com.example.data.voice.TutorScenarioRubric
 import com.example.data.voice.TutorCoach
 import com.example.data.voice.TutorCoach.FeedbackMode
 import com.example.data.voice.TutorCoach.SilenceAction
+import com.example.data.voice.TranscriptReview
 import com.example.data.voice.TutorSpeech
 import com.example.data.voice.WordUpgrades
 import com.example.data.local.ChatCrypto
@@ -65,6 +66,7 @@ import com.example.data.remote.QuizzesRepository
 import com.example.data.remote.QuizOutcome
 import com.example.ui.components.AssistantVoiceState
 import android.content.Intent
+import android.os.Build
 import android.os.Bundle
 import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
@@ -173,6 +175,14 @@ data class TheStudentUiState(
     val callTutorLine: String = "",
     /** The student's last sentence, kept on screen while the tutor answers. */
     val callStudentLine: String? = null,
+    /** A sentence the microphone is unsure about, waiting for the student to check. */
+    val heardToConfirm: String? = null,
+    /** One short line explaining why the words are being checked. */
+    val heardReason: String = "",
+    /** The English variety the recogniser should expect. */
+    val speechLocale: String = "en-US",
+    /** The student's own words a general model would not know. */
+    val speechTerms: String = "",
     /** The correction for the current turn, shown as soon as it is known. */
     val callFix: GrammarFix? = null,
     val callFixes: List<GrammarFix> = emptyList(),
@@ -401,6 +411,8 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var dictationFinishing = false
     private var dictationBuffer: String = ""
     private var dictationJob: Job? = null
+    /** The whole turn ends at 30 s even if the engine never returns a segment. */
+    private var turnCeilingJob: Job? = null
     /**
      * A generation number for the recogniser session. Cancelling a session can
      * deliver both a late onError and a late onResults, and a one-shot boolean
@@ -408,6 +420,22 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * callback now checks that it still belongs to the live generation.
      */
     private var recognitionGeneration = 0L
+
+    /**
+     * Android 13+ can keep ONE session open for a long answer and hand back
+     * each finished stretch through onSegmentResults. No restart, no text-only
+     * stitching, and no first syllable lost while the mic re-acquires. Older
+     * phones (and engines that ignore the hint) keep the restart path.
+     */
+    private var segmentedSessionActive = false
+    /** Did any stretch of this turn arrive with an uncertain short word? */
+    private var turnNeedsConfirmation = false
+    private val turnUncertainWords = LinkedHashSet<String>()
+    /** Where a held transcript goes once the student has checked it. */
+    private var pendingHeardRoute = HeardRoute.CALL
+    private var pendingHeardText = ""
+
+    private enum class HeardRoute { CALL, ASSISTANT, DRILL }
 
     // ── what the tutor remembers and practises ───────────────────────────────
     /** Level, due reviews, facts and the last-call line, all off the main state. */
@@ -594,6 +622,12 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
     private var sessionVerificationJob: Job? = null
 
     init {
+        _uiState.update {
+            it.copy(
+                speechLocale = preferences.speechLocale,
+                speechTerms = preferences.speechTerms
+            )
+        }
         viewModelScope.launch(Dispatchers.IO) {
             // A database problem (for example a schema surprise after an update)
             // must never take the whole app down before the first frame.
@@ -805,6 +839,13 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
             override fun onError(error: Int) {
                 if (!isCurrent()) return
+                if (error == SpeechRecognizer.ERROR_LANGUAGE_NOT_SUPPORTED ||
+                    error == SpeechRecognizer.ERROR_LANGUAGE_UNAVAILABLE
+                ) {
+                    // The chosen accent is not installed on this handset. The
+                    // next retry uses the model every English phone has.
+                    setSpeechLocale(TheStudentPreferences.DEFAULT_SPEECH_LOCALE)
+                }
                 if (dictationActive) {
                     handleDictationError()
                     return
@@ -824,19 +865,26 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
             override fun onResults(results: Bundle?) {
                 if (!isCurrent()) return
-                val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
-                val recognizedText = matches?.firstOrNull()
+                val verdict = readVerdict(results)
                 awaitingTranscript = false
                 endOfSpeechWatchdog?.cancel()
                 if (dictationActive) {
-                    handleDictationSegment(recognizedText)
+                    recordHeardEvidence(verdict)
+                    // A segmented session keeps running; only the legacy
+                    // one-shot engine needs the microphone reopened here.
+                    handleDictationSegment(verdict.text, restart = !segmentedSessionActive)
                     return
                 }
-                if (!recognizedText.isNullOrBlank()) {
-                    if (_uiState.value.callPhase == CallPhase.LIVE) {
-                        submitCallTurn(recognizedText)
+                if (verdict.text.isNotBlank()) {
+                    val route = if (_uiState.value.callPhase == CallPhase.LIVE) {
+                        HeardRoute.CALL
                     } else {
-                        processUserVoiceInput(recognizedText)
+                        HeardRoute.ASSISTANT
+                    }
+                    if (verdict.needsConfirmation) {
+                        holdHeard(verdict.text, verdict.reason, route)
+                    } else {
+                        routeHeard(verdict.text, route)
                     }
                 } else if (_uiState.value.callPhase == CallPhase.LIVE) {
                     handleRecognitionMiss()
@@ -856,7 +904,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     // the preview is what has already been heard plus the words
                     // in progress — never just the last two words.
                     val preview = if (dictationActive) {
-                        mergeHeard(dictationBuffer, partial)
+                        TranscriptReview.mergeSegments(dictationBuffer, partial)
                     } else {
                         partial
                     }
@@ -867,6 +915,24 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         )
                     }
                 }
+            }
+
+            /**
+             * One continuous session for a long answer (Android 13+). Each
+             * finished stretch is appended without tearing the session down;
+             * the app's own adaptive pause still decides when the turn is over.
+             */
+            override fun onSegmentResults(segmentResults: Bundle?) {
+                if (!isCurrent() || !dictationActive) return
+                segmentedSessionActive = true
+                val verdict = readVerdict(segmentResults)
+                recordHeardEvidence(verdict)
+                handleDictationSegment(verdict.text, restart = false)
+            }
+
+            override fun onEndOfSegmentedSession() {
+                if (!isCurrent() || !dictationActive || !segmentedSessionActive) return
+                commitDictation()
             }
 
             override fun onEvent(eventType: Int, params: Bundle?) {}
@@ -4364,6 +4430,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationJob?.cancel()
         abandonRecognition()
         tutorSpeechSeq++
+        turnNeedsConfirmation = false
+        turnUncertainWords.clear()
+        _uiState.update { it.copy(heardToConfirm = null, heardReason = "") }
 
         // A new call starts from a clean slate: budget, drills, memory of what
         // was heard, and the barge-in detector (which may have switched itself
@@ -4509,6 +4578,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationJob?.cancel()
         try { tts?.stop() } catch (_: Exception) {}
         abandonRecognition()
+        turnNeedsConfirmation = false
+        turnUncertainWords.clear()
+        _uiState.update { it.copy(heardToConfirm = null, heardReason = "") }
 
         bargeInMonitor.stop()
 
@@ -4775,6 +4847,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
 
     /** Listen again shortly, unless the student muted or hung up in the meantime. */
     private fun scheduleListening(delayMs: Long) {
+        // A transcript waiting for the student owns the floor. Reopening the
+        // microphone here would throw away the words they are checking.
+        if (_uiState.value.heardToConfirm != null) return
         callTurnJob?.cancel()
         callTurnJob = viewModelScope.launch {
             delay(delayMs)
@@ -5130,7 +5205,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * the student sees their own sentence fixed while the tutor is "thinking",
      * and a slow or unreachable server never means a silent call.
      */
-    private fun submitCallTurn(text: String) {
+    private fun submitCallTurn(text: String, heardConfident: Boolean = true) {
         // What the recogniser hands over is an unpunctuated word chain. This is
         // the student's sentence as it will be shown, corrected and remembered:
         // capitalised, paused and ended properly.
@@ -5210,7 +5285,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             stepName = replyStep?.name,
             drillActive = drillActive
         )
-        val localFix = localFixFor(trimmed, turnIndex)
+        // An uncertain transcript is not evidence of a grammar mistake. No
+        // local card, no model FIX and no recast in the model's own reply.
+        val localFix = if (heardConfident) localFixFor(trimmed, turnIndex) else null
         // Everything is recorded; only the first few get a card.
         val displayFix = acceptForDisplay(localFix)
         _uiState.update {
@@ -5275,6 +5352,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                     askedQuestions = askedQuestions.toList(),
                     mode = currentFeedbackMode,
                     wrapUp = wrapUp,
+                    trustTranscript = heardConfident,
                     // The mistake the student has now made twice — the point at
                     // which a real teacher stops letting it pass.
                     focusRule = state.callFixes
@@ -5312,7 +5390,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             when (response) {
                 is HfApiResponse.Success -> {
                     val turn = TutorTurnPrompt.parse(response.text)
-                    modelFix = modelFixFor(
+                    modelFix = if (heardConfident) modelFixFor(
                         say = turn.say,
                         corrected = turn.fixCorrected,
                         rule = turn.rule.orEmpty(),
@@ -5320,7 +5398,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                         turnIndex = turnIndex,
                         upgradeFrom = turn.upgradeFrom,
                         upgradeTo = turn.upgradeTo
-                    )
+                    ) else null
                     word = turn.word
                     note = turn.note
                     rawSay = turn.say
@@ -5494,7 +5572,15 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationBuffer = ""
         dictationActive = true
         dictationFinishing = false
+        turnNeedsConfirmation = false
+        turnUncertainWords.clear()
+        pendingHeardText = ""
         dictationJob?.cancel()
+        turnCeilingJob?.cancel()
+        turnCeilingJob = viewModelScope.launch {
+            delay(TutorCoach.MAX_TURN_MS)
+            if (dictationActive) commitDictation()
+        }
         turnSpeechStartedAt = 0L
         dictationStartedAt = System.currentTimeMillis()
         // If the tutor has just asked the student to produce a particular
@@ -5517,21 +5603,52 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 initSpeechRecognizer()
             }
             try {
+                val hints = speechHints()
                 val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
                     putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, "en-US")
+                    // A Sri Lankan learner should not be forced into a US model.
+                    putExtra(RecognizerIntent.EXTRA_LANGUAGE, preferences.speechLocale)
                     putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
-                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1)
-                    // Hints for engines that honour them: do not call the turn
-                    // over at the first breath. Engines that ignore them are
-                    // covered by the segment/restart loop above.
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
-                    putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 4000L)
+                    // Keep the engine's other guesses: short words are exactly
+                    // where the top guess is wrong, and confidence tells us when
+                    // to ask instead of quietly grading a misheard sentence.
+                    putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 4)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                        if (hints.isNotEmpty()) {
+                            putStringArrayListExtra(
+                                RecognizerIntent.EXTRA_BIASING_STRINGS,
+                                ArrayList(hints)
+                            )
+                        }
+                        // Let the engine punctuate instead of our guessing code.
+                        putExtra(
+                            RecognizerIntent.EXTRA_ENABLE_FORMATTING,
+                            RecognizerIntent.FORMATTING_OPTIMIZE_LATENCY
+                        )
+                        // One continuous session for a long answer. Android
+                        // delivers each finished stretch to onSegmentResults;
+                        // engines that ignore the hint keep the restart loop.
+                        // The short pause only ends a SEGMENT, not the turn:
+                        // TutorCoach.endpointDelayMs still owns endpointing.
+                        putExtra(
+                            RecognizerIntent.EXTRA_SEGMENTED_SESSION,
+                            RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS
+                        )
+                        putExtra(
+                            RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS,
+                            1_500
+                        )
+                    }
+                    // The silence-length hints are deliberately NOT set.
+                    // Android documents them as "extremely rare" outside a
+                    // segmented session, engines may ignore them, and the app
+                    // owns endpointing with TutorCoach.endpointDelayMs.
                 }
                 awaitingTranscript = true
                 // A fresh session owns a fresh generation: any callback still
                 // owed by a cancelled session is now stale by construction.
                 val session = ++recognitionGeneration
+                segmentedSessionActive = false
                 speechRecognizer?.setRecognitionListener(tutorRecognitionListener(session))
                 speechRecognizer?.startListening(intent)
                 _uiState.update {
@@ -5592,7 +5709,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
      * the student can notice the gap. If they have stopped talking, the commit
      * timer sends what was heard.
      */
-    private fun handleDictationSegment(recognizedText: String?) {
+    private fun handleDictationSegment(recognizedText: String?, restart: Boolean = true) {
         // A turn cannot run forever: a shy learner who keeps adding one word
         // must still get an answer. 30 s is the voice-agent ceiling, not a
         // timeout on their speaking.
@@ -5601,14 +5718,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         ) {
             val wordsSoFar = dictationBuffer
             if (wordsSoFar.isNotBlank()) {
-                dictationBuffer = mergeHeard(wordsSoFar, recognizedText.orEmpty())
+                dictationBuffer = TranscriptReview.mergeSegments(wordsSoFar, recognizedText.orEmpty())
             }
             commitDictation()
             return
         }
         val text = recognizedText?.trim().orEmpty()
         if (text.isNotEmpty()) {
-            dictationBuffer = mergeHeard(dictationBuffer, text)
+            dictationBuffer = TranscriptReview.mergeSegments(dictationBuffer, text)
             _uiState.update {
                 it.copy(
                     currentUserTranscript = dictationBuffer,
@@ -5637,7 +5754,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             commitDictation()
             return
         }
-        restartRecognition()
+        if (restart) restartRecognition()
         scheduleDictationCommit()
     }
 
@@ -5703,6 +5820,7 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
         dictationActive = false
         dictationFinishing = false
         dictationJob?.cancel()
+        turnCeilingJob?.cancel()
         abandonRecognition()
         dictationStartedAt = 0L
         val text = dictationBuffer.trim()
@@ -5719,8 +5837,14 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 paceSamples.add(((words * 60.0) / seconds).toInt().coerceIn(40, 260))
             }
         }
+        val needsCheck = turnNeedsConfirmation
+        val uncertain = turnUncertainWords.toList()
         if (drillActive && text.isNotBlank()) {
-            evaluateDrill(text)
+            if (needsCheck) {
+                holdHeard(text, heardReason(uncertain), HeardRoute.DRILL)
+            } else {
+                evaluateDrill(text)
+            }
             return
         }
         drillActive = false
@@ -5732,39 +5856,154 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
             }
             return
         }
-        if (_uiState.value.callPhase == CallPhase.LIVE) {
-            submitCallTurn(text)
+        val route = if (_uiState.value.callPhase == CallPhase.LIVE) {
+            HeardRoute.CALL
         } else {
-            processUserVoiceInput(text)
+            HeardRoute.ASSISTANT
+        }
+        if (needsCheck) {
+            holdHeard(text, heardReason(uncertain), route)
+            return
+        }
+        routeHeard(text, route)
+    }
+
+    // ── speech-to-text decisions ────────────────────────────────────────────
+
+    /**
+     * Read ALL the engine's guesses, not just the first one.
+     *
+     * Confidence is optional and often missing, so the decision layer also
+     * uses disagreement between guesses and the vocabulary the tutor just put
+     * in the student's ear. It never invents a word.
+     */
+    private fun readVerdict(results: Bundle?): TranscriptReview.Verdict {
+        val matches: List<String> = results
+            ?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
+            ?: emptyList()
+        val scores = results?.getFloatArray(SpeechRecognizer.CONFIDENCE_SCORES)
+        val candidates = matches.mapIndexed { index, text ->
+            TranscriptReview.Candidate(text, scores?.getOrNull(index) ?: -1f)
+        }
+        return TranscriptReview.choose(candidates, speechHints())
+    }
+
+    /** One uncertain stretch is enough to check the whole sentence once. */
+    private fun recordHeardEvidence(verdict: TranscriptReview.Verdict) {
+        if (verdict.needsConfirmation) turnNeedsConfirmation = true
+        turnUncertainWords.addAll(verdict.uncertainWords)
+    }
+
+    private fun heardReason(uncertain: List<String>): String =
+        if (uncertain.isEmpty()) {
+            "I wasn't sure I caught every word."
+        } else {
+            "I heard a short word two ways: " + uncertain.take(3).joinToString(", ") + "."
+        }
+
+    /**
+     * Put the heard words in front of the student and stop the call loop.
+     * Nothing is sent, corrected or remembered until they say the words are
+     * right — a tutor that grades a misheard word teaches the wrong thing.
+     */
+    private fun holdHeard(text: String, reason: String, route: HeardRoute) {
+        val phase = _uiState.value.callPhase
+        if (phase != CallPhase.LIVE && phase != CallPhase.CONNECTING) {
+            // The check card lives on the tutor's call screen. With no call on
+            // screen there is nowhere to confirm, so answer the meaning without
+            // grading words the microphone may have invented.
+            routeHeard(text, route, confident = false)
+            return
+        }
+        pendingHeardText = text
+        pendingHeardRoute = route
+        callTurnJob?.cancel()
+        dictationJob?.cancel()
+        _uiState.update {
+            it.copy(
+                heardToConfirm = text,
+                heardReason = reason,
+                voiceAssistantState = AssistantVoiceState.IDLE,
+                micRmsDb = 0f
+            )
+        }
+    }
+
+    private fun clearHeardHold() {
+        pendingHeardText = ""
+        _uiState.update { it.copy(heardToConfirm = null, heardReason = "") }
+    }
+
+    /** The student checked (or edited) the words: grammar feedback is safe. */
+    fun confirmHeardTranscript(text: String) {
+        val held = pendingHeardText
+        if (_uiState.value.heardToConfirm == null || held.isBlank()) return
+        // An emptied field means "use what you heard", not "send nothing".
+        val cleaned = TutorSpeech.polishRecognised(text.ifBlank { held })
+        val route = pendingHeardRoute
+        clearHeardHold()
+        routeHeard(cleaned, route)
+    }
+
+    /** Throw the misheard words away and listen again. */
+    fun retryHeardTranscript() {
+        if (_uiState.value.heardToConfirm == null) return
+        clearHeardHold()
+        startVoiceListening()
+    }
+
+    private fun routeHeard(text: String, route: HeardRoute, confident: Boolean = true) {
+        when (route) {
+            HeardRoute.CALL -> submitCallTurn(text, heardConfident = confident)
+            HeardRoute.ASSISTANT -> processUserVoiceInput(text)
+            HeardRoute.DRILL -> evaluateDrill(text)
         }
     }
 
     /**
-     * Join two pieces of heard speech.
+     * Words the phone's general model has never heard.
      *
-     * A restarted session often re-delivers the tail of the last phrase it heard,
-     * so the words they share are dropped once: "I went to the" + "to the beach"
-     * becomes "I went to the beach", never "I went to the to the beach".
+     * Lesson sentences, the tutor's last question and the scenario's own
+     * vocabulary are added automatically; the student's own terms come first.
+     * On Android 13+ these go to EXTRA_BIASING_STRINGS. On older phones the same
+     * list helps pick between the engine's guesses.
      */
-    private fun mergeHeard(existing: String, incoming: String): String {
-        val a = existing.trim()
-        val b = incoming.trim()
-        if (a.isEmpty()) return b
-        if (b.isEmpty()) return a
-        val left = a.split(Regex("\\s+"))
-        val right = b.split(Regex("\\s+"))
-        var overlap = 0
-        val max = minOf(left.size, right.size, 8)
-        for (n in max downTo 1) {
-            val tail = left.takeLast(n).joinToString(" ")
-            val head = right.take(n).joinToString(" ")
-            if (tail.equals(head, ignoreCase = true)) {
-                overlap = n
-                break
-            }
+    private fun speechHints(): List<String> {
+        val state = _uiState.value
+        val sources = mutableListOf<String>()
+        val step = TutorLessonCatalog.find(state.activeLessonId)?.step(state.lessonStepIndex)
+        if (step != null) {
+            sources.add(step.modelLine)
+            sources.addAll(step.starters)
+            sources.add(step.instruction)
         }
-        if (overlap >= right.size) return a
-        return (left + right.drop(overlap)).joinToString(" ")
+        if (state.callTutorLine.isNotBlank()) sources.add(state.callTutorLine)
+        drillTarget?.takeIf { it.isNotBlank() }?.let { sources.add(it) }
+        EnglishVoiceTutorEngine.getStarterGreeting(state.currentScenario)
+            .vocabularyHighlight
+            ?.let { sources.add(it.replace('/', ' ')) }
+        val ownTerms = preferences.speechTerms
+            .split(Regex("[,;\n]"))
+            .map { it.trim() }
+            .filter { it.isNotBlank() }
+            .take(20)
+        return TranscriptReview.hintWords(sources, ownTerms)
+    }
+
+    /** The student's English variety applies from the next listening session. */
+    fun setSpeechLocale(locale: String) {
+        val chosen = if (locale in TheStudentPreferences.SPEECH_LOCALES) {
+            locale
+        } else {
+            TheStudentPreferences.DEFAULT_SPEECH_LOCALE
+        }
+        preferences.speechLocale = chosen
+        _uiState.update { it.copy(speechLocale = chosen) }
+    }
+
+    fun setSpeechTerms(terms: String) {
+        preferences.speechTerms = terms
+        _uiState.update { it.copy(speechTerms = terms) }
     }
 
     // ── drills: saying it properly, not just hearing it ──────────────────

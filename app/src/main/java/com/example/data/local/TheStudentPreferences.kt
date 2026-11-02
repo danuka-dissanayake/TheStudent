@@ -53,6 +53,30 @@ class TheStudentPreferences(context: Context) {
         get() = prefs.getBoolean(KEY_TUTOR_CONSENT, false)
         set(value) = prefs.edit().putBoolean(KEY_TUTOR_CONSENT, value).apply()
 
+    /**
+     * Which English the microphone should expect.
+     *
+     * A recognition engine trained for US English is measurably worse on a
+     * Sri Lankan learner even when the student speaks clearly. `en-IN` and
+     * `en-GB` are offered because they are the closest installed models to
+     * Sri Lankan English; nothing is guessed from the account profile.
+     */
+    var speechLocale: String
+        get() = prefs.getString(KEY_SPEECH_LOCALE, DEFAULT_SPEECH_LOCALE)
+            ?.takeIf { it.isNotBlank() } ?: DEFAULT_SPEECH_LOCALE
+        set(value) = prefs.edit()
+            .putString(KEY_SPEECH_LOCALE, value.trim().ifBlank { DEFAULT_SPEECH_LOCALE })
+            .apply()
+
+    /**
+     * Words the phone's general model has never heard: a home town, a subject
+     * term, a name. Passed to the recogniser as vocabulary hints on Android 13+,
+     * and used to choose between its guesses on older phones. Cleared on sign-out
+     * because these can be personal.
+     */
+    var speechTerms: String
+        get() = prefs.getString(KEY_SPEECH_TERMS, "").orEmpty()
+        set(value) = prefs.edit().putString(KEY_SPEECH_TERMS, value.trim()).apply()
 
     /**
      * The bearer token, decrypted on demand.
@@ -201,6 +225,8 @@ class TheStudentPreferences(context: Context) {
             .remove(KEY_SESSION_TOKEN)
             .remove(KEY_SESSION_EXPIRES_AT)
             .remove(KEY_USER_ROLE)
+            // The student's own words can contain names or a home town.
+            .remove(KEY_SPEECH_TERMS)
             .apply()
     }
 
@@ -222,7 +248,13 @@ class TheStudentPreferences(context: Context) {
         private const val KEY_SPEAKING_CALLS = "tutor_speaking_calls"
         // v2: the disclosure now explains remembered facts and ASR limits.
         private const val KEY_TUTOR_CONSENT = "tutor_consent_v2"
+        private const val KEY_SPEECH_LOCALE = "tutor_speech_locale"
+        private const val KEY_SPEECH_TERMS = "tutor_speech_terms"
         private const val LAST_DISMISSALS_KEPT = 40
+
+        /** Only locales a phone's English recogniser actually ships with. */
+        val SPEECH_LOCALES = listOf("en-US", "en-GB", "en-IN", "en-AU")
+        const val DEFAULT_SPEECH_LOCALE = "en-US"
 
         const val ROLE_STUDENT = "student"
         const val ROLE_ADMIN = "admin"

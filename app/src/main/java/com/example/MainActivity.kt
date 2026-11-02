@@ -694,7 +694,15 @@ class MainActivity : ComponentActivity() {
                                                             onDismissSummary = { viewModel.dismissCallSummary() },
                                                             onShowSnackbar = { viewModel.showSnackbar(it) },
                                                             onTutorOpened = { viewModel.refreshTutorProgress() },
-                                                            onForgetMemory = { viewModel.forgetTutorMemory() }
+                                                            onForgetMemory = { viewModel.forgetTutorMemory() },
+                                                            heardToConfirm = uiState.heardToConfirm,
+                                                            heardReason = uiState.heardReason,
+                                                            onConfirmHeard = { viewModel.confirmHeardTranscript(it) },
+                                                            onRetryHeard = { viewModel.retryHeardTranscript() },
+                                                            speechLocale = uiState.speechLocale,
+                                                            speechTerms = uiState.speechTerms,
+                                                            onSelectSpeechLocale = { viewModel.setSpeechLocale(it) },
+                                                            onChangeSpeechTerms = { viewModel.setSpeechTerms(it) }
                                                         )
                                                     }
                                                     TheStudentNavTab.PROFILE -> {

@@ -6,10 +6,12 @@
 `data/model/TutorCallModels.kt` (shape) ·
 `data/voice/TutorCoach.kt` (research-backed decision layer)
 
-> **Read §12 last, not first.** Sections 1–11 are the design history, including
-> superseded rounds (Piper, tap-only barge-in, count-based silence ladder).
-> §12 is the behaviour the code implements today, and
-> `docs/AI_TUTOR_RESEARCH.md` is the research and rationale behind it.
+> **Read §12–13 last, not first.** Sections 1–11 are the design history,
+> including superseded rounds (Piper, tap-only barge-in, count-based silence
+> ladder). §12 is the tutor behaviour the code implements today, §13 is how the
+> microphone itself was fixed. `docs/AI_TUTOR_RESEARCH.md` holds the research
+> behind §12 and `docs/STT_IMPROVEMENTS.md` holds the plain-English rationale
+> behind §13.
 
 ---
 
@@ -862,3 +864,58 @@ The ViewModel owns only the Android lifecycle; it asks the Coach what to do.
 
 Unit tests (run in Android Studio / `./gradlew :app:testDebugUnitTest`):
 `TutorCoachTest`, `TutorTurnPromptTest`, `EnglishGrammarRulesTest`.
+
+---
+
+## 13. Round 22 — hearing the student properly (current STT behaviour)
+
+The tutor can only teach the words it actually heard. Until this round the app
+restarted Android's one-shot `SpeechRecognizer` after every pause and glued the
+text together by matching repeated words. Long answers therefore arrived with
+dropped, doubled or substituted words, and short grammar words were graded as
+if the microphone were a reliable witness. The full diagnosis, the trade-offs
+and the sources are in `docs/STT_IMPROVEMENTS.md`.
+
+**No library, model or API key was added.** Voice still never leaves the phone
+for transcription. What changed:
+
+1. **One continuous session on Android 13+.** `EXTRA_SEGMENTED_SESSION` makes
+   the engine deliver finished stretches to `onSegmentResults`; the restart
+   loop is kept only as a fallback for older phones and engines that ignore the
+   hint. `EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS` is set *only* for
+   that segmented session, as Android's docs require.
+2. **`TranscriptReview`** (`data/voice`) is the pure, unit-tested decision
+   layer: it chooses between the engine's real guesses (boosted by lesson
+   vocabulary), detects disagreement on short words, and joins segments
+   without deleting deliberate repetitions or duplicating cumulative finals.
+   It never invents a word.
+3. **Every guess is read.** `EXTRA_MAX_RESULTS = 4` plus
+   `CONFIDENCE_SCORES`; `EXTRA_BIASING_STRINGS` carries lesson words, the
+   tutor's last question, scenario vocabulary and the student's own terms;
+   `EXTRA_ENABLE_FORMATTING` lets the engine punctuate.
+4. **Accent is a setting**, not a hard-coded `en-US`: `en-US / en-GB / en-IN /
+   en-AU` in ⋯ → Speech settings, with an automatic fallback to `en-US` when
+   a locale is not installed. Custom words are cleared on sign-out.
+5. **"Did I hear you right?"** When confidence is low or two guesses disagree
+   on a meaning-changing short word, the sentence is held in an editable card
+   instead of being sent. Nothing is corrected, answered or remembered until
+   the student confirms it. If an untrusted transcript ever reaches the tutor,
+   `TutorTurnPrompt.system(trustTranscript = false)` forbids corrections and
+   recasts, and local/model fixes are suppressed.
+6. **A 30 s ceiling** applies even when an engine never delivers a segment.
+
+Checking a change (on a real phone — this sandbox has no JDK/Android SDK):
+
+1. Talk for 20–30 s with two pauses → the whole answer appears, no lost first
+   word after a restart and no repeated tail.
+2. Say a sentence full of little words → the live preview and the final bubble
+   agree.
+3. Add `Kandy` in ⋯ → Speech settings → "Words she should recognise", then say
+   it again → it survives.
+4. Force doubtful speech → the check card appears; edit a word, tap **Send
+   these words**, and no grammar card is shown for the word you fixed.
+5. Repeat on an Android 12 or older handset → the restart fallback still
+   assembles a long answer.
+
+Unit tests: `TranscriptReviewTest` plus the "untrusted transcript" case in
+`TutorTurnPromptTest`.

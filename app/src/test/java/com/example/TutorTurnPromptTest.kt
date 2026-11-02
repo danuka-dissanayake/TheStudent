@@ -75,4 +75,23 @@ class TutorTurnPromptTest {
         assertTrue(prompt.contains("minimal edit"))
         assertTrue(prompt.contains("CORRECTION MODE: focused form practice"))
     }
+
+    @Test
+    fun `an untrusted transcript switches correction off`() {
+        val prompt = TutorTurnPrompt.system(
+            scenario = "Free Conversation",
+            lesson = null,
+            stepIndex = 0,
+            trustTranscript = false
+        )
+        assertTrue(prompt.contains("MICROPHONE MAY HAVE MISHEARD"))
+        assertTrue(prompt.contains("Do not recast"))
+        assertFalse(
+            TutorTurnPrompt.system(
+                scenario = "Free Conversation",
+                lesson = null,
+                stepIndex = 0
+            ).contains("MICROPHONE MAY HAVE MISHEARD")
+        )
+    }
 }

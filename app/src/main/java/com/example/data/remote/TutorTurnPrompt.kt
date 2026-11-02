@@ -59,7 +59,13 @@ object TutorTurnPrompt {
         askedQuestions: List<String> = emptyList(),
         mode: TutorCoach.FeedbackMode = TutorCoach.FeedbackMode.FLUENCY,
         /** The lesson's last step was earned: wrap up and move to free talk. */
-        wrapUp: Boolean = false
+        wrapUp: Boolean = false,
+        /**
+         * False when the recogniser was unsure about a short word. A tutor must
+         * not grade a word the microphone may have invented, and a recast in
+         * SAY would correct it just as surely as a card.
+         */
+        trustTranscript: Boolean = true
     ): String {
         val step: LessonStep? = lesson?.step(stepIndex)
         val lessonBlock = when {
@@ -118,6 +124,18 @@ object TutorTurnPrompt {
             """.trimIndent()
         }
 
+        // Speech recognition is least reliable on short grammar words. Correcting
+        // an uncertain transcript teaches the student that their own correct
+        // English was wrong, so the tutor replies to the meaning only.
+        val trustBlock = if (trustTranscript) {
+            ""
+        } else {
+            """
+            THE MICROPHONE MAY HAVE MISHEARD A SHORT WORD. Do not correct grammar, spelling or word choice this turn.
+            Do not recast the student's sentence in SAY. Write NONE on FIX, RULE and WORD.
+            """.trimIndent()
+        }
+
         return """
             You are Miss Emma, a warm, patient English speaking tutor on a phone call with a Sri Lankan student (CEFR $level). Your job is to make the STUDENT speak.
 
@@ -126,6 +144,7 @@ object TutorTurnPrompt {
             $askedBlock
             $focusBlock
             $correctionBlock
+            $trustBlock
 
             SAY: one or two short sentences (max 30 words) ending in exactly ONE question. Never answer your own question. Use one detail from what the student said; never open with praise such as "Great job". Use everyday $level words: no idioms, lists, markdown, brackets, stage directions or "as an AI". Never repeat a question from the asked list. For a one-word answer, ask an easy either/or question.
             FIX: a minimal edit of the student's OWN sentence — keep their words and meaning — or NONE when it is correct, when only punctuation differs, or when you would have to rewrite it. RULE: the point in three words, or NONE when FIX is NONE.
