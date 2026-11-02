@@ -38,6 +38,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
 import androidx.compose.material3.Icon
@@ -159,7 +160,7 @@ fun WebAssistantScreen(
                 // Same host and HTTPS stay here. Anything else is consumed, so
                 // the student never lands in a browser with a visible URL.
                 if (WebAssistantConfig.isAllowedUrl(target, baseUrl)) return false
-                onMessage("That link stays inside TheStudent AI.")
+                onMessage("That link can't be opened here.")
                 return true
             }
 
@@ -172,10 +173,24 @@ fun WebAssistantScreen(
                 isLoading = false
                 pushIdentity(view)
                 // A hydrated SPA may register its message listener a beat after
-                // onPageFinished. Push once more, guarded against a destroyed view.
+                // onPageFinished. Retry only if the page no longer holds the
+                // value (for example after a guest-sign-in reload). Sending an
+                // identical identity twice is NOT harmless: the website signs
+                // its session out when userId changes, so a duplicate post could
+                // start a second session or interrupt the redirect.
                 scope.launch {
                     delay(700)
-                    if (webViewRef.value === view) pushIdentity(view)
+                    if (webViewRef.value !== view) return@launch
+                    runCatching {
+                        view?.evaluateJavascript(
+                            "(function(){try{" +
+                                "return !!(window.__THESTUDENT_USER__ && " +
+                                "window.__THESTUDENT_USER__.type==='THESTUDENT_USER')" +
+                                "}catch(e){return false}})()"
+                        ) { present ->
+                            if (present != "true") pushIdentity(view)
+                        }
+                    }
                 }
             }
 
@@ -296,6 +311,20 @@ fun WebAssistantScreen(
                         fontFamily = MaisonNeueFontFamily,
                         fontSize = 11.5.sp,
                         color = Color(0xFF64748B)
+                    )
+                }
+                IconButton(onClick = {
+                    // Reload the plain embed URL: no ?q=, no stale chat.
+                    isLoading = true
+                    loadError = null
+                    webViewRef.value?.loadUrl(
+                        WebAssistantConfig.pageUrl(baseUrl, isDarkTheme, null)
+                    )
+                }) {
+                    Icon(
+                        Icons.Filled.Add,
+                        contentDescription = "New chat",
+                        tint = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                     )
                 }
                 Text(
