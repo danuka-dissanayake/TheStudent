@@ -840,6 +840,15 @@ class MainActivity : ComponentActivity() {
                                                     }
                                                 }
                                             }
+                                            // App-wide AI button. Keep it inside this Box: the BoxScope gives
+                                            // .align(), and the two values below are scoped to the Scaffold content.
+                                            AssistantFab(
+                                                visible = showAssistantFab,
+                                                onClick = { viewModel.openWebAssistant() },
+                                                modifier = Modifier
+                                                    .align(Alignment.BottomEnd)
+                                                    .padding(end = 16.dp, bottom = assistantFabBottom)
+                                            )
                                         }
                                     }
                                 }
@@ -889,14 +898,6 @@ class MainActivity : ComponentActivity() {
                                     onSuccess = { message ->
                                         viewModel.showSnackbar(message)
                                     }
-                                )
-
-                                AssistantFab(
-                                    visible = showAssistantFab,
-                                    onClick = { viewModel.openWebAssistant() },
-                                    modifier = Modifier
-                                        .align(Alignment.BottomEnd)
-                                        .padding(end = 16.dp, bottom = assistantFabBottom)
                                 )
                             }
                         }
