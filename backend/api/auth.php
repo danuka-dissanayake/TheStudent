@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.7';
+const TS_API_VERSION = '3.6.8';
 
 /**
  * Deterministic Ed25519 keypair derived from APP_KEY for signing short-lived
@@ -1733,7 +1733,8 @@ if ($action === 'update_profile') {
         $params['full_name'] = $newName;
     }
 
-    if (array_key_exists('phone', $body)) {
+    if (array_key_exists('phone', $body) && trim((string) ($body['phone'] ?? '')) !== '') {
+        $newPhone = validatePhoneNumber($body['phone']);
         $sets[] = 'phone = :phone';
         $params['phone'] = $newPhone;
     }
@@ -2607,19 +2608,33 @@ if ($action === 'google_login') {
             sendJsonResponse('error', 'Google account does not match this TheStudent account.', [], 409);
         }
 
+        // Preserve the user's custom name and uploaded profile picture if they
+        // already have one in the database. Only fall back to the Google token's
+        // name/picture when the database column is still empty.
+        $existingName = trim((string) ($user['full_name'] ?? ''));
+        $keepName = ($existingName !== '' && strcasecmp($existingName, 'Student') !== 0)
+            ? $existingName
+            : substr($fullName !== '' ? $fullName : 'Student', 0, 150);
+
+        $existingPicture = trim((string) ($user['profile_picture'] ?? ''));
+        $keepPicture = $existingPicture !== '' ? $existingPicture : $profilePicture;
+
         $pdo->prepare(
             'UPDATE users
              SET google_id = COALESCE(google_id, :gid),
                  full_name = :name,
-                 profile_picture = COALESCE(:picture, profile_picture),
+                 profile_picture = :picture,
                  updated_at = NOW()
              WHERE id = :id'
         )->execute([
             'gid'     => $googleId,
-            'name'    => substr($fullName, 0, 150),
-            'picture' => $profilePicture,
+            'name'    => $keepName,
+            'picture' => $keepPicture,
             'id'      => $userId,
         ]);
+
+        $user['full_name'] = $keepName;
+        $user['profile_picture'] = $keepPicture;
 
         if ((int) $user['is_email_verified'] === 0) {
             enforceOtpSendThrottle($pdo, $clientIp, $email);
@@ -2665,10 +2680,11 @@ if ($action === 'google_login') {
         sendJsonResponse('success', 'Google sign-in successful', [
             'token'      => $session['token'],
             'expires_at' => $session['expires_at'],
-            'user'       => publicUser(array_merge($user, [
-                'full_name'       => $fullName !== '' ? $fullName : ($user['full_name'] ?? 'Student'),
-                'profile_picture' => $profilePicture ?? ($user['profile_picture'] ?? null),
-            ]), ts_user_subjects($pdo, $userId)),
+            'user'       => withExp(
+                $pdo,
+                publicUser($user, ts_user_subjects($pdo, $userId)),
+                $userId
+            ),
         ]);
     }
 

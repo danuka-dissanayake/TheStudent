@@ -282,6 +282,7 @@ object TheStudentAuthClient {
             .url(endpoint(backendBaseUrl, "me"))
             .get()
             .header("Authorization", "Bearer $token")
+            .header("X-TheStudent-Token", token)
             .header("Accept", "application/json")
             .build()
 
@@ -330,6 +331,7 @@ object TheStudentAuthClient {
             .url(endpoint(backendBaseUrl, "logout"))
             .post("{}".toRequestBody(JSON_MEDIA_TYPE))
             .header("Authorization", "Bearer $token")
+            .header("X-TheStudent-Token", token)
             .build()
         try {
             httpClient.newCall(request).execute().use { it.isSuccessful }
@@ -346,6 +348,7 @@ object TheStudentAuthClient {
             .url(endpoint(backendBaseUrl, "logout_all"))
             .post("{}".toRequestBody(JSON_MEDIA_TYPE))
             .header("Authorization", "Bearer $token")
+            .header("X-TheStudent-Token", token)
             .build()
         try {
             httpClient.newCall(request).execute().use { it.isSuccessful }
@@ -403,6 +406,7 @@ object TheStudentAuthClient {
                 .post(bodyBuilder.build())
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer $token")
+                .header("X-TheStudent-Token", token)
         )
     }
 
@@ -439,6 +443,7 @@ object TheStudentAuthClient {
                 .post(bodyBuilder.build())
                 .header("Accept", "application/json")
                 .header("Authorization", "Bearer $token")
+                .header("X-TheStudent-Token", token)
         )
     }
 
@@ -497,7 +502,12 @@ object TheStudentAuthClient {
             .url(endpointUrl)
             .post(payload.toString().toRequestBody(JSON_MEDIA_TYPE))
             .header("Accept", "application/json")
-            .apply { if (!bearerToken.isNullOrBlank()) header("Authorization", "Bearer $bearerToken") }
+            .apply {
+                if (!bearerToken.isNullOrBlank()) {
+                    header("Authorization", "Bearer $bearerToken")
+                    header("X-TheStudent-Token", bearerToken)
+                }
+            }
     )
 
     /**
@@ -606,6 +616,7 @@ object TheStudentAuthClient {
             .header("Accept", "application/json")
         if (!bearerToken.isNullOrBlank()) {
             builder.header("Authorization", "Bearer $bearerToken")
+            builder.header("X-TheStudent-Token", bearerToken)
         }
 
         return try {
