@@ -252,6 +252,7 @@ fun AiAssistantScreen(
             controller?.isAppearanceLightNavigationBars = false
 
             onDispose {
+                CookieManager.getInstance().flush()
                 if (window != null) {
                     window.statusBarColor = AndroidColor.TRANSPARENT
                     window.navigationBarColor = AndroidColor.TRANSPARENT
@@ -386,7 +387,7 @@ fun AiAssistantScreen(
 
                         val cookieManager = CookieManager.getInstance()
                         cookieManager.setAcceptCookie(true)
-                        cookieManager.setAcceptThirdPartyCookies(this, true)
+                        cookieManager.setAcceptThirdPartyCookies(this, false)
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -436,6 +437,14 @@ fun AiAssistantScreen(
 
                             override fun onPermissionRequest(request: PermissionRequest?) {
                                 if (request == null) return
+                                val originUri = request.origin
+                                val isTrustedOrigin = originUri != null &&
+                                    originUri.scheme.equals("https", ignoreCase = true) &&
+                                    originUri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
+                                if (!isTrustedOrigin) {
+                                    request.deny()
+                                    return
+                                }
                                 val needsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
                                 if (needsAudio) {
                                     val hasAudioPerm = ContextCompat.checkSelfPermission(
@@ -450,7 +459,7 @@ fun AiAssistantScreen(
                                         audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
                                     }
                                 } else {
-                                    request.grant(request.resources)
+                                    request.deny()
                                 }
                             }
 
@@ -567,7 +576,18 @@ fun AiAssistantScreen(
                             }
                         }
 
-                        loadUrl(AI_ASSISTANT_WEB_URL)
+                        val initialUrl = if (inputText.isNotBlank()) {
+                            val built = Uri.parse(AI_ASSISTANT_WEB_URL)
+                                .buildUpon()
+                                .appendQueryParameter("q", inputText.take(2000))
+                                .build()
+                                .toString()
+                            onInputChange("")
+                            built
+                        } else {
+                            AI_ASSISTANT_WEB_URL
+                        }
+                        loadUrl(initialUrl)
                     }
 
                     webViewRef = webView
