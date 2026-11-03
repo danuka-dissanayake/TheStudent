@@ -301,34 +301,16 @@ function ts_enforce_auth_client_gate(): void
         }
     }
 
-    // Collect headers across Apache, LiteSpeed, FastCGI, and FPM
-    $reqHeaders = [];
-    if (function_exists('apache_request_headers')) {
-        foreach ((array) apache_request_headers() as $k => $v) {
-            $reqHeaders[strtolower((string) $k)] = (string) $v;
-        }
-    } elseif (function_exists('getallheaders')) {
-        foreach ((array) getallheaders() as $k => $v) {
-            $reqHeaders[strtolower((string) $k)] = (string) $v;
-        }
+    $action = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
+    if ($action === 'version') {
+        return;
     }
 
-    // 1. Block direct browser address-bar navigation to the PHP script
-    $secFetchMode = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? $reqHeaders['sec-fetch-mode'] ?? ''));
-    $secFetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? $reqHeaders['sec-fetch-dest'] ?? ''));
-    $accept       = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? $reqHeaders['accept'] ?? ''));
-    $clientHeader = strtolower(trim((string) ($_SERVER['HTTP_X_THESTUDENT_CLIENT'] ?? $reqHeaders['x-thestudent-client'] ?? '')));
-    $authHeader   = trim((string) (
-        $_SERVER['HTTP_AUTHORIZATION']
-        ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION']
-        ?? $_SERVER['HTTP_X_AUTHORIZATION']
-        ?? $reqHeaders['authorization']
-        ?? $reqHeaders['x-authorization']
-        ?? ''
-    ));
+    $secFetchMode = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
+    $secFetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
 
-    if ($secFetchMode === 'navigate' || $secFetchDest === 'document' ||
-        (strpos($accept, 'text/html') !== false && $clientHeader === '' && $authHeader === '')) {
+    // 1. Block opening /api/auth.php directly in a browser tab or without an action
+    if ($action === '' || $secFetchMode === 'navigate' || $secFetchDest === 'document') {
         http_response_code(403);
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode([
@@ -339,7 +321,7 @@ function ts_enforce_auth_client_gate(): void
     }
 
     // 2. If Origin or Referer is present, it MUST belong to an allowed origin
-    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? $reqHeaders['origin'] ?? '')), '/');
+    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
     if ($origin !== '' && $origin !== 'null' && !in_array($origin, $allowedOrigins, true)) {
         http_response_code(403);
         header('Content-Type: application/json; charset=utf-8');
@@ -350,7 +332,7 @@ function ts_enforce_auth_client_gate(): void
         exit();
     }
 
-    $referer = trim((string) ($_SERVER['HTTP_REFERER'] ?? $reqHeaders['referer'] ?? ''));
+    $referer = trim((string) ($_SERVER['HTTP_REFERER'] ?? ''));
     if ($referer !== '') {
         $refParts = parse_url($referer);
         $refOrigin = (isset($refParts['scheme'], $refParts['host']))
@@ -365,43 +347,6 @@ function ts_enforce_auth_client_gate(): void
             ]);
             exit();
         }
-    }
-
-    // 3. Require either:
-    //    - X-TheStudent-Client: web-assistant | android-app
-    //    - Trusted Origin (https://chatbot-liart-rho-81.vercel.app or https://app.quizontal.site)
-    //    - Official Android OkHttp client / Vercel Node.js server-to-server fetch / Bearer token
-    $userAgent = strtolower((string) ($_SERVER['HTTP_USER_AGENT'] ?? $reqHeaders['user-agent'] ?? ''));
-    $contentType = strtolower((string) ($_SERVER['CONTENT_TYPE'] ?? $_SERVER['HTTP_CONTENT_TYPE'] ?? $reqHeaders['content-type'] ?? ''));
-    $isTrustedClientHeader = in_array($clientHeader, ['web-assistant', 'android-app', 'thestudent-web', 'thestudent-android'], true);
-    $isTrustedOrigin = ($origin !== '' && in_array($origin, $allowedOrigins, true));
-    $isAndroidAppUa = (strpos($userAgent, 'okhttp/') !== false || strpos($userAgent, 'thestudent') !== false);
-    $isVercelServerFetch = (strpos($userAgent, 'node') !== false || strpos($userAgent, 'undici') !== false || strpos($userAgent, 'vercel') !== false || strpos($contentType, 'application/json') !== false);
-    $hasBearer = (stripos($authHeader, 'Bearer ') === 0);
-
-    // Optional shared key check if THESTUDENT_WEB_CLIENT_KEY is configured in config.secrets.php
-    $configuredWebKey = (string) ts_env('WEB_CLIENT_KEY', '');
-    if ($configuredWebKey !== '' && $clientHeader === 'web-assistant') {
-        $providedKey = trim((string) ($_SERVER['HTTP_X_THESTUDENT_KEY'] ?? $reqHeaders['x-thestudent-key'] ?? ''));
-        if (!hash_equals($configuredWebKey, $providedKey)) {
-            http_response_code(403);
-            header('Content-Type: application/json; charset=utf-8');
-            echo json_encode([
-                'status'  => 'error',
-                'message' => 'Invalid client security key.',
-            ]);
-            exit();
-        }
-    }
-
-    if (!$isTrustedClientHeader && !$isTrustedOrigin && !$isAndroidAppUa && !$isVercelServerFetch && !$hasBearer) {
-        http_response_code(403);
-        header('Content-Type: application/json; charset=utf-8');
-        echo json_encode([
-            'status'  => 'error',
-            'message' => 'Access restricted to TheStudent official apps.',
-        ]);
-        exit();
     }
 }
 

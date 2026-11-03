@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.0';
+const TS_API_VERSION                = '3.6.1';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -115,14 +115,7 @@ if (ts_requires_https() && !ts_is_https()) {
     exit();
 }
 
-// Block direct browser navigation and unauthorized third-party origins/clients
-if (function_exists('ts_enforce_auth_client_gate')) {
-    ts_enforce_auth_client_gate();
-}
-
-$pdo      = getDbConnection();
-$clientIp = ts_client_ip();
-$action   = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
+$action = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
 
 /**
  * Deploy fingerprint — lets you confirm from a browser that the files you
@@ -148,6 +141,70 @@ if ($action === 'version') {
     ], JSON_PRETTY_PRINT);
     exit();
 }
+
+// Self-contained security gate inside auth.php:
+// 1. Blocks direct browser address-bar navigation (Sec-Fetch-Mode: navigate / document)
+//    or requests with no ?action= parameter.
+// 2. Blocks any third-party browser Origin or Referer outside TheStudent's official origins.
+// 3. Allows all server-to-server calls from Vercel (chatbot-liart-rho-81.vercel.app) and Android OkHttp.
+(static function () use ($action): void {
+    $allowedOrigins = [
+        'https://app.quizontal.site',
+        'https://chatbot-liart-rho-81.vercel.app',
+    ];
+    if (defined('ALLOWED_ORIGINS')) {
+        foreach (explode(',', (string) ALLOWED_ORIGINS) as $item) {
+            $trimmed = rtrim(trim($item), '/');
+            if ($trimmed !== '' && !in_array($trimmed, $allowedOrigins, true)) {
+                $allowedOrigins[] = $trimmed;
+            }
+        }
+    }
+
+    $secFetchMode = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
+    $secFetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
+
+    // Block opening /api/auth.php directly in a browser tab
+    if ($action === '' || $secFetchMode === 'navigate' || $secFetchDest === 'document') {
+        http_response_code(403);
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Direct access to this endpoint is forbidden.',
+        ]);
+        exit();
+    }
+
+    // Block any third-party browser Origin
+    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
+    if ($origin !== '' && $origin !== 'null' && !in_array($origin, $allowedOrigins, true)) {
+        http_response_code(403);
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Unauthorized origin.',
+        ]);
+        exit();
+    }
+
+    // Block any third-party Referer
+    $referer = trim((string) ($_SERVER['HTTP_REFERER'] ?? ''));
+    if ($referer !== '') {
+        $refParts = parse_url($referer);
+        $refOrigin = (isset($refParts['scheme'], $refParts['host']))
+            ? strtolower($refParts['scheme']) . '://' . strtolower($refParts['host']) . (isset($refParts['port']) ? ':' . $refParts['port'] : '')
+            : '';
+        if ($refOrigin !== '' && !in_array($refOrigin, $allowedOrigins, true)) {
+            http_response_code(403);
+            echo json_encode([
+                'status'  => 'error',
+                'message' => 'Unauthorized referer.',
+            ]);
+            exit();
+        }
+    }
+})();
+
+$pdo      = getDbConnection();
+$clientIp = ts_client_ip();
 
 /**
  * Standard JSON envelope.
@@ -811,34 +868,36 @@ function createSession(PDO $pdo, int $userId, string $ip, string $deviceInfo = '
  */
 function extractBearerToken(): ?string
 {
-    $header = '';
-    if (!empty($_SERVER['HTTP_AUTHORIZATION'])) {
-        $header = trim((string) $_SERVER['HTTP_AUTHORIZATION']);
-    } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
-        $header = trim((string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
-    } elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
-        $header = trim((string) $_SERVER['HTTP_X_AUTHORIZATION']);
-    } elseif (function_exists('apache_request_headers')) {
-        $req = apache_request_headers();
-        foreach ((array) $req as $k => $v) {
-            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
-                $header = trim((string) $v);
-                break;
-            }
+    $candidates = [];
+
+    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_AUTHORIZATION'] as $serverKey) {
+        if (!empty($_SERVER[$serverKey])) {
+            $candidates[] = trim((string) $_SERVER[$serverKey]);
         }
-    } elseif (function_exists('getallheaders')) {
-        $req = getallheaders();
-        foreach ((array) $req as $k => $v) {
+    }
+
+    if (function_exists('apache_request_headers')) {
+        foreach ((array) apache_request_headers() as $k => $v) {
             if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
-                $header = trim((string) $v);
-                break;
+                $candidates[] = trim((string) $v);
             }
         }
     }
 
-    if ($header !== '' && preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/i', $header, $m)) {
-        return $m[1];
+    if (function_exists('getallheaders')) {
+        foreach ((array) getallheaders() as $k => $v) {
+            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
+                $candidates[] = trim((string) $v);
+            }
+        }
     }
+
+    foreach ($candidates as $header) {
+        if ($header !== '' && preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/i', $header, $m)) {
+            return $m[1];
+        }
+    }
+
     return null;
 }
 
