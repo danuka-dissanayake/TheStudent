@@ -816,12 +816,27 @@ function extractBearerToken(): ?string
         $header = trim((string) $_SERVER['HTTP_AUTHORIZATION']);
     } elseif (!empty($_SERVER['REDIRECT_HTTP_AUTHORIZATION'])) {
         $header = trim((string) $_SERVER['REDIRECT_HTTP_AUTHORIZATION']);
+    } elseif (!empty($_SERVER['HTTP_X_AUTHORIZATION'])) {
+        $header = trim((string) $_SERVER['HTTP_X_AUTHORIZATION']);
     } elseif (function_exists('apache_request_headers')) {
         $req = apache_request_headers();
-        $header = (string) ($req['Authorization'] ?? $req['authorization'] ?? '');
+        foreach ((array) $req as $k => $v) {
+            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
+                $header = trim((string) $v);
+                break;
+            }
+        }
+    } elseif (function_exists('getallheaders')) {
+        $req = getallheaders();
+        foreach ((array) $req as $k => $v) {
+            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
+                $header = trim((string) $v);
+                break;
+            }
+        }
     }
 
-    if ($header !== '' && preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/', $header, $m)) {
+    if ($header !== '' && preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/i', $header, $m)) {
         return $m[1];
     }
     return null;
