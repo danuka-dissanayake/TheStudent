@@ -833,7 +833,11 @@ class MainActivity : ComponentActivity() {
                                 (uiState.isAuthenticated || viewModel.preferences.isLoggedIn)
                             ) {
                                 FloatingAiAssistantButton(
-                                    onClick = { viewModel.openAiAssistant() }
+                                    onClick = { viewModel.openAiAssistant() },
+                                    onSelectPrompt = { prompt ->
+                                        viewModel.setAiAssistantInput(prompt)
+                                        viewModel.openAiAssistant()
+                                    }
                                 )
                             }
                             }
