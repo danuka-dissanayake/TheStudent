@@ -88,7 +88,7 @@ class MainActivity : ComponentActivity() {
             // Same for the account page: back must not drop the session or the tab.
             BackHandler(enabled = uiState.isAccountOpen) { viewModel.closeAccount() }
 
-            BackHandler(enabled = !drawerState.isOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
+            BackHandler(enabled = !drawerState.isOpen && !uiState.isAiAssistantOpen && !uiState.isLanguageLabOpen && !uiState.isExpOpen && !uiState.isProgressOpen && !uiState.isCourseCollectionOpen && !uiState.isAccountOpen && uiState.screenFlow == AppScreenFlow.MAIN && (uiState.currentTab != TheStudentNavTab.HOME || uiState.isChatConversationOpen)) {
                 if (uiState.isChatConversationOpen) {
                     viewModel.closeChat()
                 } else {
@@ -111,7 +111,9 @@ class MainActivity : ComponentActivity() {
                 }
             }
 
-            MyApplicationTheme(darkTheme = uiState.isDarkTheme) {
+            MyApplicationTheme(
+                darkTheme = uiState.isDarkTheme || (uiState.screenFlow == AppScreenFlow.MAIN && uiState.isAiAssistantOpen)
+            ) {
                 // ── Cross-flow navigation shimmer ───────────────────────────────────────
                 // Shows NavigationTransitionShimmer for ~1050ms when navigating from any
                 // auth/onboarding flow into the main dashboard.

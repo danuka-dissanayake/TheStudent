@@ -80,9 +80,9 @@ fun MyApplicationTheme(
                 window.navigationBarColor = android.graphics.Color.TRANSPARENT
 
                 val windowInsetsController = WindowCompat.getInsetsController(window, view)
-                // Always use dark status bar icons for clean light theme canvas
-                windowInsetsController.isAppearanceLightStatusBars = true
-                windowInsetsController.isAppearanceLightNavigationBars = true
+                // Use light (white) status bar texts/icons on dark screens, dark icons on light screens
+                windowInsetsController.isAppearanceLightStatusBars = !darkTheme
+                windowInsetsController.isAppearanceLightNavigationBars = !darkTheme
             }
         }
     }
