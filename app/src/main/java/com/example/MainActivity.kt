@@ -231,6 +231,7 @@ class MainActivity : ComponentActivity() {
                             )
                         }
                         AppScreenFlow.MAIN -> {
+                            Box(modifier = Modifier.fillMaxSize()) {
                             // Quiz state read once per composition: the runner and the
                             // builder are full-screen routes, not tabs.
                             val editingQuizId by viewModel.editingQuizId.collectAsStateWithLifecycle()
@@ -824,6 +825,17 @@ class MainActivity : ComponentActivity() {
                                         viewModel.showSnackbar(message)
                                     }
                                 )
+                            }
+
+                            // Draggable floating AI Assistant button visible across screens
+                            if (!uiState.isAiAssistantOpen &&
+                                !drawerState.isOpen &&
+                                (uiState.isAuthenticated || viewModel.preferences.isLoggedIn)
+                            ) {
+                                FloatingAiAssistantButton(
+                                    onClick = { viewModel.openAiAssistant() }
+                                )
+                            }
                             }
                         }
                     }
