@@ -83,10 +83,6 @@ foreach ($__tsSecretsCandidates as $__tsCandidate) {
 }
 if ($__tsSecretsFile !== null) {
     require_once $__tsSecretsFile;
-    // Warn (server log only) when the secrets sit inside the web root.
-    if (strpos((string) realpath($__tsSecretsFile), (string) realpath(__DIR__)) === 0) {
-        error_log('[TheStudent] config.secrets.php is inside the web root - move it one level above public_html.');
-    }
 }
 
 // Legacy constant names (kept so older deploy scripts keep working).

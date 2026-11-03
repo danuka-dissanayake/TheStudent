@@ -55,28 +55,33 @@ class TheStudentPreferences(context: Context) {
 
 
     /**
-     * The bearer token, decrypted on demand.
-     * Reading it never fails hard: unreadable/rotated ciphertext simply means
-     * the user has to sign in again.
+     * The bearer token, decrypted on demand and cached in memory across threads.
+     * Reading it is thread-safe (safe to call from WebView's JavaBridge thread
+     * and the main/IO threads simultaneously) and never deletes the stored
+     * ciphertext on a transient read error.
      */
     var sessionToken: String?
         get() {
+            cachedPlainToken?.takeIf { it.isNotBlank() }?.let { return it }
             val encrypted = prefs.getString(KEY_SESSION_TOKEN, null)
             if (encrypted.isNullOrBlank()) {
                 return null
             }
-            return tokenVault.decrypt(encrypted) ?: run {
-                // Ciphertext cannot be read (key invalidated / restored backup).
-                prefs.edit().remove(KEY_SESSION_TOKEN).apply()
-                null
+            val decrypted = tokenVault.decrypt(encrypted)?.trim()
+            if (!decrypted.isNullOrBlank()) {
+                cachedPlainToken = decrypted
             }
+            return decrypted
         }
         set(value) {
             val editor = prefs.edit()
             if (value.isNullOrBlank()) {
+                cachedPlainToken = null
                 editor.remove(KEY_SESSION_TOKEN)
             } else {
-                val encrypted = tokenVault.encrypt(value)
+                val trimmed = value.trim()
+                cachedPlainToken = trimmed
+                val encrypted = tokenVault.encrypt(trimmed)
                 if (encrypted != null) {
                     editor.putString(KEY_SESSION_TOKEN, encrypted)
                 } else {
@@ -187,6 +192,7 @@ class TheStudentPreferences(context: Context) {
      * Keeps the onboarding flag so the user lands on sign-in, not the intro.
      */
     fun logout() {
+        cachedPlainToken = null
         prefs.edit()
             .putBoolean(KEY_IS_LOGGED_IN, false)
             .putBoolean(KEY_IS_GUEST, false)
@@ -203,6 +209,9 @@ class TheStudentPreferences(context: Context) {
 
     companion object {
         private const val TAG = "TheStudentPreferences"
+
+        @Volatile
+        private var cachedPlainToken: String? = null
         private const val PREFS_NAME = "thestudent_user_session"
         private const val KEY_IS_ONBOARDED = "is_onboarded"
         private const val KEY_IS_LOGGED_IN = "is_logged_in"
@@ -276,34 +285,38 @@ class TheStudentPreferences(context: Context) {
  */
 private class SessionTokenVault {
 
-    fun encrypt(plainText: String): String? = try {
-        val cipher = Cipher.getInstance(TRANSFORMATION)
-        cipher.init(Cipher.ENCRYPT_MODE, obtainKey())
-        val iv = cipher.iv
-        val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
-        val packed = ByteArray(iv.size + cipherText.size)
-        System.arraycopy(iv, 0, packed, 0, iv.size)
-        System.arraycopy(cipherText, 0, packed, iv.size, cipherText.size)
-        Base64.encodeToString(packed, Base64.NO_WRAP)
-    } catch (e: Exception) {
-        Log.e(TAG, "Token encryption failed: ${e.message}", e)
-        null
+    fun encrypt(plainText: String): String? = synchronized(VAULT_LOCK) {
+        try {
+            val cipher = Cipher.getInstance(TRANSFORMATION)
+            cipher.init(Cipher.ENCRYPT_MODE, obtainKey())
+            val iv = cipher.iv
+            val cipherText = cipher.doFinal(plainText.toByteArray(Charsets.UTF_8))
+            val packed = ByteArray(iv.size + cipherText.size)
+            System.arraycopy(iv, 0, packed, 0, iv.size)
+            System.arraycopy(cipherText, 0, packed, iv.size, cipherText.size)
+            Base64.encodeToString(packed, Base64.NO_WRAP)
+        } catch (e: Exception) {
+            Log.e(TAG, "Token encryption failed: ${e.message}", e)
+            null
+        }
     }
 
-    fun decrypt(payload: String): String? = try {
-        val packed = Base64.decode(payload, Base64.NO_WRAP)
-        if (packed.size <= IV_LENGTH) {
+    fun decrypt(payload: String): String? = synchronized(VAULT_LOCK) {
+        try {
+            val packed = Base64.decode(payload, Base64.NO_WRAP)
+            if (packed.size <= IV_LENGTH) {
+                null
+            } else {
+                val iv = packed.copyOfRange(0, IV_LENGTH)
+                val cipherText = packed.copyOfRange(IV_LENGTH, packed.size)
+                val cipher = Cipher.getInstance(TRANSFORMATION)
+                cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(TAG_BITS, iv))
+                String(cipher.doFinal(cipherText), Charsets.UTF_8)
+            }
+        } catch (e: Exception) {
+            Log.w(TAG, "Token decryption failed: ${e.message}")
             null
-        } else {
-            val iv = packed.copyOfRange(0, IV_LENGTH)
-            val cipherText = packed.copyOfRange(IV_LENGTH, packed.size)
-            val cipher = Cipher.getInstance(TRANSFORMATION)
-            cipher.init(Cipher.DECRYPT_MODE, obtainKey(), GCMParameterSpec(TAG_BITS, iv))
-            String(cipher.doFinal(cipherText), Charsets.UTF_8)
         }
-    } catch (e: Exception) {
-        Log.w(TAG, "Token decryption failed: ${e.message}")
-        null
     }
 
     private fun obtainKey(): SecretKey {
@@ -326,6 +339,7 @@ private class SessionTokenVault {
     }
 
     companion object {
+        private val VAULT_LOCK = Any()
         private const val TAG = "SessionTokenVault"
         private const val ANDROID_KEYSTORE = "AndroidKeyStore"
         private const val KEY_ALIAS = "thestudent_session_vault_v1"

@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.3';
+const TS_API_VERSION                = '3.6.4';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -103,6 +103,23 @@ const TS_DUMMY_BCRYPT = '$2b$12$GzWllz3yIrCQigBsL2LStuX.RarOSsiry9XR6/pv9sd0lbIi
 // ---------------------------------------------------------------------------
 // Bootstrap
 // ---------------------------------------------------------------------------
+(static function (): void {
+    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
+    $host = (string) (parse_url($origin, PHP_URL_HOST) ?? '');
+    if ($origin === 'https://app.quizontal.site' ||
+        $origin === 'https://chatbot-liart-rho-81.vercel.app' ||
+        ($host !== '' && str_ends_with(strtolower($host), '.vercel.app'))) {
+        header('Access-Control-Allow-Origin: ' . $origin);
+        header('Vary: Origin');
+    }
+    header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Authorization, X-TheStudent-Token, X-Requested-With, X-TheStudent-Client, X-TheStudent-Key');
+    header('Access-Control-Max-Age: 600');
+    if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
+        http_response_code(204);
+        exit();
+    }
+})();
 ts_apply_security_headers();
 header('Content-Type: application/json; charset=utf-8');
 
@@ -128,12 +145,86 @@ if ($action === 'version') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
     $activeTokens = -1;
+    $selfTest = null;
     try {
         $pdoDiag = getDbConnection();
         $stmtDiag = $pdoDiag->query('SELECT COUNT(*) AS c FROM user_tokens WHERE expires_at > NOW()');
         $activeTokens = $stmtDiag ? (int) ($stmtDiag->fetch()['c'] ?? 0) : -1;
+
+        if (!empty($_GET['self_test'])) {
+            $rowUser = $pdoDiag->query('SELECT user_id FROM user_tokens WHERE expires_at > NOW() ORDER BY id DESC LIMIT 1')->fetch();
+            if ($rowUser && !empty($rowUser['user_id'])) {
+                $testUserId = (int) $rowUser['user_id'];
+                $tempToken = bin2hex(random_bytes(32));
+                $tempHash = hash('sha256', $tempToken);
+                $tempExp = gmdate('Y-m-d H:i:s', time() + 60);
+                $ins = $pdoDiag->prepare('INSERT INTO user_tokens (user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)');
+                $ins->execute([$testUserId, $tempHash, 'self-test', '127.0.0.1', $tempExp]);
+
+                try {
+                    // 1. Test local action=me via curl
+                    $meUrl = 'https://app.quizontal.site/api/auth.php?action=me&token=' . $tempToken;
+                    $chMe = curl_init($meUrl);
+                    curl_setopt_array($chMe, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT        => 10,
+                        CURLOPT_HTTPHEADER     => [
+                            'Authorization: Bearer ' . $tempToken,
+                            'X-TheStudent-Token: ' . $tempToken,
+                            'X-TheStudent-Client: web-assistant',
+                            'Accept: application/json',
+                        ],
+                    ]);
+                    $meBody = (string) curl_exec($chMe);
+                    $meCode = (int) curl_getinfo($chMe, CURLINFO_HTTP_CODE);
+                    curl_close($chMe);
+
+                    // 2. Test Vercel /api/auth/login-token via curl
+                    $vercelUrl = 'https://chatbot-liart-rho-81.vercel.app/api/auth/login-token';
+                    $chV = curl_init($vercelUrl);
+                    $vercelRespHeaders = [];
+                    curl_setopt_array($chV, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_POST           => true,
+                        CURLOPT_TIMEOUT        => 12,
+                        CURLOPT_POSTFIELDS     => json_encode(['token' => $tempToken]),
+                        CURLOPT_HTTPHEADER     => [
+                            'Content-Type: application/json',
+                            'Accept: application/json',
+                            'Origin: https://chatbot-liart-rho-81.vercel.app',
+                        ],
+                        CURLOPT_HEADERFUNCTION => static function ($ch, string $hdr) use (&$vercelRespHeaders): int {
+                            if (stripos($hdr, 'set-cookie:') === 0) {
+                                $vercelRespHeaders[] = 'set-cookie present';
+                            }
+                            return strlen($hdr);
+                        },
+                    ]);
+                    $vercelBody = (string) curl_exec($chV);
+                    $vercelCode = (int) curl_getinfo($chV, CURLINFO_HTTP_CODE);
+                    $vercelErr  = curl_error($chV);
+                    curl_close($chV);
+
+                    $selfTest = [
+                        'test_user_id'   => $testUserId,
+                        'local_me_code'  => $meCode,
+                        'local_me_ok'    => $meCode === 200,
+                        'vercel_code'    => $vercelCode,
+                        'vercel_cookies' => count($vercelRespHeaders),
+                        'vercel_body'    => substr($vercelBody, 0, 500),
+                        'vercel_err'     => $vercelErr,
+                    ];
+                } finally {
+                    $del = $pdoDiag->prepare('DELETE FROM user_tokens WHERE token_hash = ?');
+                    $del->execute([$tempHash]);
+                }
+            } else {
+                $selfTest = ['error' => 'No active user_tokens row found in DB'];
+            }
+        }
     } catch (Throwable $e) {
         $activeTokens = -2;
+        $selfTest = ['exception' => $e->getMessage()];
     }
     $recentFile = rtrim(sys_get_temp_dir(), '/\\') . '/ts_auth_recent.json';
     $recentCalls = [];
@@ -154,67 +245,12 @@ if ($action === 'version') {
             'diag_token_length' => defined('DIAG_TOKEN') ? strlen(trim((string) DIAG_TOKEN)) : 0,
             'active_tokens_in_db' => $activeTokens,
         ],
+        'self_test'         => $selfTest,
         'recent_auth_calls' => $recentCalls,
         'auth_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ], JSON_PRETTY_PRINT);
     exit();
 }
-
-// Self-contained security gate inside auth.php:
-// 1. Blocks opening /api/auth.php with no ?action= parameter.
-// 2. Blocks any third-party browser Origin or Referer outside TheStudent's official origins.
-// 3. Allows all server-to-server calls from Vercel (chatbot-liart-rho-81.vercel.app) and Android OkHttp.
-(static function () use ($action): void {
-    $allowedOrigins = [
-        'https://app.quizontal.site',
-        'https://chatbot-liart-rho-81.vercel.app',
-    ];
-    if (defined('ALLOWED_ORIGINS')) {
-        foreach (explode(',', (string) ALLOWED_ORIGINS) as $item) {
-            $trimmed = rtrim(trim($item), '/');
-            if ($trimmed !== '' && !in_array($trimmed, $allowedOrigins, true)) {
-                $allowedOrigins[] = $trimmed;
-            }
-        }
-    }
-
-    if ($action === '') {
-        http_response_code(403);
-        echo json_encode([
-            'status'  => 'error',
-            'message' => 'Direct access to this endpoint is forbidden.',
-        ]);
-        exit();
-    }
-
-    // Block any third-party browser Origin
-    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
-    if ($origin !== '' && $origin !== 'null' && !in_array($origin, $allowedOrigins, true)) {
-        http_response_code(403);
-        echo json_encode([
-            'status'  => 'error',
-            'message' => 'Unauthorized origin.',
-        ]);
-        exit();
-    }
-
-    // Block any third-party Referer
-    $referer = trim((string) ($_SERVER['HTTP_REFERER'] ?? ''));
-    if ($referer !== '') {
-        $refParts = parse_url($referer);
-        $refOrigin = (isset($refParts['scheme'], $refParts['host']))
-            ? strtolower($refParts['scheme']) . '://' . strtolower($refParts['host']) . (isset($refParts['port']) ? ':' . $refParts['port'] : '')
-            : '';
-        if ($refOrigin !== '' && !in_array($refOrigin, $allowedOrigins, true)) {
-            http_response_code(403);
-            echo json_encode([
-                'status'  => 'error',
-                'message' => 'Unauthorized referer.',
-            ]);
-            exit();
-        }
-    }
-})();
 
 $pdo      = getDbConnection();
 $clientIp = ts_client_ip();
@@ -241,9 +277,10 @@ function sendJsonResponse(string $status, string $message, array $data = [], int
             'has_tok'   => $tok !== null,
             'tok_len'   => $tok !== null ? strlen($tok) : 0,
             'tok_pre'   => $tok !== null ? substr($tok, 0, 6) : '',
+            'origin'    => substr((string) ($_SERVER['HTTP_ORIGIN'] ?? ''), 0, 50),
             'ua'        => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 40),
         ]);
-        @file_put_contents($recentFile, json_encode(array_slice($existing, 0, 12)));
+        @file_put_contents($recentFile, json_encode(array_slice($existing, 0, 15)));
     } catch (Throwable $e) {
     }
 
@@ -257,6 +294,39 @@ function sendJsonResponse(string $status, string $message, array $data = [], int
     ], $data), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     exit();
 }
+
+// Self-contained security gate inside auth.php:
+// 1. Blocks opening /api/auth.php with no ?action= parameter.
+// 2. Blocks any third-party browser Origin outside TheStudent's official origins.
+// 3. Allows all server-to-server calls from Vercel (chatbot-liart-rho-81.vercel.app) and Android OkHttp.
+(static function () use ($action): void {
+    $allowedOrigins = [
+        'https://app.quizontal.site',
+        'https://chatbot-liart-rho-81.vercel.app',
+    ];
+    if (defined('ALLOWED_ORIGINS')) {
+        foreach (explode(',', (string) ALLOWED_ORIGINS) as $item) {
+            $trimmed = rtrim(trim($item), '/');
+            if ($trimmed !== '' && !in_array($trimmed, $allowedOrigins, true)) {
+                $allowedOrigins[] = $trimmed;
+            }
+        }
+    }
+
+    if ($action === '') {
+        sendJsonResponse('error', 'Direct access to this endpoint is forbidden.', [], 403);
+    }
+
+    // Block any third-party browser Origin (allow official origins and *.vercel.app)
+    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
+    if ($origin !== '' && $origin !== 'null') {
+        $originHost = strtolower((string) (parse_url($origin, PHP_URL_HOST) ?? ''));
+        $isVercelOrigin = ($originHost !== '' && str_ends_with($originHost, '.vercel.app'));
+        if (!in_array($origin, $allowedOrigins, true) && !$isVercelOrigin) {
+            sendJsonResponse('error', 'Unauthorized origin.', [], 403);
+        }
+    }
+})();
 
 function requirePost(string $action): void
 {

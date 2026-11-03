@@ -161,18 +161,28 @@ private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
  *   instance directly and returns the 64-hex session token synchronously and immediately.
  */
 private class TheStudentBridge(
+    initialToken: String,
     private val tokenProvider: () -> String?
 ) {
     @Volatile
-    var pageHost: String? = AI_ASSISTANT_TRUSTED_HOST
+    var pageHost: String = AI_ASSISTANT_TRUSTED_HOST
+
+    @Volatile
+    var cachedToken: String = initialToken.trim()
 
     @JavascriptInterface
     fun isAndroidApp(): Boolean = true
 
     @JavascriptInterface
     fun getSessionToken(): String {
-        if (pageHost != AI_ASSISTANT_TRUSTED_HOST) return ""
-        val token = tokenProvider().orEmpty().trim()
+        if (pageHost.isNotEmpty() && pageHost != AI_ASSISTANT_TRUSTED_HOST && !pageHost.endsWith(".vercel.app")) {
+            return ""
+        }
+        val fastToken = cachedToken.trim()
+        val token = if (fastToken.isNotEmpty()) fastToken else tokenProvider().orEmpty().trim()
+        if (token.isNotEmpty()) {
+            cachedToken = token
+        }
         return if (token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) token else ""
     }
 }
@@ -297,7 +307,10 @@ fun AiAssistantScreen(
 
     val preferences = remember(context) { TheStudentPreferences(context) }
     val bridge = remember(preferences) {
-        TheStudentBridge(tokenProvider = { preferences.sessionToken })
+        TheStudentBridge(
+            initialToken = preferences.sessionToken.orEmpty(),
+            tokenProvider = { preferences.sessionToken }
+        )
     }
     var lastSyncedToken by remember { mutableStateOf(preferences.sessionToken.orEmpty().trim()) }
 
@@ -305,6 +318,7 @@ fun AiAssistantScreen(
     LaunchedEffect(userProfile.isLoggedIn, userProfile.email, isPageLoading) {
         val wv = webViewRef ?: return@LaunchedEffect
         val currentToken = preferences.sessionToken.orEmpty().trim()
+        bridge.cachedToken = currentToken
         if (currentToken != lastSyncedToken) {
             lastSyncedToken = currentToken
             if (currentToken.isEmpty()) {
@@ -560,14 +574,21 @@ fun AiAssistantScreen(
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 hasLoadError = false
-                                bridge.pageHost = url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                                url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?.let { bridge.pageHost = it }
+                                bridge.cachedToken = preferences.sessionToken.orEmpty().trim()
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isPageLoading = false
-                                bridge.pageHost = url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
-                                postOriginLockedAuthHandshake(view, url, preferences.sessionToken)
+                                url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                                    ?.takeIf { it.isNotBlank() }
+                                    ?.let { bridge.pageHost = it }
+                                val tok = preferences.sessionToken.orEmpty().trim()
+                                bridge.cachedToken = tok
+                                postOriginLockedAuthHandshake(view, url, tok)
                                 CookieManager.getInstance().flush()
                             }
 
