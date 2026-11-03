@@ -457,6 +457,15 @@ the older native `AiAssistantScreen`. Key files:
   `webAssistantInitialPrompt`, `openWebAssistant()`, SSO mint/re-mint/revoke,
   `setWebAssistantBaseUrl()`
 
+Assistant UI: `ui/components/AssistantTopBar.kt` is the modern app-style header
+(back, title, AI badge, New chat, and a right-corner hamburger that opens the
+native chat-history drawer `AssistantHistoryDrawer.kt`). Loading uses the exact
+Uiverse dual-orbit ring animation from `UiverseLoaderVisualizer.kt`. **Dark is
+the default** (`TheStudentUiState.isDarkTheme = true`), so the native frame and
+the website's `theme=dark` both start dark. The history drawer is populated by
+the origin-pinned `CHAT_HISTORY` bridge event (website contract in
+`docs/WEBVIEW_ASSISTANT.md` §4.3.1 / §9).
+
 Signed-in students are **silently logged into the website**: the app mints a
 90-second single-use code with our PHP backend, POSTs it in a request body via
 `WebView.postUrl`, and the website's server exchanges it server-to-server and

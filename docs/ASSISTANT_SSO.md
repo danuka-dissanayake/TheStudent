@@ -220,7 +220,14 @@ Android installs the object with
 only when `WebViewFeature.WEB_MESSAGE_LISTENER` is supported, then re-checks
 `isMainFrame`, scheme, host, a 4 KB size cap, and this event allowlist:
 
-`SESSION_READY`, `SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`, `SHARE_TEXT`.
+`SESSION_READY`, `SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`,
+`SHARE_TEXT`, `CHAT_HISTORY`.
+
+App → website uses `WebViewCompat.postWebMessage` (feature `POST_WEB_MESSAGE`)
+with a `thestudent:bridge` DOM CustomEvent fallback. Only two outbound types
+exist: `REQUEST_HISTORY` and `OPEN_CHAT` (`chatId`). Neither carries a
+credential. The chat-history contract is documented in
+`docs/WEBVIEW_ASSISTANT.md` §4.3.1 and §9.
 
 Unknown types and iframe messages are ignored. `addJavascriptInterface` is never
 used. If the feature is unsupported the bridge simply does not exist (fail closed);
@@ -262,9 +269,12 @@ one-way `window.postMessage` for the guest identity hint still works.
 > 7. When the website session expires, if `window.TheStudentBridge` exists, call
 >    `window.TheStudentBridge.postMessage(JSON.stringify({type:"SESSION_EXPIRED"}))`
 >    from the main frame on the production HTTPS origin; the app will mint a fresh
->    one-time code and re-POST. Allowed event types are only `SESSION_READY`,
->    `SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`, `SHARE_TEXT`. Add an
->    `onmessage` handler that accepts `{"ok":true}`.
+>    one-time code and re-POST. Incoming (web → app) event types are only
+>    `SESSION_READY`, `SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`,
+>    `SHARE_TEXT`, `CHAT_HISTORY`. Add an `onmessage` handler that accepts
+>    `{"ok":true}`. Outgoing (app → web) types are `REQUEST_HISTORY` and
+>    `OPEN_CHAT`; see `docs/WEBVIEW_ASSISTANT.md` §4.3.1 for the chat-history
+>    contract (native drawer in the app).
 > 8. Optionally call `?action=validate` (same HMAC scheme, body `{sub}`) to
 >    confirm the student has not signed out of the app since this session was
 >    created; sign the website session out if `active === false`.

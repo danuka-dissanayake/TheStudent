@@ -133,7 +133,12 @@ data class TheStudentUiState(
     val isTtsSpeaking: Boolean = false,
     val snackbarMessage: String? = null,
     val isAuthDialogOpen: Boolean = false,
-    val isDarkTheme: Boolean = false,
+    /**
+     * Dark is the default. The assistant WebView and the website's `theme=`
+     * parameter both follow this flag, so a fresh install opens the AI
+     * assistant in dark mode without the student having to find the toggle.
+     */
+    val isDarkTheme: Boolean = true,
     val isOtpAuthMode: Boolean = false,
     val pendingAuthProfile: UserProfile? = null,
     val pendingAuthOtp: String? = null,

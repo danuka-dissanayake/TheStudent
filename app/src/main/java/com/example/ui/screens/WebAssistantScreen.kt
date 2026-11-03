@@ -30,7 +30,6 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
-import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -38,19 +37,15 @@ import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material3.Button
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
-import androidx.compose.material3.IconButton
-import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -59,7 +54,6 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -72,9 +66,14 @@ import androidx.webkit.JavaScriptReplyProxy
 import androidx.webkit.WebMessageCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import com.example.data.local.AssistantChatHistory
+import com.example.data.local.AssistantChatItem
 import com.example.data.local.AssistantHandshake
 import com.example.data.local.WebAssistantConfig
 import com.example.data.local.WebAssistantSession
+import com.example.ui.components.AssistantHistoryDrawer
+import com.example.ui.components.AssistantTopBar
+import com.example.ui.components.UiverseLoaderVisualizer
 import com.example.ui.theme.MaisonNeueFontFamily
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -83,26 +82,25 @@ import org.json.JSONObject
 /**
  * TheStudent AI, served by the website but framed as an ordinary app screen.
  *
- * Everything around the web content is native: the header, the back button, the
- * loading bar and the error card. Nothing shows a URL, and no link is allowed to
- * hand the student to Chrome — [WebAssistantConfig.isAllowedUrl] keeps the whole
- * journey on one host.
+ * Everything around the web content is native: the modern app-style header, the
+ * chat-history drawer, the loading state and the error card. Nothing shows a
+ * URL, and no link is allowed to hand the student to Chrome.
  *
  * Sign-in
  * -------
  * When [authCode] is present the screen does NOT load the site's home page. It
  * POSTs a short-lived, single-use code + PKCE verifier to the website's exchange
- * route with [WebView.postUrl]. The code lives in the request BODY, never in a
- * URL. The website exchanges it server-to-server, rotates its session and sets
- * an `HttpOnly; Secure; SameSite=Lax` cookie; JavaScript in this WebView never
- * sees a token. When there is no code the site opens in guest mode.
+ * route with [WebView.postUrl]. The website exchanges it server-to-server and
+ * sets an `HttpOnly; Secure; SameSite=Lax` cookie; JavaScript here never sees
+ * a token.
  *
  * Bridge
  * ------
- * Web -> app messages use `WebViewCompat.addWebMessageListener` with an EXACT
- * origin allowlist, a main-frame + origin re-check, a size cap and an event
- * allowlist. `addJavascriptInterface` is never used. If the WebView build does
- * not support the feature we fail closed: no bridge is injected at all.
+ * Web -> app uses `WebViewCompat.addWebMessageListener` with an EXACT origin
+ * allowlist, main-frame + origin re-checks, a size cap and an event allowlist.
+ * App -> web uses `postWebMessage` (falling back to a DOM CustomEvent). No
+ * credential ever crosses either direction. `addJavascriptInterface` is never
+ * used, and unsupported WebViews get no bridge at all (fail closed).
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
@@ -151,9 +149,21 @@ fun WebAssistantScreen(
 
     var isLoading by remember { mutableStateOf(true) }
     var loadError by remember { mutableStateOf<String?>(null) }
-    var progress by remember { mutableStateOf(0) }
     val webViewRef = remember { mutableStateOf<WebView?>(null) }
     val fileCallback = remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+
+    // Native chat history (the website hides its sidebar in ?app=android mode).
+    var historyOpen by remember { mutableStateOf(false) }
+    var historyChats by remember { mutableStateOf<List<AssistantChatItem>>(emptyList()) }
+    var historyLoading by remember { mutableStateOf(false) }
+
+    // If the site never answers, do not spin forever.
+    LaunchedEffect(historyOpen, historyLoading) {
+        if (historyOpen && historyLoading) {
+            delay(5_000)
+            if (historyLoading) historyLoading = false
+        }
+    }
 
     // The site offers "Summarize document (PDF, Word)". Without a file chooser
     // WebChromeClient that button silently does nothing inside a WebView.
@@ -167,11 +177,61 @@ fun WebAssistantScreen(
 
     fun pushIdentity(view: WebView?) {
         // With SSO the HttpOnly cookie IS the identity. Re-posting a JS identity
-        // could make the website sign its own session out on an "account change",
-        // so we deliberately do not inject it in the signed-in flow.
+        // could make the website sign its own session out on an "account change".
         if (ssoReady) return
         val script = WebAssistantConfig.identityScript(studentName, studentId, isDarkTheme)
         runCatching { view?.evaluateJavascript(script, null) }
+    }
+
+    fun startNewChat() {
+        historyOpen = false
+        historyChats = emptyList()
+        isLoading = true
+        loadError = null
+        webViewRef.value?.loadUrl(
+            WebAssistantConfig.pageUrl(baseUrl, isDarkTheme, null)
+        )
+    }
+
+    /**
+     * App -> website. Prefer the origin-targeted AndroidX postWebMessage; on
+     * older WebViews fall back to a DOM CustomEvent carrying the same JSON.
+     * Only allow-listed, non-credential events are ever sent.
+     */
+    fun postToWebsite(event: String, chatId: String? = null) {
+        val payload = JSONObject().put("type", event)
+        if (chatId != null) payload.put("chatId", chatId)
+        val json = payload.toString()
+        val view = webViewRef.value
+        val origin = Uri.parse(WebAssistantConfig.originOf(baseUrl))
+
+        val delivered = if (
+            view != null && WebViewFeature.isFeatureSupported(WebViewFeature.POST_WEB_MESSAGE)
+        ) {
+            runCatching {
+                WebViewCompat.postWebMessage(view, WebMessageCompat(json), origin)
+                true
+            }.getOrDefault(false)
+        } else {
+            false
+        }
+
+        if (!delivered) {
+            // JSONObject.quote gives a valid JS string literal, so web content
+            // cannot break out of the injected script.
+            val literal = JSONObject.quote(json)
+            runCatching {
+                view?.evaluateJavascript(
+                    "window.dispatchEvent(new CustomEvent('thestudent:bridge',{detail:$literal}))",
+                    null
+                )
+            }
+        }
+    }
+
+    fun requestHistory() {
+        historyLoading = true
+        postToWebsite(AssistantHandshake.EVENT_REQUEST_HISTORY)
     }
 
     fun createWebView(ctx: Context): WebView = WebView(ctx).apply {
@@ -243,15 +303,13 @@ fun WebAssistantScreen(
                             runCatching { replyProxy.postMessage("{\"ok\":true}") }
 
                             when (type) {
+                                AssistantHandshake.EVENT_CHAT_HISTORY -> {
+                                    historyChats = AssistantChatHistory.parse(event)
+                                    historyLoading = false
+                                }
                                 "SESSION_EXPIRED" -> onSessionExpired()
                                 "CLOSE" -> onClose()
-                                "NEW_CHAT" -> {
-                                    isLoading = true
-                                    loadError = null
-                                    webViewRef.value?.loadUrl(
-                                        WebAssistantConfig.pageUrl(baseUrl, isDarkTheme, null)
-                                    )
-                                }
+                                "NEW_CHAT" -> startNewChat()
                                 else -> onBridgeEvent(type, event)
                             }
                         }
@@ -331,10 +389,6 @@ fun WebAssistantScreen(
         }
 
         webChromeClient = object : WebChromeClient() {
-            override fun onProgressChanged(view: WebView?, newProgress: Int) {
-                progress = newProgress
-            }
-
             override fun onShowFileChooser(
                 webView: WebView?,
                 filePathCallback: ValueCallback<Array<Uri>>?,
@@ -379,234 +433,205 @@ fun WebAssistantScreen(
     }
 
     // The system back button walks the site's history first, then closes the
-    // screen. MainActivity's "return to Home" handler is disabled while open.
+    // screen. The chat-history drawer takes priority while it is open.
     BackHandler(enabled = true) {
-        val view = webViewRef.value
-        if (view != null && view.canGoBack()) view.goBack() else onClose()
+        if (historyOpen) {
+            historyOpen = false
+        } else {
+            val view = webViewRef.value
+            if (view != null && view.canGoBack()) view.goBack() else onClose()
+        }
     }
 
-    Column(
-        modifier = modifier
-            .fillMaxSize()
-            .background(if (isDarkTheme) Color(0xFF0F172A) else Color(0xFFF1F7F4))
-            .statusBarsPadding()
-            .navigationBarsPadding()
-            .testTag("web_assistant_screen")
-    ) {
-        Surface(
-            color = if (isDarkTheme) Color(0xFF152238) else Color.White,
-            shadowElevation = 2.dp
+    Box(modifier = modifier.fillMaxSize()) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(if (isDarkTheme) Color(0xFF0B131E) else Color(0xFFF1F7F4))
+                .statusBarsPadding()
+                .navigationBarsPadding()
+                .testTag("web_assistant_screen")
         ) {
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(64.dp)
-                    .padding(horizontal = 8.dp),
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                IconButton(onClick = onClose) {
-                    Icon(
-                        Icons.AutoMirrored.Filled.ArrowBack,
-                        contentDescription = "Back",
-                        tint = if (isDarkTheme) Color.White else Color(0xFF0F172A)
-                    )
+            AssistantTopBar(
+                isDarkTheme = isDarkTheme,
+                onBack = {
+                    historyOpen = false
+                    onClose()
+                },
+                onNewChat = { startNewChat() },
+                onHistoryClick = {
+                    historyOpen = true
+                    requestHistory()
                 }
-                Spacer(Modifier.width(4.dp))
-                Column(modifier = Modifier.weight(1f)) {
-                    Text(
-                        "TheStudent AI",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
-                    )
-                    Text(
-                        "Your study assistant",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 11.5.sp,
-                        color = Color(0xFF64748B)
-                    )
-                }
-                IconButton(onClick = {
-                    // Reload the plain embed URL: no ?q=, no stale chat. The
-                    // HttpOnly cookie keeps the student signed in.
-                    isLoading = true
-                    loadError = null
-                    webViewRef.value?.loadUrl(
-                        WebAssistantConfig.pageUrl(baseUrl, isDarkTheme, null)
-                    )
-                }) {
-                    Icon(
-                        Icons.Filled.Add,
-                        contentDescription = "New chat",
-                        tint = if (isDarkTheme) Color.White else Color(0xFF0F172A)
-                    )
-                }
-                Text(
-                    "AI",
-                    fontFamily = MaisonNeueFontFamily,
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.Bold,
-                    color = Color.White,
-                    modifier = Modifier
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF059669))
-                        .padding(horizontal = 9.dp, vertical = 5.dp)
-                )
-                Spacer(Modifier.width(12.dp))
-            }
-        }
+            )
 
-        // A failed automatic sign-in never blocks the assistant: the student
-        // can still use it as a guest and retry with one tap.
-        if (authFailed) {
-            Surface(color = if (isDarkTheme) Color(0xFF3A2A12) else Color(0xFFFFF4D6)) {
-                Row(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 14.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    Text(
-                        "Couldn't sign you in automatically. You're using TheStudent AI as a guest.",
-                        fontFamily = MaisonNeueFontFamily,
-                        fontSize = 12.sp,
-                        color = if (isDarkTheme) Color.White else Color(0xFF0F172A),
-                        modifier = Modifier.weight(1f)
-                    )
-                    TextButton(onClick = onRetrySignIn) { Text("Retry") }
-                }
-            }
-        }
-
-        Box(modifier = Modifier.weight(1f)) {
-            if (authPending) {
-                // Native "secure sign-in" state. No WebView exists yet, so no
-                // page can observe a half-finished handshake.
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    color = if (isDarkTheme) Color(0xFF152238) else Color.White,
-                    shape = RoundedCornerShape(18.dp),
-                    shadowElevation = 4.dp
-                ) {
-                    Column(
-                        modifier = Modifier.padding(24.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(12.dp)
-                    ) {
-                        CircularProgressIndicator(modifier = Modifier.size(28.dp))
-                        Text(
-                            "Signing you in securely…",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 14.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
-                        )
-                        Text(
-                            "You won't have to sign in again.",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 12.sp,
-                            textAlign = TextAlign.Center,
-                            color = Color(0xFF64748B)
-                        )
-                    }
-                }
-            } else {
-                // A different page URL / code / theme gets a fresh WebView. The
-                // old one is removed from its parent and destroyed, otherwise
-                // WebView keeps its memory after removal. `owned` belongs to
-                // this key, so a stale dispose can never destroy the WebView
-                // that replaced it.
-                key(navKey) {
-                    val owned = remember { mutableStateOf<WebView?>(null) }
-                    AndroidView(
-                        factory = { ctx ->
-                            val view = createWebView(ctx)
-                            (view.parent as? ViewGroup)?.removeView(view)
-                            owned.value = view
-                            webViewRef.value = view
-                            if (ssoReady && postData != null && target != null) {
-                                // The code is in the POST BODY, never in a URL.
-                                view.postUrl(target, postData)
-                            } else {
-                                view.loadUrl(pageUrl)
-                            }
-                            view
-                        },
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .testTag("web_assistant_webview")
-                    )
-                    DisposableEffect(Unit) {
-                        onDispose {
-                            val view = owned.value
-                            if (view != null) {
-                                (view.parent as? ViewGroup)?.removeView(view)
-                                view.stopLoading()
-                                view.destroy()
-                                if (webViewRef.value === view) webViewRef.value = null
-                                owned.value = null
-                            }
-                            WebAssistantSession.flush()
-                        }
-                    }
-                }
-
-                if (isLoading && loadError == null && progress < 100) {
-                    LinearProgressIndicator(
+            // A failed automatic sign-in never blocks the assistant: the student
+            // can still use it as a guest and retry with one tap.
+            if (authFailed) {
+                Surface(color = if (isDarkTheme) Color(0xFF3A2A12) else Color(0xFFFFF4D6)) {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .align(Alignment.TopCenter)
-                    )
+                            .padding(horizontal = 14.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(
+                            "Couldn't sign you in automatically. You're using TheStudent AI as a guest.",
+                            fontFamily = MaisonNeueFontFamily,
+                            fontSize = 12.sp,
+                            color = if (isDarkTheme) Color.White else Color(0xFF0F172A),
+                            modifier = Modifier.weight(1f)
+                        )
+                        TextButton(onClick = onRetrySignIn) { Text("Retry") }
+                    }
                 }
             }
 
-            if (loadError != null && !authPending) {
-                Surface(
-                    modifier = Modifier
-                        .align(Alignment.Center)
-                        .padding(24.dp),
-                    color = Color.White,
-                    shape = RoundedCornerShape(18.dp),
-                    shadowElevation = 6.dp
-                ) {
-                    Column(
-                        modifier = Modifier.padding(20.dp),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.spacedBy(8.dp)
+            Box(modifier = Modifier.weight(1f)) {
+                if (authPending) {
+                    // Native "secure sign-in" state. No WebView exists yet, so no
+                    // page can observe a half-finished handshake.
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        color = if (isDarkTheme) Color(0xFF141F2D) else Color.White,
+                        shape = RoundedCornerShape(18.dp),
+                        shadowElevation = 4.dp
                     ) {
-                        Text(
-                            "TheStudent AI is unavailable",
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 15.sp,
-                            fontWeight = FontWeight.Bold,
-                            color = Color(0xFF0F172A)
-                        )
-                        Text(
-                            loadError.orEmpty(),
-                            fontFamily = MaisonNeueFontFamily,
-                            fontSize = 13.sp,
-                            textAlign = TextAlign.Center,
-                            color = Color(0xFF64748B)
-                        )
-                        Button(onClick = {
-                            loadError = null
-                            isLoading = true
-                            webViewRef.value?.reload()
-                        }) {
-                            Icon(
-                                Icons.Filled.Refresh,
-                                contentDescription = null,
-                                modifier = Modifier.size(16.dp)
+                        Column(
+                            modifier = Modifier.padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            UiverseLoaderVisualizer(size = 90.dp)
+                            Text(
+                                "Signing you in securely…",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 14.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
                             )
-                            Spacer(Modifier.width(6.dp))
-                            Text("Try again")
+                            Text(
+                                "You won't have to sign in again.",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 12.sp,
+                                textAlign = TextAlign.Center,
+                                color = Color(0xFF94A3B8)
+                            )
+                        }
+                    }
+                } else {
+                    // A different page URL / code / theme gets a fresh WebView.
+                    // The old one is removed from its parent and destroyed.
+                    key(navKey) {
+                        val owned = remember { mutableStateOf<WebView?>(null) }
+                        AndroidView(
+                            factory = { ctx ->
+                                val view = createWebView(ctx)
+                                (view.parent as? ViewGroup)?.removeView(view)
+                                owned.value = view
+                                webViewRef.value = view
+                                if (ssoReady && postData != null && target != null) {
+                                    // The code is in the POST BODY, never in a URL.
+                                    view.postUrl(target, postData)
+                                } else {
+                                    view.loadUrl(pageUrl)
+                                }
+                                view
+                            },
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .testTag("web_assistant_webview")
+                        )
+                        DisposableEffect(Unit) {
+                            onDispose {
+                                val view = owned.value
+                                if (view != null) {
+                                    (view.parent as? ViewGroup)?.removeView(view)
+                                    view.stopLoading()
+                                    view.destroy()
+                                    if (webViewRef.value === view) webViewRef.value = null
+                                    owned.value = null
+                                }
+                                WebAssistantSession.flush()
+                            }
+                        }
+                    }
+
+                    // Centred orbit loader replaces the thin top progress bar.
+                    if (isLoading && loadError == null) {
+                        Box(
+                            modifier = Modifier.fillMaxSize(),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            UiverseLoaderVisualizer(
+                                modifier = Modifier.testTag("assistant_loading_spinner"),
+                                size = 110.dp
+                            )
+                        }
+                    }
+                }
+
+                if (loadError != null && !authPending) {
+                    Surface(
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .padding(24.dp),
+                        color = if (isDarkTheme) Color(0xFF141F2D) else Color.White,
+                        shape = RoundedCornerShape(18.dp),
+                        shadowElevation = 6.dp
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Text(
+                                "TheStudent AI is unavailable",
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 15.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = if (isDarkTheme) Color.White else Color(0xFF0F172A)
+                            )
+                            Text(
+                                loadError.orEmpty(),
+                                fontFamily = MaisonNeueFontFamily,
+                                fontSize = 13.sp,
+                                textAlign = TextAlign.Center,
+                                color = Color(0xFF94A3B8)
+                            )
+                            Button(onClick = {
+                                loadError = null
+                                isLoading = true
+                                webViewRef.value?.reload()
+                            }) {
+                                Icon(
+                                    Icons.Filled.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(Modifier.width(6.dp))
+                                Text("Try again")
+                            }
                         }
                     }
                 }
             }
         }
+
+        AssistantHistoryDrawer(
+            visible = historyOpen,
+            chats = historyChats,
+            isLoading = historyLoading,
+            isDarkTheme = isDarkTheme,
+            onDismiss = { historyOpen = false },
+            onNewChat = { startNewChat() },
+            onRefresh = { requestHistory() },
+            onChatSelected = { chat ->
+                postToWebsite(AssistantHandshake.EVENT_OPEN_CHAT, chat.id)
+                historyOpen = false
+            }
+        )
     }
 }

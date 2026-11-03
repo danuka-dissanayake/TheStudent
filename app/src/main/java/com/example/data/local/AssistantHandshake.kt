@@ -24,13 +24,21 @@ object AssistantHandshake {
      * The ONLY messages web content may send to the app. Nothing here may read,
      * write or request credentials. Unknown types are ignored.
      */
+    /** Website -> app: the site sends its chat list for the native history drawer. */
+    const val EVENT_CHAT_HISTORY = "CHAT_HISTORY"
+
+    /** App -> website: ask for the chat list / open one conversation. */
+    const val EVENT_REQUEST_HISTORY = "REQUEST_HISTORY"
+    const val EVENT_OPEN_CHAT = "OPEN_CHAT"
+
     val ALLOWED_EVENTS = setOf(
         "SESSION_READY",
         "SESSION_EXPIRED",
         "NEW_CHAT",
         "CLOSE",
         "OPEN_PAPERS",
-        "SHARE_TEXT"
+        "SHARE_TEXT",
+        EVENT_CHAT_HISTORY
     )
 
     const val MAX_BRIDGE_MESSAGE = 4_096

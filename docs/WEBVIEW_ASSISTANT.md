@@ -178,10 +178,46 @@ if (window.TheStudentBridge) {
 Android uses `WebViewCompat.addWebMessageListener` with an exact origin
 allowlist, a `WEB_MESSAGE_LISTENER` feature gate, a main-frame + scheme + host
 re-check, a 4 KB size cap and an explicit event allowlist (`SESSION_READY`,
-`SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`, `SHARE_TEXT`). Unknown
-types and iframe messages are ignored; unsupported WebViews get **no bridge at
-all** (fail closed). There are no credential read/write events.
-`addJavascriptInterface` is never used.
+`SESSION_EXPIRED`, `NEW_CHAT`, `CLOSE`, `OPEN_PAPERS`, `SHARE_TEXT`,
+`CHAT_HISTORY`). Unknown types and iframe messages are ignored; unsupported
+WebViews get **no bridge at all** (fail closed). There are no credential
+read/write events. `addJavascriptInterface` is never used.
+
+In the other direction the app uses `WebViewCompat.postWebMessage` (feature
+`POST_WEB_MESSAGE`), falling back to a `thestudent:bridge` DOM `CustomEvent` on
+older WebViews. Two outbound events exist: `REQUEST_HISTORY` and `OPEN_CHAT`
+(with `chatId`). Both are non-credential.
+
+### 4.3.1 Chat-history contract (website work required)
+
+The `?app=android` layout hides the website's sidebar, so the native hamburger
+drawer is the only way back to older conversations. The website must:
+
+1. Accept either inbound channel:
+   ```js
+   window.addEventListener('message', e => handle(JSON.parse(e.data)));
+   window.addEventListener('thestudent:bridge', e => handle(JSON.parse(e.detail)));
+   ```
+   where `handle` ignores anything whose `type` is not `REQUEST_HISTORY` or
+   `OPEN_CHAT`, and ignores messages from another origin.
+2. On `REQUEST_HISTORY`, respond from the **main frame** on the production
+   origin:
+   ```js
+   window.TheStudentBridge?.postMessage(JSON.stringify({
+     type: 'CHAT_HISTORY',
+     chats: [{ id: 'opaque-id', title: 'Conversation title', updatedAt: '2h ago' }]
+   }));
+   ```
+   `id` must match `[A-Za-z0-9._-]{1,128}`; the app drops unsafe ids, caps the
+   list at 50 items and truncates titles to 120 characters. Never send a token,
+   email or cookie value here.
+3. On `OPEN_CHAT` (`{type:'OPEN_CHAT', chatId:'…'}`), load that conversation
+   **in place** — no external navigation, no popups.
+4. Optionally post `NEW_CHAT` when the site starts a fresh conversation so the
+   app can clear its cached list.
+
+Until the site implements this the drawer simply shows an empty state after a
+5-second timeout, with a Refresh button — it never blocks the assistant.
 
 ### 4.4 Example embed-mode sketch (React / Next.js)
 
@@ -302,8 +338,9 @@ side:
   server-side session is what fixes cross-device continuity.
 - **Voice inside the app:** either hide the buttons (cheap, recommended for
   now) or ask us to build a native bridge using the app's existing
-  `SpeechRecognizer` pipeline and a `@JavascriptInterface` that returns a
-  transcript to the composer. The latter is Android work in this repo.
+  `SpeechRecognizer` pipeline and the origin-pinned `WebMessageListener`
+  (never `@JavascriptInterface`) that returns a transcript to the composer.
+  The latter is Android work in this repo.
 
 ### Android changes made in this pass
 
@@ -314,3 +351,60 @@ side:
 - Native **"New chat"** `IconButton` in the header.
 - External-link fallback snackbar reworded to "That link can't be opened here."
   so it does not contradict the website's "Link copied" toast.
+
+---
+
+## 9. Assistant UI: modern header, history drawer, dark default (current)
+
+The assistant screen now uses the same header language as the rest of the app
+(`ui/components/AssistantTopBar.kt`): a hairline-bordered `Surface`, status-bar
+aware padding, a 54 dp row and 40 dp rounded, bordered icon buttons — exactly
+like `TheStudentTopAppBar`. From left to right: **back**, the title, an emerald
+**AI** badge, **New chat**, and the **hamburger in the right corner**.
+
+The hamburger opens `ui/components/AssistantHistoryDrawer.kt`, a native
+right-hand drawer with a scrim, a "New chat" action, the website-supplied chat
+list (see §4.3.1) and a "No conversations yet" empty state. Back closes the
+drawer first, then walks WebView history, then leaves the screen.
+
+**Dark is now the default.** `TheStudentUiState.isDarkTheme = true`, so the
+native frame uses the dark palette and the website receives `theme=dark` on
+first open. The profile toggle still switches to light.
+
+**Loading uses the exact Uiverse.io dual-orbit ring animation** (gold + lime
+glowing particles) via `ui/components/UiverseLoaderVisualizer.kt`, centred in
+the content area — the thin `LinearProgressIndicator` under the header is gone.
+The same spinner appears in the "Signing you in securely…" card and while the
+history drawer loads. That loader now disables JavaScript, uses no network base
+URL and destroys its WebView on dispose.
+
+### Copy-paste prompt for the website repo (chat history)
+
+> Add chat-history support for the Android WebView embed mode. Keep the normal
+> browser experience unchanged.
+>
+> 1. Accept app -> web messages from BOTH channels and ignore anything from
+>    another origin:
+>    ```js
+>    window.addEventListener('message', e => handle(JSON.parse(e.data)));
+>    window.addEventListener('thestudent:bridge', e => handle(JSON.parse(e.detail)));
+>    ```
+>    Only react to `type === 'REQUEST_HISTORY'` and `type === 'OPEN_CHAT'`.
+> 2. On `REQUEST_HISTORY`, read the CURRENT signed-in user's conversation list
+>    from your server (the HttpOnly session cookie is the only auth source —
+>    never a userId from JS), then post from the MAIN frame on the production
+>    origin:
+>    ```js
+>    window.TheStudentBridge?.postMessage(JSON.stringify({
+>      type: 'CHAT_HISTORY',
+>      chats: [{ id: 'opaque-id', title: 'Conversation title', updatedAt: '2h ago' }]
+>    }));
+>    ```
+>    `id` must be `[A-Za-z0-9._-]{1,128}`. Send at most 50 items. Never include
+>    a token, email, cookie or secret. Do not accept `CHAT_HISTORY` from the app.
+> 3. On `{type:'OPEN_CHAT', chatId:'…'}` load that conversation in place, with
+>    no popup or external navigation. On a new conversation, optionally post
+>    `{type:'NEW_CHAT'}` so the app clears its cached list.
+> 4. Keep `?app=android` hiding the website's own sidebar; the native drawer is
+>    the history UI inside the app. Keep everything same-origin and keep the
+>    `theme=dark` / `theme=light` query working (dark is the app default now).

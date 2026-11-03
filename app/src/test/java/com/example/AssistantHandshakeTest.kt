@@ -75,10 +75,23 @@ class AssistantHandshakeTest {
         assertTrue(AssistantHandshake.isAllowedEvent("SESSION_EXPIRED"))
         assertTrue(AssistantHandshake.isAllowedEvent("SESSION_READY"))
         assertTrue(AssistantHandshake.isAllowedEvent("NEW_CHAT"))
+        assertTrue(AssistantHandshake.isAllowedEvent(AssistantHandshake.EVENT_CHAT_HISTORY))
+        // App -> web events are never accepted as incoming messages.
+        assertFalse(AssistantHandshake.isAllowedEvent(AssistantHandshake.EVENT_REQUEST_HISTORY))
+        assertFalse(AssistantHandshake.isAllowedEvent(AssistantHandshake.EVENT_OPEN_CHAT))
         assertFalse(AssistantHandshake.isAllowedEvent("GET_TOKEN"))
         assertFalse(AssistantHandshake.isAllowedEvent("SET_SESSION"))
         assertFalse(AssistantHandshake.isAllowedEvent(""))
         assertFalse(AssistantHandshake.isAllowedEvent(null))
+    }
+
+    @Test
+    fun `chat history events carry no credential names`() {
+        assertEquals("CHAT_HISTORY", AssistantHandshake.EVENT_CHAT_HISTORY)
+        assertEquals("REQUEST_HISTORY", AssistantHandshake.EVENT_REQUEST_HISTORY)
+        assertEquals("OPEN_CHAT", AssistantHandshake.EVENT_OPEN_CHAT)
+        assertTrue(AssistantHandshake.ALLOWED_EVENTS.none { it.contains("TOKEN") })
+        assertTrue(AssistantHandshake.ALLOWED_EVENTS.none { it.contains("PASSWORD") })
     }
 
     @Test
