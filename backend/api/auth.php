@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.4';
+const TS_API_VERSION                = '3.6.5';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -158,7 +158,7 @@ if ($action === 'version') {
                 $tempToken = bin2hex(random_bytes(32));
                 $tempHash = hash('sha256', $tempToken);
                 $tempExp = gmdate('Y-m-d H:i:s', time() + 60);
-                $ins = $pdoDiag->prepare('INSERT INTO user_tokens (user_id, token_hash, user_agent, ip_address, expires_at) VALUES (?, ?, ?, ?, ?)');
+                $ins = $pdoDiag->prepare('INSERT INTO user_tokens (user_id, token, device_info, ip_address, expires_at, last_used_at) VALUES (?, ?, ?, ?, ?, NOW())');
                 $ins->execute([$testUserId, $tempHash, 'self-test', '127.0.0.1', $tempExp]);
 
                 try {
@@ -215,7 +215,7 @@ if ($action === 'version') {
                         'vercel_err'     => $vercelErr,
                     ];
                 } finally {
-                    $del = $pdoDiag->prepare('DELETE FROM user_tokens WHERE token_hash = ?');
+                    $del = $pdoDiag->prepare('DELETE FROM user_tokens WHERE token = ?');
                     $del->execute([$tempHash]);
                 }
             } else {
