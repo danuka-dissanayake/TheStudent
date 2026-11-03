@@ -16,6 +16,7 @@ import android.os.Environment
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -132,6 +133,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.PathParser
 import androidx.core.view.WindowCompat
+import com.example.data.local.TheStudentPreferences
 import com.example.data.model.AiAssistantMessage
 import com.example.data.model.AiModelChoice
 import com.example.data.model.AttachedMedia
@@ -146,6 +148,72 @@ const val AI_ASSISTANT_WEB_URL = "https://chatbot-liart-rho-81.vercel.app/"
 
 private val AiWebBackground = Color(0xFF121016)
 private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
+
+private class TheStudentAndroidWebBridge(
+    private val userJsonProvider: () -> String,
+    private val tokenProvider: () -> String
+) {
+    @JavascriptInterface
+    fun getUserJson(): String = userJsonProvider()
+
+    @JavascriptInterface
+    fun getAuthToken(): String = tokenProvider()
+
+    @JavascriptInterface
+    fun isLoggedIn(): Boolean = tokenProvider().isNotBlank() || userJsonProvider().isNotBlank()
+}
+
+private fun buildUserBridgeJson(
+    userProfile: UserProfile,
+    prefs: TheStudentPreferences
+): JSONObject {
+    val name = userProfile.name.ifBlank { prefs.userName.orEmpty() }.ifBlank { "Student" }
+    val email = userProfile.email.ifBlank { prefs.userEmail.orEmpty() }
+    val token = prefs.sessionToken.orEmpty()
+    return JSONObject().apply {
+        put("name", name)
+        put("full_name", name)
+        put("email", email)
+        put("avatar_url", userProfile.avatarUrl)
+        put("image", userProfile.avatarUrl)
+        put("picture", userProfile.avatarUrl)
+        put("academic_level", userProfile.academicLevel)
+        put("stream_or_degree", userProfile.streamOrDegree)
+        put("institution", userProfile.institution)
+        put("target_exam", userProfile.targetExam)
+        put("streak_days", userProfile.streakDays)
+        put("points", userProfile.points)
+        put("role", prefs.userRole)
+        put("auth_provider", userProfile.authProvider)
+        put("token", token)
+        put("is_logged_in", userProfile.isLoggedIn || prefs.isLoggedIn || email.isNotBlank())
+    }
+}
+
+private fun injectAuthSessionIntoWebView(
+    webView: WebView?,
+    userJson: JSONObject
+) {
+    if (webView == null) return
+    val jsonString = userJson.toString()
+    val quotedJson = JSONObject.quote(jsonString)
+    val quotedToken = JSONObject.quote(userJson.optString("token", ""))
+    val script = """
+        (function() {
+            try {
+                var userObj = JSON.parse($quotedJson);
+                window.__THESTUDENT_USER__ = userObj;
+                window.__THESTUDENT_TOKEN__ = $quotedToken;
+                localStorage.setItem('thestudent_user', $quotedJson);
+                if ($quotedToken) {
+                    localStorage.setItem('thestudent_token', $quotedToken);
+                }
+                window.dispatchEvent(new CustomEvent('thestudent:auth', { detail: userObj }));
+            } catch (e) {}
+        })();
+    """.trimIndent()
+    webView.evaluateJavascript(script, null)
+}
 
 /**
  * TheStudent AI Assistant Screen powered directly by the full-featured mobile web experience
@@ -226,6 +294,17 @@ fun AiAssistantScreen(
     var webViewRef by remember { mutableStateOf<WebView?>(null) }
     var isPageLoading by remember { mutableStateOf(true) }
     var hasLoadError by remember { mutableStateOf(false) }
+
+    val preferences = remember(context) { TheStudentPreferences(context) }
+    val currentUserProfile by androidx.compose.runtime.rememberUpdatedState(userProfile)
+
+    LaunchedEffect(userProfile, isPageLoading) {
+        val wv = webViewRef
+        if (wv != null && !isPageLoading) {
+            val userJson = buildUserBridgeJson(userProfile, preferences)
+            injectAuthSessionIntoWebView(wv, userJson)
+        }
+    }
 
     // File chooser state for `<input type="file">` (photo, PDF, document attachments in the web app)
     var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
@@ -340,6 +419,18 @@ fun AiAssistantScreen(
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, true)
 
+                        addJavascriptInterface(
+                            TheStudentAndroidWebBridge(
+                                userJsonProvider = {
+                                    buildUserBridgeJson(currentUserProfile, preferences).toString()
+                                },
+                                tokenProvider = {
+                                    preferences.sessionToken.orEmpty()
+                                }
+                            ),
+                            "TheStudentAndroid"
+                        )
+
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
@@ -443,11 +534,15 @@ fun AiAssistantScreen(
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 hasLoadError = false
+                                val userJson = buildUserBridgeJson(currentUserProfile, preferences)
+                                injectAuthSessionIntoWebView(view, userJson)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isPageLoading = false
+                                val userJson = buildUserBridgeJson(currentUserProfile, preferences)
+                                injectAuthSessionIntoWebView(view, userJson)
                                 CookieManager.getInstance().flush()
                             }
 
