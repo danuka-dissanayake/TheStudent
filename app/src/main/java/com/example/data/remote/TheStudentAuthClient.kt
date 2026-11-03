@@ -109,10 +109,14 @@ object TheStudentAuthClient {
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .addInterceptor { chain ->
-            val request = chain.request().newBuilder()
+            val orig = chain.request()
+            val builder = orig.newBuilder()
                 .header("X-TheStudent-Client", "android-app")
-                .build()
-            chain.proceed(request)
+            val auth = orig.header("Authorization").orEmpty()
+            if (auth.startsWith("Bearer ", ignoreCase = true)) {
+                builder.header("X-TheStudent-Token", auth.substring(7).trim())
+            }
+            chain.proceed(builder.build())
         }
         .build()
 

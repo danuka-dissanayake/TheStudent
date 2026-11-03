@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.2';
+const TS_API_VERSION                = '3.6.3';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -906,7 +906,13 @@ function extractBearerToken(): ?string
 {
     $candidates = [];
 
-    foreach (['HTTP_AUTHORIZATION', 'REDIRECT_HTTP_AUTHORIZATION', 'REDIRECT_REDIRECT_HTTP_AUTHORIZATION', 'HTTP_X_AUTHORIZATION'] as $serverKey) {
+    foreach ([
+        'HTTP_AUTHORIZATION',
+        'REDIRECT_HTTP_AUTHORIZATION',
+        'REDIRECT_REDIRECT_HTTP_AUTHORIZATION',
+        'HTTP_X_AUTHORIZATION',
+        'HTTP_X_THESTUDENT_TOKEN',
+    ] as $serverKey) {
         if (!empty($_SERVER[$serverKey])) {
             $candidates[] = trim((string) $_SERVER[$serverKey]);
         }
@@ -914,7 +920,9 @@ function extractBearerToken(): ?string
 
     if (function_exists('apache_request_headers')) {
         foreach ((array) apache_request_headers() as $k => $v) {
-            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
+            if (strcasecmp((string) $k, 'Authorization') === 0 ||
+                strcasecmp((string) $k, 'X-Authorization') === 0 ||
+                strcasecmp((string) $k, 'X-TheStudent-Token') === 0) {
                 $candidates[] = trim((string) $v);
             }
         }
@@ -922,15 +930,40 @@ function extractBearerToken(): ?string
 
     if (function_exists('getallheaders')) {
         foreach ((array) getallheaders() as $k => $v) {
-            if (strcasecmp((string) $k, 'Authorization') === 0 || strcasecmp((string) $k, 'X-Authorization') === 0) {
+            if (strcasecmp((string) $k, 'Authorization') === 0 ||
+                strcasecmp((string) $k, 'X-Authorization') === 0 ||
+                strcasecmp((string) $k, 'X-TheStudent-Token') === 0) {
                 $candidates[] = trim((string) $v);
             }
         }
     }
 
     foreach ($candidates as $header) {
-        if ($header !== '' && preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/i', $header, $m)) {
+        if ($header === '') {
+            continue;
+        }
+        if (preg_match('/^Bearer\s+([A-Fa-f0-9]{32,256})$/i', $header, $m)) {
             return $m[1];
+        }
+        if (preg_match('/^([A-Fa-f0-9]{32,256})$/', $header, $m)) {
+            return $m[1];
+        }
+    }
+
+    // Fallback for Apache/PHP-FPM hosts that strip the Authorization header when .htaccess is not active
+    $queryOrPostToken = trim((string) ($_GET['token'] ?? $_POST['token'] ?? ''));
+    if ($queryOrPostToken !== '' && preg_match('/^([A-Fa-f0-9]{32,256})$/', $queryOrPostToken, $m)) {
+        return $m[1];
+    }
+
+    $rawBody = @file_get_contents('php://input');
+    if (is_string($rawBody) && $rawBody !== '') {
+        $decoded = json_decode($rawBody, true);
+        if (is_array($decoded) && !empty($decoded['token'])) {
+            $bodyToken = trim((string) $decoded['token']);
+            if (preg_match('/^([A-Fa-f0-9]{32,256})$/', $bodyToken, $m)) {
+                return $m[1];
+            }
         }
     }
 

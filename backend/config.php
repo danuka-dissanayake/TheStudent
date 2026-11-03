@@ -274,7 +274,7 @@ function ts_apply_security_headers(): void
     }
 
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-TheStudent-Client, X-TheStudent-Key');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Authorization, X-TheStudent-Token, X-Requested-With, X-TheStudent-Client, X-TheStudent-Key');
     header('Access-Control-Max-Age: 600');
 
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
