@@ -175,12 +175,19 @@ private fun postOriginLockedAuthHandshake(
     val quotedOrigin = JSONObject.quote(AI_ASSISTANT_TRUSTED_ORIGIN)
     val script = """
         (function() {
-            if (window.location.origin === $quotedOrigin) {
-                window.postMessage(
-                    { type: 'THESTUDENT_AUTH_HANDSHAKE', token: $quotedToken },
-                    $quotedOrigin
-                );
-            }
+            if (window.location.origin !== $quotedOrigin) return;
+            var sendHandshake = function() {
+                if (window.location.origin === $quotedOrigin) {
+                    window.postMessage(
+                        { type: 'THESTUDENT_AUTH_HANDSHAKE', token: $quotedToken },
+                        $quotedOrigin
+                    );
+                }
+            };
+            sendHandshake();
+            setTimeout(sendHandshake, 350);
+            setTimeout(sendHandshake, 1000);
+            setTimeout(sendHandshake, 2500);
         })();
     """.trimIndent()
     webView.evaluateJavascript(script, null)
