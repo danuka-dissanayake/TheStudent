@@ -19,7 +19,6 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.wrapContentSize
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Surface
@@ -35,9 +34,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
@@ -51,12 +48,14 @@ import androidx.compose.ui.graphics.drawscope.Fill
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.PI
@@ -75,7 +74,9 @@ private data class RadialSpeedDialItem(
     val index: Int,
     val label: String,
     val prompt: String,
-    val icon: RadialActionIcon
+    val icon: RadialActionIcon,
+    val cosAngle: Float,
+    val sinAngle: Float
 )
 
 private val DefaultRadialItems = listOf(
@@ -83,25 +84,33 @@ private val DefaultRadialItems = listOf(
         index = 0,
         label = "Ask AI Chat",
         prompt = "",
-        icon = RadialActionIcon.AI_CHAT
+        icon = RadialActionIcon.AI_CHAT,
+        cosAngle = cos(0.0).toFloat(),
+        sinAngle = sin(0.0).toFloat()
     ),
     RadialSpeedDialItem(
         index = 1,
         label = "Download papers",
         prompt = "Find and download official Sri Lankan past papers and marking schemes.",
-        icon = RadialActionIcon.DOWNLOAD_PAPERS
+        icon = RadialActionIcon.DOWNLOAD_PAPERS,
+        cosAngle = cos(30.0 * PI / 180.0).toFloat(),
+        sinAngle = sin(30.0 * PI / 180.0).toFloat()
     ),
     RadialSpeedDialItem(
         index = 2,
         label = "Create quiz",
         prompt = "Create an interactive MCQ practice quiz to test my knowledge.",
-        icon = RadialActionIcon.CREATE_QUIZ
+        icon = RadialActionIcon.CREATE_QUIZ,
+        cosAngle = cos(60.0 * PI / 180.0).toFloat(),
+        sinAngle = sin(60.0 * PI / 180.0).toFloat()
     ),
     RadialSpeedDialItem(
         index = 3,
         label = "Solve step by step",
         prompt = "Solve this math or science problem step by step with clear explanations.",
-        icon = RadialActionIcon.SOLVE_STEPS
+        icon = RadialActionIcon.SOLVE_STEPS,
+        cosAngle = cos(90.0 * PI / 180.0).toFloat(),
+        sinAngle = sin(90.0 * PI / 180.0).toFloat()
     )
 )
 
@@ -109,13 +118,14 @@ private val DefaultRadialItems = listOf(
  * Speed Dial Radial Menu FAB with Backdrop (`fb-07` design) + Draggable Left/Right Docking
  * + Exact Dual Speech-Bubble "Ai" Icon.
  *
- * - **FAB Icon**: Renders the overlapping dual speech-bubble `"Ai"` icon from the user's screenshot.
- * - **Draggable on Left & Right Sides**: Can be dragged anywhere and smoothly snaps to the nearest
- *   horizontal edge (left or right side of the screen).
- * - **Quarter-Circle Radial Speed Dial**: Tapping the FAB opens a dimmed backdrop scrim and fans out
- *   4 actions along a quarter-circle (`cos(i * 30°)`, `sin(i * 30°)`) with staggered spring delays,
- *   and delayed floating labels that arrive a beat after their icons. Automatically flips the
- *   quarter-circle inward depending on whether the FAB is docked on the right or left side.
+ * Performance & Layout Optimizations:
+ * - Compact `52.dp` main FAB and `44.dp` radial action buttons, positioned lower on initial load
+ *   just above the bottom navigation bar (`verticalFraction = 0.92f`).
+ * - Zero-recomposition 60/120fps animations: all `Animatable` values are read strictly inside
+ *   GPU `graphicsLayer` lambdas instead of during composition.
+ * - Non-overlapping labels: labels are placed via custom `Modifier.layout` outside the full width
+ *   of each action icon with a guaranteed `10.dp` gap, and rendered in a dedicated top z-index layer
+ *   above all radial icons so no icon ever hides any part of the label text.
  */
 @Composable
 fun FloatingAiAssistantButton(
@@ -127,31 +137,92 @@ fun FloatingAiAssistantButton(
     val coroutineScope = rememberCoroutineScope()
 
     var isDockedRight by rememberSaveable { mutableStateOf(true) }
-    var verticalFraction by rememberSaveable { mutableFloatStateOf(0.76f) }
+    // Lower initial vertical position on first load (just above the bottom nav bar)
+    var verticalFraction by rememberSaveable { mutableFloatStateOf(0.92f) }
     var isDragging by remember { mutableStateOf(false) }
     var isMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var keepRadialComposed by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isMenuOpen) {
         isMenuOpen = false
     }
 
-    val fabSizeDp = 62.dp
-    val actSizeDp = 52.dp
-    val radialDistanceDp = 128.dp
-    val edgeMarginDp = 18.dp
-    val topSafeMarginDp = 96.dp
-    val bottomSafeMarginDp = 112.dp
+    // Reduced, sleeker button dimensions
+    val fabSizeDp = 52.dp
+    val actSizeDp = 44.dp
+    val radialDistanceDp = 114.dp
+    val edgeMarginDp = 16.dp
+    val topSafeMarginDp = 88.dp
+    val bottomSafeMarginDp = 90.dp
 
-    val scrimAlpha by animateFloatAsState(
-        targetValue = if (isMenuOpen) 1f else 0f,
-        animationSpec = tween(durationMillis = 240, easing = FastOutSlowInEasing),
-        label = "fb07_scrim_alpha"
-    )
+    val scrimAnim = remember { Animatable(0f) }
+    val itemAnims = remember { List(DefaultRadialItems.size) { Animatable(0f) } }
+    val labelAnims = remember { List(DefaultRadialItems.size) { Animatable(0f) } }
+
+    LaunchedEffect(isMenuOpen) {
+        if (isMenuOpen) {
+            keepRadialComposed = true
+            launch {
+                scrimAnim.animateTo(
+                    targetValue = 1f,
+                    animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
+                )
+            }
+            DefaultRadialItems.forEach { item ->
+                val idx = item.index
+                launch {
+                    delay(idx * 45L)
+                    itemAnims[idx].animateTo(
+                        targetValue = 1f,
+                        animationSpec = spring(
+                            dampingRatio = 0.72f,
+                            stiffness = 420f
+                        )
+                    )
+                }
+                launch {
+                    delay(idx * 40L + 95L)
+                    labelAnims[idx].animateTo(
+                        targetValue = 1f,
+                        animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+        } else {
+            launch {
+                scrimAnim.animateTo(
+                    targetValue = 0f,
+                    animationSpec = tween(durationMillis = 180, easing = FastOutSlowInEasing)
+                )
+            }
+            DefaultRadialItems.forEach { item ->
+                val idx = item.index
+                val reverseDelay = (DefaultRadialItems.lastIndex - idx) * 35L
+                launch {
+                    labelAnims[idx].animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 100)
+                    )
+                }
+                launch {
+                    delay(reverseDelay)
+                    itemAnims[idx].animateTo(
+                        targetValue = 0f,
+                        animationSpec = tween(durationMillis = 190, easing = FastOutSlowInEasing)
+                    )
+                }
+            }
+            delay(DefaultRadialItems.size * 35L + 200L)
+            if (!isMenuOpen) {
+                keepRadialComposed = false
+            }
+        }
+    }
 
     val fabScale by animateFloatAsState(
         targetValue = when {
             isDragging -> 1.08f
-            isMenuOpen -> 0.96f
+            isMenuOpen -> 0.95f
             else -> 1.0f
         },
         animationSpec = spring(
@@ -173,6 +244,8 @@ fun FloatingAiAssistantButton(
         val edgeMarginPx = with(density) { edgeMarginDp.toPx() }
         val topSafePx = with(density) { topSafeMarginDp.toPx() }
         val bottomSafePx = with(density) { bottomSafeMarginDp.toPx() }
+        val labelGapPx = with(density) { 10.dp.roundToPx() }
+        val labelSlidePx = with(density) { 8.dp.toPx() }
 
         val minX = edgeMarginPx
         val maxX = (screenWidthPx - fabSizePx - edgeMarginPx).coerceAtLeast(minX)
@@ -194,149 +267,64 @@ fun FloatingAiAssistantButton(
             }
         }
 
-        // 1. Backdrop Scrim (.fb-07__scrim)
-        if (scrimAlpha > 0.01f) {
+        // 1. Backdrop Scrim (.fb-07__scrim) — animated via graphicsLayer for 0 recompositions
+        if (keepRadialComposed) {
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .alpha(scrimAlpha)
+                    .zIndex(1f)
+                    .graphicsLayer {
+                        alpha = scrimAnim.value
+                    }
                     .background(Color(0x99120D1D))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
                         indication = null,
+                        enabled = isMenuOpen,
                         onClick = { isMenuOpen = false }
                     )
                     .testTag("floating_ai_scrim")
             )
         }
 
-        // Determine whether the quarter-circle should fan upward (-1f) or downward (+1f)
-        // so radial items never clip off the top of the screen if the FAB is dragged high up.
         val fanUpward = (offsetY.value - radialRadiusPx - actSizePx * 0.5f) >= with(density) { 48.dp.toPx() }
         val horizontalDir = if (isDockedRight) -1f else 1f
         val verticalDir = if (fanUpward) -1f else 1f
-
-        // 2. Radial Action Buttons (.fb-07__acts -> 4 items on a quarter-circle: i * 30deg)
         val actBaseInsetPx = (fabSizePx - actSizePx) / 2f
 
-        DefaultRadialItems.forEach { item ->
-            val itemProgress = remember(item.index) { Animatable(0f) }
-            val labelProgress = remember(item.index) { Animatable(0f) }
-
-            LaunchedEffect(isMenuOpen) {
-                if (isMenuOpen) {
-                    // Open staggered delay: calc(var(--fb-07-i) * 55ms)
-                    val openDelayMs = item.index * 55L
-                    launch {
-                        delay(openDelayMs)
-                        itemProgress.animateTo(
-                            targetValue = 1f,
-                            animationSpec = spring(
-                                dampingRatio = 0.68f,
-                                stiffness = 380f
-                            )
-                        )
-                    }
-                    // Label arrives a beat after its icon: calc(var(--fb-07-i) * 45ms + 120ms)
-                    launch {
-                        delay(item.index * 45L + 120L)
-                        labelProgress.animateTo(
-                            targetValue = 1f,
-                            animationSpec = tween(durationMillis = 200, easing = FastOutSlowInEasing)
-                        )
-                    }
-                } else {
-                    // Close staggered reverse delay: calc((3 - var(--fb-07-i)) * 45ms)
-                    val closeDelayMs = (DefaultRadialItems.lastIndex - item.index) * 45L
-                    launch {
-                        labelProgress.animateTo(
-                            targetValue = 0f,
-                            animationSpec = tween(durationMillis = 120)
-                        )
-                    }
-                    launch {
-                        delay(closeDelayMs)
-                        itemProgress.animateTo(
-                            targetValue = 0f,
-                            animationSpec = tween(durationMillis = 220, easing = FastOutSlowInEasing)
-                        )
-                    }
-                }
-            }
-
-            if (itemProgress.value > 0.01f) {
-                val angleDeg = item.index * 30.0
-                val angleRad = angleDeg * (PI / 180.0)
-                val tx = (cos(angleRad).toFloat() * radialRadiusPx * horizontalDir) * itemProgress.value
-                val ty = (sin(angleRad).toFloat() * radialRadiusPx * verticalDir) * itemProgress.value
-
-                val actCenterX = offsetX.value + actBaseInsetPx + tx
-                val actCenterY = offsetY.value + actBaseInsetPx + ty
-                val currentScale = 0.3f + 0.7f * itemProgress.value
-                val currentAlpha = itemProgress.value.coerceIn(0f, 1f)
+        if (keepRadialComposed) {
+            // 2A. Radial Action Icon Circles Layer (zIndex = 2f)
+            DefaultRadialItems.forEach { item ->
+                val itemAnim = itemAnims[item.index]
 
                 Box(
                     modifier = Modifier
+                        .zIndex(2f)
                         .offset {
                             IntOffset(
-                                x = actCenterX.roundToInt(),
-                                y = actCenterY.roundToInt()
+                                x = (offsetX.value + actBaseInsetPx).roundToInt(),
+                                y = (offsetY.value + actBaseInsetPx).roundToInt()
                             )
                         }
-                        .wrapContentSize(align = Alignment.Center, unbounded = true)
+                        .size(actSizeDp)
+                        .graphicsLayer {
+                            val p = itemAnim.value
+                            val clamped = p.coerceIn(0f, 1f)
+                            translationX = item.cosAngle * radialRadiusPx * horizontalDir * p
+                            translationY = item.sinAngle * radialRadiusPx * verticalDir * p
+                            val s = 0.3f + 0.7f * clamped
+                            scaleX = s
+                            scaleY = s
+                            alpha = clamped
+                        }
                 ) {
-                    // Floating Label Pill (.fb-07__lab) placed beside the circular button
-                    val labelSlidePx = with(density) { 8.dp.toPx() } * (1f - labelProgress.value) * (if (isDockedRight) 1f else -1f)
-                    val labelGapPx = with(density) { 12.dp.toPx() }
-
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = Color(0xE01B1626),
-                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.14f)),
-                        shadowElevation = 6.dp,
-                        modifier = Modifier
-                            .align(if (isDockedRight) Alignment.CenterStart else Alignment.CenterEnd)
-                            .offset {
-                                val xShift = if (isDockedRight) {
-                                    -(actSizePx / 2f + labelGapPx) + labelSlidePx
-                                } else {
-                                    (actSizePx / 2f + labelGapPx) + labelSlidePx
-                                }
-                                IntOffset(x = xShift.roundToInt(), y = 0)
-                            }
-                            .graphicsLayer {
-                                alpha = labelProgress.value.coerceIn(0f, 1f)
-                                // Shift by 50% of own width so it sits cleanly outside the 52dp button
-                                translationX = if (isDockedRight) -size.width / 2f else size.width / 2f
-                            }
-                            .clickable(
-                                enabled = isMenuOpen,
-                                onClick = {
-                                    isMenuOpen = false
-                                    if (item.prompt.isBlank()) onClick() else onSelectPrompt(item.prompt)
-                                }
-                            )
-                    ) {
-                        Text(
-                            text = item.label,
-                            color = Color(0xFFF7F5FA),
-                            fontSize = 12.5.sp,
-                            fontWeight = FontWeight.SemiBold,
-                            maxLines = 1,
-                            modifier = Modifier.padding(horizontal = 11.dp, vertical = 5.dp)
-                        )
-                    }
-
-                    // Circular Radial Action Button (.fb-07__act: 52dp circle, white surface, dark icon)
                     Surface(
                         shape = CircleShape,
                         color = Color(0xFFFAF9FC),
-                        shadowElevation = 10.dp,
+                        shadowElevation = 6.dp,
                         border = BorderStroke(1.dp, Color(0xFFE2E8F0)),
                         modifier = Modifier
-                            .size(actSizeDp)
-                            .scale(currentScale)
-                            .alpha(currentAlpha)
+                            .fillMaxSize()
                             .clip(CircleShape)
                             .clickable(
                                 enabled = isMenuOpen,
@@ -354,17 +342,100 @@ fun FloatingAiAssistantButton(
                             RadialActionSvgIcon(
                                 icon = item.icon,
                                 tint = Color(0xFF1E1B2E),
-                                modifier = Modifier.size(23.dp)
+                                modifier = Modifier.size(20.dp)
                             )
                         }
                     }
                 }
             }
+
+            // 2B. Floating Label Pills Layer (zIndex = 3f, rendered above ALL icons so no icon ever hides text)
+            DefaultRadialItems.forEach { item ->
+                val itemAnim = itemAnims[item.index]
+                val labelAnim = labelAnims[item.index]
+
+                Box(
+                    modifier = Modifier
+                        .zIndex(3f)
+                        .offset {
+                            IntOffset(
+                                x = (offsetX.value + actBaseInsetPx).roundToInt(),
+                                y = (offsetY.value + actBaseInsetPx).roundToInt()
+                            )
+                        }
+                        .size(actSizeDp)
+                        .graphicsLayer {
+                            val p = itemAnim.value
+                            translationX = item.cosAngle * radialRadiusPx * horizontalDir * p
+                            translationY = item.sinAngle * radialRadiusPx * verticalDir * p
+                        }
+                ) {
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = Color(0xE81B1626),
+                        border = BorderStroke(1.dp, Color.White.copy(alpha = 0.16f)),
+                        shadowElevation = 4.dp,
+                        modifier = Modifier
+                            .layout { measurable, constraints ->
+                                // Measure label at its natural width without being constrained by the 44dp icon box
+                                val looseConstraints = constraints.copy(
+                                    minWidth = 0,
+                                    maxWidth = Int.MAX_VALUE,
+                                    minHeight = 0
+                                )
+                                val placeable = measurable.measure(looseConstraints)
+                                val iconBoxPx = actSizeDp.roundToPx()
+                                layout(0, 0) {
+                                    // Place completely outside the 44dp circular icon with a 10dp gap
+                                    val xPos = if (isDockedRight) {
+                                        -placeable.width - labelGapPx
+                                    } else {
+                                        iconBoxPx + labelGapPx
+                                    }
+                                    val yPos = (iconBoxPx - placeable.height) / 2
+                                    placeable.place(xPos, yPos)
+                                }
+                            }
+                            .graphicsLayer {
+                                val lp = labelAnim.value.coerceIn(0f, 1f)
+                                alpha = lp
+                                translationX = labelSlidePx * (1f - lp) * (if (isDockedRight) 1f else -1f)
+                            }
+                            .clickable(
+                                enabled = isMenuOpen,
+                                onClick = {
+                                    isMenuOpen = false
+                                    if (item.prompt.isBlank()) onClick() else onSelectPrompt(item.prompt)
+                                }
+                            )
+                    ) {
+                        Text(
+                            text = item.label,
+                            color = Color(0xFFF7F5FA),
+                            fontSize = 12.sp,
+                            fontWeight = FontWeight.SemiBold,
+                            maxLines = 1,
+                            softWrap = false,
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                        )
+                    }
+                }
+            }
         }
 
-        // 3. Main Floating Button (.fb-07__fab) with the Dual Speech-Bubble "Ai" Icon
+        // 3. Main Floating Button (.fb-07__fab, 52.dp) with the Dual Speech-Bubble "Ai" Icon
+        val closeRotation by animateFloatAsState(
+            targetValue = if (isMenuOpen) 135f else 0f,
+            animationSpec = spring(
+                dampingRatio = 0.68f,
+                stiffness = 360f
+            ),
+            label = "fb07_icon_rotation"
+        )
+
         Box(
             modifier = Modifier
+                .zIndex(4f)
                 .offset {
                     IntOffset(
                         x = offsetX.value.roundToInt(),
@@ -372,7 +443,10 @@ fun FloatingAiAssistantButton(
                     )
                 }
                 .size(fabSizeDp)
-                .scale(fabScale)
+                .graphicsLayer {
+                    scaleX = fabScale
+                    scaleY = fabScale
+                }
                 .pointerInput(screenWidthPx, screenHeightPx, isMenuOpen) {
                     if (isMenuOpen) return@pointerInput
                     detectDragGestures(
@@ -441,7 +515,7 @@ fun FloatingAiAssistantButton(
                     )
                 }
                 .shadow(
-                    elevation = if (isDragging || isMenuOpen) 16.dp else 10.dp,
+                    elevation = 10.dp,
                     shape = CircleShape,
                     ambientColor = Color.Black,
                     spotColor = Color.Black
@@ -465,20 +539,11 @@ fun FloatingAiAssistantButton(
                 .testTag("floating_ai_assistant_button"),
             contentAlignment = Alignment.Center
         ) {
-            val closeRotation by animateFloatAsState(
-                targetValue = if (isMenuOpen) 135f else 0f,
-                animationSpec = spring(
-                    dampingRatio = 0.65f,
-                    stiffness = 340f
-                ),
-                label = "fb07_icon_rotation"
-            )
-
             if (isMenuOpen) {
                 // Close (+) rotated 135deg into an (×) just like .fb-07__fab[aria-expanded="true"] svg
                 Canvas(
                     modifier = Modifier
-                        .size(27.dp)
+                        .size(22.dp)
                         .graphicsLayer { rotationZ = closeRotation }
                 ) {
                     val w = size.width
@@ -503,7 +568,7 @@ fun FloatingAiAssistantButton(
                 // Exact Dual Speech-Bubble "Ai" Icon matching the user's attached image
                 AiDualChatBubblesIcon(
                     bubbleColor = Color(0xFF0A0A0D),
-                    modifier = Modifier.size(40.dp)
+                    modifier = Modifier.size(33.dp)
                 )
             }
         }
@@ -665,7 +730,6 @@ private fun RadialActionSvgIcon(
 
         when (icon) {
             RadialActionIcon.AI_CHAT -> {
-                // Clean chat bubble + AI star
                 val path = Path().apply {
                     moveTo(w * 0.20f, h * 0.24f)
                     lineTo(w * 0.80f, h * 0.24f)
@@ -699,7 +763,6 @@ private fun RadialActionSvgIcon(
             }
 
             RadialActionIcon.DOWNLOAD_PAPERS -> {
-                // Document with folded corner (<path d="M6 4h9l4 4v12H6z"/><path d="M15 4v5h4"/>)
                 val docPath = Path().apply {
                     moveTo(w * 0.25f, h * 0.16f)
                     lineTo(w * 0.625f, h * 0.16f)
@@ -718,7 +781,6 @@ private fun RadialActionSvgIcon(
             }
 
             RadialActionIcon.CREATE_QUIZ -> {
-                // Checklist / Quiz lines
                 drawLine(
                     color = tint,
                     start = Offset(w * 0.42f, h * 0.30f),
@@ -746,7 +808,6 @@ private fun RadialActionSvgIcon(
             }
 
             RadialActionIcon.SOLVE_STEPS -> {
-                // Sigma (∑) step-by-step math symbol
                 val sigmaPath = Path().apply {
                     moveTo(w * 0.76f, h * 0.22f)
                     lineTo(w * 0.26f, h * 0.22f)
