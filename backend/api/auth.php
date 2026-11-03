@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.5.0';
+const TS_API_VERSION                = '3.6.0';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -113,6 +113,11 @@ if (ts_requires_https() && !ts_is_https()) {
         'message' => 'Secure connection required.',
     ]);
     exit();
+}
+
+// Block direct browser navigation and unauthorized third-party origins/clients
+if (function_exists('ts_enforce_auth_client_gate')) {
+    ts_enforce_auth_client_gate();
 }
 
 $pdo      = getDbConnection();
@@ -1756,11 +1761,18 @@ if ($action === 'academic_profile') {
 }
 
 // ===========================================================================
-if ($action === 'login') {
-    requirePost('login');
+if ($action === 'login' || $action === 'web_login') {
+    requirePost($action);
 
     $email    = normalizeEmail($body['email'] ?? '');
     $password = (string) ($body['password'] ?? '');
+
+    $clientHeader = strtolower(trim((string) ($_SERVER['HTTP_X_THESTUDENT_CLIENT'] ?? '')));
+    $originHeader = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
+    $isWebClient  = ($action === 'web_login')
+        || in_array($clientHeader, ['web-assistant', 'thestudent-web'], true)
+        || ($originHeader === 'https://chatbot-liart-rho-81.vercel.app')
+        || (($body['client'] ?? '') === 'web');
 
     if ($password === '') {
         sendJsonResponse('error', 'Please enter your password.', [], 400);
@@ -1821,7 +1833,8 @@ if ($action === 'login') {
     $ipChanged = isNewNetwork($lastIp, $clientIp);
     $isSuspicious = (int) ($user['suspicious_flag'] ?? 0) === 1;
 
-    if ($ipChanged || $isSuspicious) {
+    // Trusted web login skips the rotating-serverless-IP challenge unless the account is flagged suspicious
+    if ((!$isWebClient && $ipChanged) || $isSuspicious) {
         enforceOtpSendThrottle($pdo, $clientIp, $email);
         $delivery = issueEmailOtp($pdo, $userId, $email, 'ip_change', null, $clientIp);
         if (!$delivery['sent']) {
@@ -1836,15 +1849,25 @@ if ($action === 'login') {
     }
 
     clearFailedAttempts($pdo, $clientIp, $email);
-    $pdo->prepare('UPDATE users SET last_login_ip = :ip, last_login_at = NOW(), suspicious_flag = 0 WHERE id = :id')
-        ->execute(['ip' => substr($clientIp, 0, 45), 'id' => $userId]);
+    if (!$isWebClient) {
+        $pdo->prepare('UPDATE users SET last_login_ip = :ip, last_login_at = NOW(), suspicious_flag = 0 WHERE id = :id')
+            ->execute(['ip' => substr($clientIp, 0, 45), 'id' => $userId]);
+    } else {
+        $pdo->prepare('UPDATE users SET last_login_at = NOW(), suspicious_flag = 0 WHERE id = :id')
+            ->execute(['id' => $userId]);
+    }
 
-    $session = createSession($pdo, $userId, $clientIp, 'Android App');
+    $deviceLabel = $isWebClient ? 'TheStudent Web Assistant' : 'Android App';
+    $session = createSession($pdo, $userId, $clientIp, $deviceLabel);
 
     sendJsonResponse('success', 'Login successful', [
         'token'      => $session['token'],
         'expires_at' => $session['expires_at'],
-        'user'       => publicUser($user + ['is_email_verified' => 1], ts_user_subjects($pdo, (int) $user['id'])),
+        'user'       => withExp(
+            $pdo,
+            publicUser($user + ['is_email_verified' => 1], ts_user_subjects($pdo, $userId)),
+            $userId
+        ),
     ]);
 }
 

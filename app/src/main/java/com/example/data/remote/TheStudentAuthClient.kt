@@ -108,6 +108,12 @@ object TheStudentAuthClient {
         .readTimeout(20, TimeUnit.SECONDS)
         .writeTimeout(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
+        .addInterceptor { chain ->
+            val request = chain.request().newBuilder()
+                .header("X-TheStudent-Client", "android-app")
+                .build()
+            chain.proceed(request)
+        }
         .build()
 
     private fun normalizeUrl(backendBaseUrl: String): String {

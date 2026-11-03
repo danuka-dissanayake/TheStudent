@@ -129,7 +129,7 @@ foreach ($__tsLegacyMap as $constName => $envSuffix) {
     if ($constName === 'SMTP_HOST')    { $fallback = 'ssl://smtp.gmail.com'; }
     if ($constName === 'SMTP_PORT')    { $fallback = 465; }
     if ($constName === 'SMTP_FROM_NAME') { $fallback = 'TheStudent Security'; }
-    if ($constName === 'ALLOWED_ORIGINS') { $fallback = 'https://app.quizontal.site'; }
+    if ($constName === 'ALLOWED_ORIGINS') { $fallback = 'https://app.quizontal.site,https://chatbot-liart-rho-81.vercel.app'; }
     if ($constName === 'TRUST_PROXY_HEADERS') { $fallback = '0'; }
     if ($constName === 'TRUSTED_PROXIES') { $fallback = ''; }
     if ($constName === 'REQUIRE_HTTPS') { $fallback = '1'; }
@@ -256,7 +256,13 @@ function ts_apply_security_headers(): void
     }
 
     $allowed = array_filter(array_map('trim', explode(',', (string) ALLOWED_ORIGINS)));
-    $origin = $_SERVER['HTTP_ORIGIN'] ?? '';
+    // Always permit the official TheStudent Web AI Assistant origin and backend origin
+    foreach (['https://app.quizontal.site', 'https://chatbot-liart-rho-81.vercel.app'] as $trustedOrigin) {
+        if (!in_array($trustedOrigin, $allowed, true)) {
+            $allowed[] = $trustedOrigin;
+        }
+    }
+    $origin = rtrim((string) ($_SERVER['HTTP_ORIGIN'] ?? ''), '/');
 
     if ($origin !== '' && !empty($allowed) && in_array('*', $allowed, true)) {
         // Wide-open CORS is only acceptable for the public read-only papers API.
@@ -268,11 +274,112 @@ function ts_apply_security_headers(): void
     }
 
     header('Access-Control-Allow-Methods: GET, POST, OPTIONS');
-    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With');
+    header('Access-Control-Allow-Headers: Content-Type, Authorization, X-Requested-With, X-TheStudent-Client, X-TheStudent-Key');
     header('Access-Control-Max-Age: 600');
 
     if (($_SERVER['REQUEST_METHOD'] ?? '') === 'OPTIONS') {
         http_response_code(204);
+        exit();
+    }
+}
+
+/**
+ * Strict access gate for /api/auth.php:
+ * - Blocks direct browser visits (address bar navigation / text/html document loads).
+ * - Blocks any third-party Origin or Referer outside TheStudent's web & backend origins.
+ * - Allows only TheStudent Android App and TheStudent Web App (chatbot-liart-rho-81.vercel.app).
+ */
+function ts_enforce_auth_client_gate(): void
+{
+    $allowedOrigins = array_filter(array_map(
+        static fn ($o) => rtrim(trim((string) $o), '/'),
+        explode(',', (string) ALLOWED_ORIGINS)
+    ));
+    foreach (['https://app.quizontal.site', 'https://chatbot-liart-rho-81.vercel.app'] as $trusted) {
+        if (!in_array($trusted, $allowedOrigins, true)) {
+            $allowedOrigins[] = $trusted;
+        }
+    }
+
+    // 1. Block direct browser address-bar navigation to the PHP script
+    $secFetchMode = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
+    $secFetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
+    $accept       = strtolower((string) ($_SERVER['HTTP_ACCEPT'] ?? ''));
+    $clientHeader = strtolower(trim((string) ($_SERVER['HTTP_X_THESTUDENT_CLIENT'] ?? '')));
+    $authHeader   = trim((string) ($_SERVER['HTTP_AUTHORIZATION'] ?? $_SERVER['REDIRECT_HTTP_AUTHORIZATION'] ?? ''));
+
+    if ($secFetchMode === 'navigate' || $secFetchDest === 'document' ||
+        (strpos($accept, 'text/html') !== false && $clientHeader === '' && $authHeader === '')) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Direct access to this endpoint is forbidden.',
+        ]);
+        exit();
+    }
+
+    // 2. If Origin or Referer is present, it MUST belong to an allowed origin
+    $origin = rtrim(trim((string) ($_SERVER['HTTP_ORIGIN'] ?? '')), '/');
+    if ($origin !== '' && $origin !== 'null' && !in_array($origin, $allowedOrigins, true)) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Unauthorized origin.',
+        ]);
+        exit();
+    }
+
+    $referer = trim((string) ($_SERVER['HTTP_REFERER'] ?? ''));
+    if ($referer !== '') {
+        $refParts = parse_url($referer);
+        $refOrigin = (isset($refParts['scheme'], $refParts['host']))
+            ? strtolower($refParts['scheme']) . '://' . strtolower($refParts['host']) . (isset($refParts['port']) ? ':' . $refParts['port'] : '')
+            : '';
+        if ($refOrigin !== '' && !in_array($refOrigin, $allowedOrigins, true)) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'status'  => 'error',
+                'message' => 'Unauthorized referer.',
+            ]);
+            exit();
+        }
+    }
+
+    // 3. Require either:
+    //    - X-TheStudent-Client: web-assistant | android-app
+    //    - Trusted Origin (https://chatbot-liart-rho-81.vercel.app or https://app.quizontal.site)
+    //    - Official Android OkHttp client / Bearer session token
+    $userAgent = strtolower((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+    $isTrustedClientHeader = in_array($clientHeader, ['web-assistant', 'android-app', 'thestudent-web', 'thestudent-android'], true);
+    $isTrustedOrigin = ($origin !== '' && in_array($origin, $allowedOrigins, true));
+    $isAndroidAppUa = (strpos($userAgent, 'okhttp/') !== false || strpos($userAgent, 'thestudent') !== false);
+    $hasBearer = (stripos($authHeader, 'Bearer ') === 0);
+
+    // Optional shared key check if THESTUDENT_WEB_CLIENT_KEY is configured in config.secrets.php
+    $configuredWebKey = (string) ts_env('WEB_CLIENT_KEY', '');
+    if ($configuredWebKey !== '' && $clientHeader === 'web-assistant') {
+        $providedKey = trim((string) ($_SERVER['HTTP_X_THESTUDENT_KEY'] ?? ''));
+        if (!hash_equals($configuredWebKey, $providedKey)) {
+            http_response_code(403);
+            header('Content-Type: application/json; charset=utf-8');
+            echo json_encode([
+                'status'  => 'error',
+                'message' => 'Invalid client security key.',
+            ]);
+            exit();
+        }
+    }
+
+    if (!$isTrustedClientHeader && !$isTrustedOrigin && !$isAndroidAppUa && !$hasBearer) {
+        http_response_code(403);
+        header('Content-Type: application/json; charset=utf-8');
+        echo json_encode([
+            'status'  => 'error',
+            'message' => 'Access restricted to TheStudent official apps.',
+        ]);
         exit();
     }
 }

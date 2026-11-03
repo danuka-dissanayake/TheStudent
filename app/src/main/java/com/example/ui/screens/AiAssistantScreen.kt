@@ -16,6 +16,7 @@ import android.os.Environment
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
+import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -149,6 +150,49 @@ private const val AI_ASSISTANT_TRUSTED_HOST = "chatbot-liart-rho-81.vercel.app"
 
 private val AiWebBackground = Color(0xFF121016)
 private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
+
+/**
+ * Origin-verified bridge for the "Login with TheStudent Android App" button on the Web Login Screen.
+ * Returns the 64-hex session token ONLY when the WebView is currently on `https://chatbot-liart-rho-81.vercel.app`.
+ */
+private class TheStudentAppLoginBridge(
+    private val webViewProvider: () -> WebView?,
+    private val tokenProvider: () -> String?
+) {
+    private fun isOnTrustedOrigin(): Boolean {
+        val wv = webViewProvider() ?: return false
+        val currentUrl = try {
+            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
+                wv.url
+            } else {
+                var urlResult: String? = null
+                val latch = java.util.concurrent.CountDownLatch(1)
+                wv.post {
+                    urlResult = wv.url
+                    latch.countDown()
+                }
+                latch.await(1, java.util.concurrent.TimeUnit.SECONDS)
+                urlResult
+            }
+        } catch (_: Exception) {
+            null
+        } ?: return false
+
+        val uri = runCatching { Uri.parse(currentUrl) }.getOrNull() ?: return false
+        return uri.scheme.equals("https", ignoreCase = true) &&
+            uri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
+    }
+
+    @JavascriptInterface
+    fun isAndroidApp(): Boolean = isOnTrustedOrigin()
+
+    @JavascriptInterface
+    fun getSessionToken(): String {
+        if (!isOnTrustedOrigin()) return ""
+        val token = tokenProvider()?.trim().orEmpty()
+        return if (token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) token else ""
+    }
+}
 
 /**
  * Single, origin-locked authentication handshake:
@@ -395,6 +439,14 @@ fun AiAssistantScreen(
                         val cookieManager = CookieManager.getInstance()
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, false)
+
+                        addJavascriptInterface(
+                            TheStudentAppLoginBridge(
+                                webViewProvider = { this },
+                                tokenProvider = { preferences.sessionToken }
+                            ),
+                            "TheStudentAndroid"
+                        )
 
                         settings.apply {
                             javaScriptEnabled = true
