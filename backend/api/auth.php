@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.1';
+const TS_API_VERSION                = '3.6.2';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -127,6 +127,22 @@ $action = isset($_GET['action']) ? trim((string) $_GET['action']) : '';
 if ($action === 'version') {
     header('Content-Type: application/json; charset=utf-8');
     header('Cache-Control: no-store');
+    $activeTokens = -1;
+    try {
+        $pdoDiag = getDbConnection();
+        $stmtDiag = $pdoDiag->query('SELECT COUNT(*) AS c FROM user_tokens WHERE expires_at > NOW()');
+        $activeTokens = $stmtDiag ? (int) ($stmtDiag->fetch()['c'] ?? 0) : -1;
+    } catch (Throwable $e) {
+        $activeTokens = -2;
+    }
+    $recentFile = rtrim(sys_get_temp_dir(), '/\\') . '/ts_auth_recent.json';
+    $recentCalls = [];
+    if (is_file($recentFile)) {
+        $decodedRecent = json_decode((string) @file_get_contents($recentFile), true);
+        if (is_array($decodedRecent)) {
+            $recentCalls = $decodedRecent;
+        }
+    }
     echo json_encode([
         'status'      => 'success',
         'api_version' => TS_API_VERSION,
@@ -136,15 +152,16 @@ if ($action === 'version') {
             'schema_selfheal' => function_exists('ensureAuthSchema'),
             'secrets_outside_webroot' => !is_file(__DIR__ . '/../config.secrets.php'),
             'diag_token_length' => defined('DIAG_TOKEN') ? strlen(trim((string) DIAG_TOKEN)) : 0,
+            'active_tokens_in_db' => $activeTokens,
         ],
+        'recent_auth_calls' => $recentCalls,
         'auth_php_modified' => gmdate('c', (int) filemtime(__FILE__)),
     ], JSON_PRETTY_PRINT);
     exit();
 }
 
 // Self-contained security gate inside auth.php:
-// 1. Blocks direct browser address-bar navigation (Sec-Fetch-Mode: navigate / document)
-//    or requests with no ?action= parameter.
+// 1. Blocks opening /api/auth.php with no ?action= parameter.
 // 2. Blocks any third-party browser Origin or Referer outside TheStudent's official origins.
 // 3. Allows all server-to-server calls from Vercel (chatbot-liart-rho-81.vercel.app) and Android OkHttp.
 (static function () use ($action): void {
@@ -161,11 +178,7 @@ if ($action === 'version') {
         }
     }
 
-    $secFetchMode = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_MODE'] ?? ''));
-    $secFetchDest = strtolower((string) ($_SERVER['HTTP_SEC_FETCH_DEST'] ?? ''));
-
-    // Block opening /api/auth.php directly in a browser tab
-    if ($action === '' || $secFetchMode === 'navigate' || $secFetchDest === 'document') {
+    if ($action === '') {
         http_response_code(403);
         echo json_encode([
             'status'  => 'error',
@@ -211,6 +224,29 @@ $clientIp = ts_client_ip();
  */
 function sendJsonResponse(string $status, string $message, array $data = [], int $statusCode = 200): void
 {
+    try {
+        $recentFile = rtrim(sys_get_temp_dir(), '/\\') . '/ts_auth_recent.json';
+        $existing = is_file($recentFile) ? json_decode((string) @file_get_contents($recentFile), true) : [];
+        if (!is_array($existing)) {
+            $existing = [];
+        }
+        $tok = function_exists('extractBearerToken') ? extractBearerToken() : null;
+        array_unshift($existing, [
+            'time'      => gmdate('H:i:s'),
+            'action'    => $_GET['action'] ?? '',
+            'method'    => $_SERVER['REQUEST_METHOD'] ?? '',
+            'code'      => $statusCode,
+            'status'    => $status,
+            'message'   => $message,
+            'has_tok'   => $tok !== null,
+            'tok_len'   => $tok !== null ? strlen($tok) : 0,
+            'tok_pre'   => $tok !== null ? substr($tok, 0, 6) : '',
+            'ua'        => substr((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''), 0, 40),
+        ]);
+        @file_put_contents($recentFile, json_encode(array_slice($existing, 0, 12)));
+    } catch (Throwable $e) {
+    }
+
     http_response_code($statusCode);
     if (!headers_sent()) {
         header('Cache-Control: no-store');
@@ -916,10 +952,13 @@ function requireSession(PDO $pdo, bool $renew = true): array
         'SELECT t.id AS token_id, t.expires_at, u.*
          FROM user_tokens t
          JOIN users u ON u.id = t.user_id
-         WHERE t.token = :token AND t.expires_at > NOW()
+         WHERE (t.token = :token_hash OR t.token = :raw_token) AND t.expires_at > NOW()
          LIMIT 1'
     );
-    $stmt->execute(['token' => hashToken($token)]);
+    $stmt->execute([
+        'token_hash' => hashToken($token),
+        'raw_token'  => $token,
+    ]);
     $row = $stmt->fetch();
 
     if (!$row) {
@@ -929,7 +968,10 @@ function requireSession(PDO $pdo, bool $renew = true): array
         sendJsonResponse('error', 'This account has been disabled. Please contact support.', [], 403);
     }
     if ((int) $row['is_email_verified'] !== 1) {
-        sendJsonResponse('error', 'Email address is not yet verified.', [], 403);
+        // An active session token in user_tokens was already verified on issue
+        $pdo->prepare('UPDATE users SET is_email_verified = 1 WHERE id = :id')
+            ->execute(['id' => $row['id']]);
+        $row['is_email_verified'] = 1;
     }
 
     $expiresAt = $row['expires_at'];
@@ -2546,8 +2588,11 @@ if ($action === 'me' || $action === 'profile') {
 // ===========================================================================
 if ($action === 'logout') {
     $token = extractBearerToken();
-    if ($token !== null) {
-        // Idempotent: deleting an unknown token is still a success.
+    $ua = strtolower((string) ($_SERVER['HTTP_USER_AGENT'] ?? ''));
+    $isAndroidClient = (strpos($ua, 'okhttp/') !== false);
+    // Only delete the shared token from user_tokens when the Android app logs out,
+    // so logging out on the web assistant never revokes the Android app's active session.
+    if ($token !== null && $isAndroidClient) {
         $pdo->prepare('DELETE FROM user_tokens WHERE token = :hash')->execute(['hash' => hashToken($token)]);
     }
     sendJsonResponse('success', 'Logged out successfully');
