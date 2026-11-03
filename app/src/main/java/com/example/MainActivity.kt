@@ -827,9 +827,11 @@ class MainActivity : ComponentActivity() {
                                 )
                             }
 
-                            // Draggable floating AI Assistant button visible across screens
+                            // Draggable floating AI Assistant button visible across screens (excluded on Chat screen)
                             if (!uiState.isAiAssistantOpen &&
                                 !drawerState.isOpen &&
+                                uiState.currentTab != TheStudentNavTab.CHAT &&
+                                !uiState.isChatConversationOpen &&
                                 (uiState.isAuthenticated || viewModel.preferences.isLoggedIn)
                             ) {
                                 FloatingAiAssistantButton(

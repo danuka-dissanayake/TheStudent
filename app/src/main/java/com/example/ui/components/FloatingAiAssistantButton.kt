@@ -15,7 +15,9 @@ import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -52,16 +54,14 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.zIndex
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlin.math.PI
-import kotlin.math.cos
 import kotlin.math.roundToInt
-import kotlin.math.sin
 
 private enum class RadialActionIcon {
     AI_CHAT,
@@ -70,13 +70,20 @@ private enum class RadialActionIcon {
     SOLVE_STEPS
 }
 
+/**
+ * Each item sits along a quarter-circle curve `(dxDp, dyDp)` where `dxDp` follows a smooth
+ * cosine curve (`116dp -> 104dp -> 74dp -> 26dp`) while `dyDp` steps by a full `48.dp` per row
+ * (`8dp -> 56dp -> 104dp -> 152dp`). This guarantees every circular icon and its horizontal
+ * label pill sit on their own vertical tier with zero overlap between "Solve step by step"
+ * and "Create quiz".
+ */
 private data class RadialSpeedDialItem(
     val index: Int,
     val label: String,
     val prompt: String,
     val icon: RadialActionIcon,
-    val cosAngle: Float,
-    val sinAngle: Float
+    val dxDp: Dp,
+    val dyDp: Dp
 )
 
 private val DefaultRadialItems = listOf(
@@ -85,32 +92,32 @@ private val DefaultRadialItems = listOf(
         label = "Ask AI Chat",
         prompt = "",
         icon = RadialActionIcon.AI_CHAT,
-        cosAngle = cos(0.0).toFloat(),
-        sinAngle = sin(0.0).toFloat()
+        dxDp = 116.dp,
+        dyDp = 8.dp
     ),
     RadialSpeedDialItem(
         index = 1,
         label = "Download papers",
         prompt = "Find and download official Sri Lankan past papers and marking schemes.",
         icon = RadialActionIcon.DOWNLOAD_PAPERS,
-        cosAngle = cos(30.0 * PI / 180.0).toFloat(),
-        sinAngle = sin(30.0 * PI / 180.0).toFloat()
+        dxDp = 104.dp,
+        dyDp = 56.dp
     ),
     RadialSpeedDialItem(
         index = 2,
         label = "Create quiz",
         prompt = "Create an interactive MCQ practice quiz to test my knowledge.",
         icon = RadialActionIcon.CREATE_QUIZ,
-        cosAngle = cos(60.0 * PI / 180.0).toFloat(),
-        sinAngle = sin(60.0 * PI / 180.0).toFloat()
+        dxDp = 74.dp,
+        dyDp = 104.dp
     ),
     RadialSpeedDialItem(
         index = 3,
         label = "Solve step by step",
         prompt = "Solve this math or science problem step by step with clear explanations.",
         icon = RadialActionIcon.SOLVE_STEPS,
-        cosAngle = cos(90.0 * PI / 180.0).toFloat(),
-        sinAngle = sin(90.0 * PI / 180.0).toFloat()
+        dxDp = 26.dp,
+        dyDp = 152.dp
     )
 )
 
@@ -118,14 +125,13 @@ private val DefaultRadialItems = listOf(
  * Speed Dial Radial Menu FAB with Backdrop (`fb-07` design) + Draggable Left/Right Docking
  * + Exact Dual Speech-Bubble "Ai" Icon.
  *
- * Performance & Layout Optimizations:
- * - Compact `52.dp` main FAB and `44.dp` radial action buttons, positioned lower on initial load
- *   just above the bottom navigation bar (`verticalFraction = 0.92f`).
- * - Zero-recomposition 60/120fps animations: all `Animatable` values are read strictly inside
- *   GPU `graphicsLayer` lambdas instead of during composition.
- * - Non-overlapping labels: labels are placed via custom `Modifier.layout` outside the full width
- *   of each action icon with a guaranteed `10.dp` gap, and rendered in a dedicated top z-index layer
- *   above all radial icons so no icon ever hides any part of the label text.
+ * - **Lowest Initial Position**: Starts at `verticalFraction = 1.0f` (`maxY`), the lowest level
+ *   the floating button can appear right above the bottom navigation bar.
+ * - **Zero Label Overlap**: Each radial action along the quarter-circle arc is separated by
+ *   a full `48.dp` vertically (`8dp`, `56dp`, `104dp`, `152dp`), so "Solve step by step" sits
+ *   cleanly on its own row above "Create quiz" with `20.dp` of vertical clearance between pills.
+ * - **GPU-Accelerated 60/120fps Animation**: All `Animatable` reads happen strictly inside
+ *   `Modifier.graphicsLayer` lambdas with zero Compose recomposition during frames.
  */
 @Composable
 fun FloatingAiAssistantButton(
@@ -136,24 +142,25 @@ fun FloatingAiAssistantButton(
     val density = LocalDensity.current
     val coroutineScope = rememberCoroutineScope()
 
-    var isDockedRight by rememberSaveable { mutableStateOf(true) }
-    // Lower initial vertical position on first load (just above the bottom nav bar)
-    var verticalFraction by rememberSaveable { mutableFloatStateOf(0.92f) }
+    var isDockedRight by rememberSaveable(key = "ai_fab_docked_right_v3") { mutableStateOf(true) }
+    // 1.0f places the button at maxY (the lowest possible vertical level on first load)
+    var verticalFraction by rememberSaveable(key = "ai_fab_vertical_fraction_v3") { mutableFloatStateOf(1.0f) }
     var isDragging by remember { mutableStateOf(false) }
-    var isMenuOpen by rememberSaveable { mutableStateOf(false) }
+    var isMenuOpen by remember { mutableStateOf(false) }
     var keepRadialComposed by remember { mutableStateOf(false) }
 
     BackHandler(enabled = isMenuOpen) {
         isMenuOpen = false
     }
 
-    // Reduced, sleeker button dimensions
     val fabSizeDp = 52.dp
     val actSizeDp = 44.dp
-    val radialDistanceDp = 114.dp
+    val maxArcHeightDp = 152.dp
     val edgeMarginDp = 16.dp
     val topSafeMarginDp = 88.dp
-    val bottomSafeMarginDp = 90.dp
+    // Lowest safe margin directly above the 58dp bottom navigation bar
+    val navBarInsetBottomPx = WindowInsets.navigationBars.getBottom(density).toFloat()
+    val bottomBarClearancePx = with(density) { 74.dp.toPx() } + navBarInsetBottomPx
 
     val scrimAnim = remember { Animatable(0f) }
     val itemAnims = remember { List(DefaultRadialItems.size) { Animatable(0f) } }
@@ -240,17 +247,16 @@ fun FloatingAiAssistantButton(
 
         val fabSizePx = with(density) { fabSizeDp.toPx() }
         val actSizePx = with(density) { actSizeDp.toPx() }
-        val radialRadiusPx = with(density) { radialDistanceDp.toPx() }
+        val maxArcHeightPx = with(density) { maxArcHeightDp.toPx() }
         val edgeMarginPx = with(density) { edgeMarginDp.toPx() }
         val topSafePx = with(density) { topSafeMarginDp.toPx() }
-        val bottomSafePx = with(density) { bottomSafeMarginDp.toPx() }
         val labelGapPx = with(density) { 10.dp.roundToPx() }
         val labelSlidePx = with(density) { 8.dp.toPx() }
 
         val minX = edgeMarginPx
         val maxX = (screenWidthPx - fabSizePx - edgeMarginPx).coerceAtLeast(minX)
         val minY = topSafePx
-        val maxY = (screenHeightPx - fabSizePx - bottomSafePx).coerceAtLeast(minY)
+        val maxY = (screenHeightPx - fabSizePx - bottomBarClearancePx).coerceAtLeast(minY)
 
         val targetDockedX = if (isDockedRight) maxX else minX
         val targetDockedY = (minY + (maxY - minY) * verticalFraction.coerceIn(0f, 1f)).coerceIn(minY, maxY)
@@ -258,7 +264,7 @@ fun FloatingAiAssistantButton(
         val offsetX = remember { Animatable(targetDockedX) }
         val offsetY = remember { Animatable(targetDockedY) }
 
-        LaunchedEffect(screenWidthPx, screenHeightPx) {
+        LaunchedEffect(screenWidthPx, screenHeightPx, bottomBarClearancePx) {
             if (!isDragging && screenWidthPx > 0f && screenHeightPx > 0f) {
                 val snappedX = if (isDockedRight) maxX else minX
                 val clampedY = (minY + (maxY - minY) * verticalFraction.coerceIn(0f, 1f)).coerceIn(minY, maxY)
@@ -287,7 +293,7 @@ fun FloatingAiAssistantButton(
             )
         }
 
-        val fanUpward = (offsetY.value - radialRadiusPx - actSizePx * 0.5f) >= with(density) { 48.dp.toPx() }
+        val fanUpward = (offsetY.value - maxArcHeightPx - actSizePx * 0.5f) >= with(density) { 48.dp.toPx() }
         val horizontalDir = if (isDockedRight) -1f else 1f
         val verticalDir = if (fanUpward) -1f else 1f
         val actBaseInsetPx = (fabSizePx - actSizePx) / 2f
@@ -296,6 +302,8 @@ fun FloatingAiAssistantButton(
             // 2A. Radial Action Icon Circles Layer (zIndex = 2f)
             DefaultRadialItems.forEach { item ->
                 val itemAnim = itemAnims[item.index]
+                val itemDxPx = with(density) { item.dxDp.toPx() }
+                val itemDyPx = with(density) { item.dyDp.toPx() }
 
                 Box(
                     modifier = Modifier
@@ -310,8 +318,8 @@ fun FloatingAiAssistantButton(
                         .graphicsLayer {
                             val p = itemAnim.value
                             val clamped = p.coerceIn(0f, 1f)
-                            translationX = item.cosAngle * radialRadiusPx * horizontalDir * p
-                            translationY = item.sinAngle * radialRadiusPx * verticalDir * p
+                            translationX = itemDxPx * horizontalDir * p
+                            translationY = itemDyPx * verticalDir * p
                             val s = 0.3f + 0.7f * clamped
                             scaleX = s
                             scaleY = s
@@ -353,6 +361,8 @@ fun FloatingAiAssistantButton(
             DefaultRadialItems.forEach { item ->
                 val itemAnim = itemAnims[item.index]
                 val labelAnim = labelAnims[item.index]
+                val itemDxPx = with(density) { item.dxDp.toPx() }
+                val itemDyPx = with(density) { item.dyDp.toPx() }
 
                 Box(
                     modifier = Modifier
@@ -366,8 +376,8 @@ fun FloatingAiAssistantButton(
                         .size(actSizeDp)
                         .graphicsLayer {
                             val p = itemAnim.value
-                            translationX = item.cosAngle * radialRadiusPx * horizontalDir * p
-                            translationY = item.sinAngle * radialRadiusPx * verticalDir * p
+                            translationX = itemDxPx * horizontalDir * p
+                            translationY = itemDyPx * verticalDir * p
                         }
                 ) {
                     Surface(
@@ -377,7 +387,6 @@ fun FloatingAiAssistantButton(
                         shadowElevation = 4.dp,
                         modifier = Modifier
                             .layout { measurable, constraints ->
-                                // Measure label at its natural width without being constrained by the 44dp icon box
                                 val looseConstraints = constraints.copy(
                                     minWidth = 0,
                                     maxWidth = Int.MAX_VALUE,
@@ -386,7 +395,6 @@ fun FloatingAiAssistantButton(
                                 val placeable = measurable.measure(looseConstraints)
                                 val iconBoxPx = actSizeDp.roundToPx()
                                 layout(0, 0) {
-                                    // Place completely outside the 44dp circular icon with a 10dp gap
                                     val xPos = if (isDockedRight) {
                                         -placeable.width - labelGapPx
                                     } else {
@@ -447,7 +455,7 @@ fun FloatingAiAssistantButton(
                     scaleX = fabScale
                     scaleY = fabScale
                 }
-                .pointerInput(screenWidthPx, screenHeightPx, isMenuOpen) {
+                .pointerInput(screenWidthPx, screenHeightPx, bottomBarClearancePx, isMenuOpen) {
                     if (isMenuOpen) return@pointerInput
                     detectDragGestures(
                         onDragStart = {
@@ -588,7 +596,6 @@ fun AiDualChatBubblesIcon(
     modifier: Modifier = Modifier
 ) {
     Canvas(modifier = modifier) {
-        // Original artwork coordinate system: 260 x 250 (x: 34..294, y: 11..261)
         val scaleX = size.width / 260f
         val scaleY = size.height / 250f
         val s = minOf(scaleX, scaleY)
@@ -611,14 +618,12 @@ fun AiDualChatBubblesIcon(
                     bottom = frontCenter.y + frontRadius
                 )
             )
-            // Sharp bottom-right speech tail
             moveTo(px(236f), py(188f))
             lineTo(px(280f), py(199f))
             lineTo(px(267f), py(163f))
             close()
         }
 
-        // Cutout gap around the front bubble to carve the crescent back bubble
         val gapRadius = 108f * s
         val frontGapPath = Path().apply {
             addOval(
@@ -644,7 +649,6 @@ fun AiDualChatBubblesIcon(
                     bottom = backCenter.y + backRadius
                 )
             )
-            // Sharp bottom-left speech tail
             moveTo(px(62f), py(220f))
             lineTo(px(47f), py(258f))
             lineTo(px(92f), py(242f))
@@ -657,7 +661,6 @@ fun AiDualChatBubblesIcon(
 
         // 3. Bold "A" and "i" cutout inside the front bubble
         val letterCutoutPath = Path().apply {
-            // Outer contour of "A" (with horizontal crossbar)
             moveTo(px(171f), py(55f))
             lineTo(px(185f), py(55f))
             lineTo(px(214f), py(137f))
@@ -668,7 +671,6 @@ fun AiDualChatBubblesIcon(
             lineTo(px(142f), py(137f))
             close()
 
-            // Dot of "i"
             addRect(
                 Rect(
                     left = px(235f),
@@ -678,7 +680,6 @@ fun AiDualChatBubblesIcon(
                 )
             )
 
-            // Stem of "i"
             addRect(
                 Rect(
                     left = px(235f),
@@ -689,7 +690,6 @@ fun AiDualChatBubblesIcon(
             )
         }
 
-        // Inner triangle hole of "A" (kept solid)
         val aInnerHolePath = Path().apply {
             moveTo(px(178f), py(73f))
             lineTo(px(189f), py(109f))
