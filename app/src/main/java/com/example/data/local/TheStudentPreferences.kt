@@ -194,6 +194,11 @@ class TheStudentPreferences(context: Context) {
             .remove(KEY_SESSION_EXPIRES_AT)
             .remove(KEY_USER_ROLE)
             .apply()
+        runCatching {
+            val cookieManager = android.webkit.CookieManager.getInstance()
+            cookieManager.removeAllCookies(null)
+            cookieManager.flush()
+        }
     }
 
     companion object {
@@ -232,6 +237,14 @@ class TheStudentPreferences(context: Context) {
             expiresAt: String? = null
         ) {
             val prefs = TheStudentPreferences(context)
+            val previousEmail = prefs.userEmail.orEmpty()
+            if (previousEmail.isNotBlank() && !previousEmail.equals(userEmail, ignoreCase = true)) {
+                runCatching {
+                    val cookieManager = android.webkit.CookieManager.getInstance()
+                    cookieManager.removeAllCookies(null)
+                    cookieManager.flush()
+                }
+            }
             prefs.sessionToken = token
             prefs.userEmail = userEmail
             prefs.userName = userName

@@ -133,6 +133,9 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
 import androidx.core.graphics.PathParser
 import androidx.core.view.WindowCompat
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.data.local.TheStudentPreferences
 import com.example.data.model.AiAssistantMessage
 import com.example.data.model.AiModelChoice
@@ -152,88 +155,47 @@ private val AiWebBackground = Color(0xFF121016)
 private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
 
 /**
- * Origin-verified bridge for the "Login with TheStudent Android App" button on the Web Login Screen.
- * Returns the 64-hex session token ONLY when the WebView is currently on `https://chatbot-liart-rho-81.vercel.app`.
+ * Official JavaScript bridge exposed as `window.TheStudentAndroid` (Section 4.1).
+ * - Updated from `WebViewClient.onPageStarted` / `onPageFinished`.
+ * - Bridge calls run on a background thread (`JavaBridge`), so it never touches the `WebView`
+ *   instance directly and returns the 64-hex session token synchronously and immediately.
  */
-private class TheStudentAppLoginBridge(
-    private val webViewProvider: () -> WebView?,
+private class TheStudentBridge(
     private val tokenProvider: () -> String?
 ) {
-    private fun isOnTrustedOrigin(): Boolean {
-        val wv = webViewProvider() ?: return false
-        val currentUrl = try {
-            if (android.os.Looper.myLooper() == android.os.Looper.getMainLooper()) {
-                wv.url
-            } else {
-                var urlResult: String? = null
-                val latch = java.util.concurrent.CountDownLatch(1)
-                wv.post {
-                    urlResult = wv.url
-                    latch.countDown()
-                }
-                latch.await(1, java.util.concurrent.TimeUnit.SECONDS)
-                urlResult
-            }
-        } catch (_: Exception) {
-            null
-        } ?: return false
-
-        val uri = runCatching { Uri.parse(currentUrl) }.getOrNull() ?: return false
-        return uri.scheme.equals("https", ignoreCase = true) &&
-            uri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
-    }
+    @Volatile
+    var pageHost: String? = AI_ASSISTANT_TRUSTED_HOST
 
     @JavascriptInterface
-    fun isAndroidApp(): Boolean = isOnTrustedOrigin()
+    fun isAndroidApp(): Boolean = true
 
     @JavascriptInterface
     fun getSessionToken(): String {
-        if (!isOnTrustedOrigin()) return ""
-        val token = tokenProvider()?.trim().orEmpty()
+        if (pageHost != AI_ASSISTANT_TRUSTED_HOST) return ""
+        val token = tokenProvider().orEmpty().trim()
         return if (token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) token else ""
     }
 }
 
 /**
- * Single, origin-locked authentication handshake:
- * - Verifies that the WebView is currently on `https://chatbot-liart-rho-81.vercel.app`.
- * - Sends ONLY the opaque 64-hex session token via `window.postMessage` with a strict
- *   `targetOrigin` of `https://chatbot-liart-rho-81.vercel.app`.
- * - No `@JavascriptInterface`, no `localStorage`, and no unverified client profile JSON.
- * - The web app verifies the token server-to-server against `GET /api/auth.php?action=me`.
+ * Backup origin-locked handshake message (Section 4.4).
  */
 private fun postOriginLockedAuthHandshake(
     webView: WebView?,
+    url: String?,
     sessionToken: String?
 ) {
-    if (webView == null || sessionToken.isNullOrBlank()) return
-    val currentUri = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull() ?: return
-    val isTrustedOrigin = currentUri.scheme.equals("https", ignoreCase = true) &&
-        currentUri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
-    if (!isTrustedOrigin) return
+    if (webView == null) return
+    val currentUrl = url ?: webView.url.orEmpty()
+    val host = runCatching { Uri.parse(currentUrl).host }.getOrNull()
+    if (host != AI_ASSISTANT_TRUSTED_HOST) return
 
-    // Only allow hex session tokens to be interpolated
-    if (!sessionToken.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) return
+    val token = sessionToken?.trim().orEmpty()
+    if (!token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) return
 
-    val quotedToken = JSONObject.quote(sessionToken)
+    val quotedToken = JSONObject.quote(token)
     val quotedOrigin = JSONObject.quote(AI_ASSISTANT_TRUSTED_ORIGIN)
-    val script = """
-        (function() {
-            if (window.location.origin !== $quotedOrigin) return;
-            var sendHandshake = function() {
-                if (window.location.origin === $quotedOrigin) {
-                    window.postMessage(
-                        { type: 'THESTUDENT_AUTH_HANDSHAKE', token: $quotedToken },
-                        $quotedOrigin
-                    );
-                }
-            };
-            sendHandshake();
-            setTimeout(sendHandshake, 350);
-            setTimeout(sendHandshake, 1000);
-            setTimeout(sendHandshake, 2500);
-        })();
-    """.trimIndent()
+    val script = "window.postMessage({type:'THESTUDENT_AUTH_HANDSHAKE',token:$quotedToken},$quotedOrigin);"
     webView.evaluateJavascript(script, null)
 }
 
@@ -285,10 +247,25 @@ fun AiAssistantScreen(
 ) {
     val context = LocalContext.current
     val view = LocalView.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
     // 1. Keep the status bar transparent and flip status bar texts/icons to light (white)
     //    so they are clearly visible against the dark AI Assistant background.
     TheStudentSystemBars(darkIcons = false)
+
+    // Flush cookies on ON_PAUSE so the login cookie survives the app being killed (Section 4.3)
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_PAUSE || event == Lifecycle.Event.ON_STOP) {
+                runCatching { CookieManager.getInstance().flush() }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+            runCatching { CookieManager.getInstance().flush() }
+        }
+    }
 
     if (!view.isInEditMode) {
         DisposableEffect(view) {
@@ -319,11 +296,37 @@ fun AiAssistantScreen(
     var hasLoadError by remember { mutableStateOf(false) }
 
     val preferences = remember(context) { TheStudentPreferences(context) }
+    val bridge = remember(preferences) {
+        TheStudentBridge(tokenProvider = { preferences.sessionToken })
+    }
+    var lastSyncedToken by remember { mutableStateOf(preferences.sessionToken.orEmpty().trim()) }
 
-    LaunchedEffect(userProfile.isLoggedIn, isPageLoading) {
-        val wv = webViewRef
-        if (wv != null && !isPageLoading) {
-            postOriginLockedAuthHandshake(wv, preferences.sessionToken)
+    // Keep the app and web accounts in sync (Section 4.4 & 4.5)
+    LaunchedEffect(userProfile.isLoggedIn, userProfile.email, isPageLoading) {
+        val wv = webViewRef ?: return@LaunchedEffect
+        val currentToken = preferences.sessionToken.orEmpty().trim()
+        if (currentToken != lastSyncedToken) {
+            lastSyncedToken = currentToken
+            if (currentToken.isEmpty()) {
+                // Logged out: clear WebView cookies, flush, and reload
+                val cm = CookieManager.getInstance()
+                cm.removeAllCookies {
+                    cm.flush()
+                    wv.loadUrl(AI_ASSISTANT_WEB_URL)
+                }
+                return@LaunchedEffect
+            } else {
+                // Switched account / new token: clear old cookies, flush, and reload
+                val cm = CookieManager.getInstance()
+                cm.removeAllCookies {
+                    cm.flush()
+                    wv.loadUrl(AI_ASSISTANT_WEB_URL)
+                }
+                return@LaunchedEffect
+            }
+        }
+        if (!isPageLoading && currentToken.isNotEmpty()) {
+            postOriginLockedAuthHandshake(wv, wv.url, currentToken)
         }
     }
 
@@ -440,13 +443,7 @@ fun AiAssistantScreen(
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, false)
 
-                        addJavascriptInterface(
-                            TheStudentAppLoginBridge(
-                                webViewProvider = { this },
-                                tokenProvider = { preferences.sessionToken }
-                            ),
-                            "TheStudentAndroid"
-                        )
+                        addJavascriptInterface(bridge, "TheStudentAndroid")
 
                         settings.apply {
                             javaScriptEnabled = true
@@ -463,6 +460,10 @@ fun AiAssistantScreen(
                             setSupportMultipleWindows(false)
                             mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             cacheMode = WebSettings.LOAD_DEFAULT
+                            val defaultUa = userAgentString.orEmpty()
+                            if (!defaultUa.contains("TheStudentAndroid/")) {
+                                userAgentString = "$defaultUa TheStudentAndroid/1.0"
+                            }
                         }
 
                         webChromeClient = object : WebChromeClient() {
@@ -559,12 +560,14 @@ fun AiAssistantScreen(
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 hasLoadError = false
+                                bridge.pageHost = url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isPageLoading = false
-                                postOriginLockedAuthHandshake(view, preferences.sessionToken)
+                                bridge.pageHost = url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
+                                postOriginLockedAuthHandshake(view, url, preferences.sessionToken)
                                 CookieManager.getInstance().flush()
                             }
 
@@ -635,18 +638,8 @@ fun AiAssistantScreen(
                             }
                         }
 
-                        val initialUrl = if (inputText.isNotBlank()) {
-                            val built = Uri.parse(AI_ASSISTANT_WEB_URL)
-                                .buildUpon()
-                                .appendQueryParameter("q", inputText.take(2000))
-                                .build()
-                                .toString()
-                            onInputChange("")
-                            built
-                        } else {
-                            AI_ASSISTANT_WEB_URL
-                        }
-                        loadUrl(initialUrl)
+                        // Load the plain production URL with no query parameters (Section 1 & 4.3)
+                        loadUrl(AI_ASSISTANT_WEB_URL)
                     }
 
                     webViewRef = webView
