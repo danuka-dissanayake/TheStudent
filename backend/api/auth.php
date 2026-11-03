@@ -92,7 +92,55 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.6';
+const TS_API_VERSION                = '3.6.7';
+
+/**
+ * Deterministic Ed25519 keypair derived from APP_KEY for signing short-lived
+ * login assertions (`web_assertion`) that the Next.js server on Vercel can
+ * verify offline using Node's `node:crypto` without needing a server-to-server
+ * round-trip through DirectAdmin's firewall.
+ */
+function ts_assertion_keypair(): array
+{
+    $seed = hash('sha256', (string) APP_KEY . ':thestudent-web-assertion-ed25519-v1', true);
+    $kp = sodium_crypto_sign_seed_keypair($seed);
+    $pub = sodium_crypto_sign_publickey($kp);
+    $sec = sodium_crypto_sign_secretkey($kp);
+    return [
+        'secret'          => $sec,
+        'public'          => $pub,
+        'public_hex'      => bin2hex($pub),
+        // ASN.1 DER SPKI header for Ed25519 (OID 1.3.101.112) + 32-byte raw public key
+        'public_spki_b64' => base64_encode((string) hex2bin('302a300506032b6570032100') . $pub),
+    ];
+}
+
+function ts_sign_web_assertion(array $userPayload, string $expiresAt = '', string $rawToken = ''): string
+{
+    if (!function_exists('sodium_crypto_sign_detached')) {
+        return '';
+    }
+    try {
+        $kp = ts_assertion_keypair();
+        $now = time();
+        $claims = [
+            'iss'        => 'https://app.quizontal.site',
+            'aud'        => 'https://chatbot-liart-rho-81.vercel.app',
+            'iat'        => $now,
+            'exp'        => $now + 300,
+            'expires_at' => $expiresAt,
+            'token_hash' => $rawToken !== '' ? hash('sha256', $rawToken) : '',
+            'user'       => $userPayload,
+        ];
+        $json = (string) json_encode($claims, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        $payloadB64 = rtrim(strtr(base64_encode($json), '+/', '-_'), '=');
+        $sig = sodium_crypto_sign_detached($payloadB64, $kp['secret']);
+        $sigB64 = rtrim(strtr(base64_encode($sig), '+/', '-_'), '=');
+        return $payloadB64 . '.' . $sigB64;
+    } catch (Throwable $e) {
+        return '';
+    }
+}
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -162,8 +210,20 @@ if ($action === 'version') {
                 $ins->execute([$testUserId, $tempHash, 'self-test', '127.0.0.1', $tempExp]);
 
                 try {
-                    // 1. Test local action=me via curl (using okhttp/4.12.0 User-Agent so DirectAdmin WAF allows it)
-                    $meUrl = 'https://app.quizontal.site/api/auth.php?action=me&token=' . $tempToken;
+                    // 1a. Test local action=me via plain GET (no custom headers, Mozilla UA)
+                    $meUrlPlain = 'https://app.quizontal.site/api/auth.php?action=me&token=' . $tempToken;
+                    $chPlain = curl_init($meUrlPlain);
+                    curl_setopt_array($chPlain, [
+                        CURLOPT_RETURNTRANSFER => true,
+                        CURLOPT_TIMEOUT        => 10,
+                        CURLOPT_USERAGENT      => 'Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                    ]);
+                    $plainBody = (string) curl_exec($chPlain);
+                    $plainCode = (int) curl_getinfo($chPlain, CURLINFO_HTTP_CODE);
+                    curl_close($chPlain);
+
+                    // 1b. Test local action=me via okhttp/4.12.0 + Bearer
+                    $meUrl = 'https://app.quizontal.site/api/auth.php?action=me';
                     $chMe = curl_init($meUrl);
                     curl_setopt_array($chMe, [
                         CURLOPT_RETURNTRANSFER => true,
@@ -171,8 +231,6 @@ if ($action === 'version') {
                         CURLOPT_USERAGENT      => 'okhttp/4.12.0',
                         CURLOPT_HTTPHEADER     => [
                             'Authorization: Bearer ' . $tempToken,
-                            'X-TheStudent-Token: ' . $tempToken,
-                            'X-TheStudent-Client: web-assistant',
                             'Accept: application/json',
                         ],
                     ]);
@@ -207,13 +265,14 @@ if ($action === 'version') {
                     curl_close($chV);
 
                     $selfTest = [
-                        'test_user_id'   => $testUserId,
-                        'local_me_code'  => $meCode,
-                        'local_me_ok'    => $meCode === 200,
-                        'vercel_code'    => $vercelCode,
-                        'vercel_cookies' => count($vercelRespHeaders),
-                        'vercel_body'    => substr($vercelBody, 0, 500),
-                        'vercel_err'     => $vercelErr,
+                        'test_user_id'    => $testUserId,
+                        'plain_get_code'  => $plainCode,
+                        'local_me_code'   => $meCode,
+                        'local_me_ok'     => $meCode === 200 || $plainCode === 200,
+                        'vercel_code'     => $vercelCode,
+                        'vercel_cookies'  => count($vercelRespHeaders),
+                        'vercel_body'     => substr($vercelBody, 0, 500),
+                        'vercel_err'      => $vercelErr,
                     ];
                 } finally {
                     $del = $pdoDiag->prepare('DELETE FROM user_tokens WHERE token = ?');
@@ -235,16 +294,20 @@ if ($action === 'version') {
             $recentCalls = $decodedRecent;
         }
     }
+    $kpDiag = function_exists('sodium_crypto_sign_seed_keypair') ? ts_assertion_keypair() : null;
     echo json_encode([
         'status'      => 'success',
         'api_version' => TS_API_VERSION,
         'php_version' => PHP_VERSION,
+        'assertion_public_key_spki_b64' => $kpDiag['public_spki_b64'] ?? null,
+        'assertion_public_key_hex'      => $kpDiag['public_hex'] ?? null,
         'features'    => [
             'fatal_handler'  => function_exists('ts_install_error_handlers'),
             'schema_selfheal' => function_exists('ensureAuthSchema'),
             'secrets_outside_webroot' => !is_file(__DIR__ . '/../config.secrets.php'),
             'diag_token_length' => defined('DIAG_TOKEN') ? strlen(trim((string) DIAG_TOKEN)) : 0,
             'active_tokens_in_db' => $activeTokens,
+            'ed25519_assertions' => $kpDiag !== null,
         ],
         'self_test'         => $selfTest,
         'recent_auth_calls' => $recentCalls,
@@ -283,6 +346,20 @@ function sendJsonResponse(string $status, string $message, array $data = [], int
         ]);
         @file_put_contents($recentFile, json_encode(array_slice($existing, 0, 15)));
     } catch (Throwable $e) {
+    }
+
+    if ($status === 'success' && isset($data['user']) && is_array($data['user']) && !isset($data['web_assertion'])) {
+        $rawTok = isset($data['token']) && is_string($data['token'])
+            ? $data['token']
+            : (function_exists('extractBearerToken') ? (string) (extractBearerToken() ?? '') : '');
+        $assertion = ts_sign_web_assertion(
+            $data['user'],
+            isset($data['expires_at']) ? (string) $data['expires_at'] : '',
+            $rawTok
+        );
+        if ($assertion !== '') {
+            $data['web_assertion'] = $assertion;
+        }
     }
 
     http_response_code($statusCode);
