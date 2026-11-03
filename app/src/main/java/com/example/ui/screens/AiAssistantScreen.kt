@@ -16,7 +16,6 @@ import android.os.Environment
 import android.view.View
 import android.view.ViewGroup
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
 import android.webkit.PermissionRequest
 import android.webkit.URLUtil
 import android.webkit.ValueCallback
@@ -145,71 +144,43 @@ import java.util.Locale
 import java.util.UUID
 
 const val AI_ASSISTANT_WEB_URL = "https://chatbot-liart-rho-81.vercel.app/"
+private const val AI_ASSISTANT_TRUSTED_ORIGIN = "https://chatbot-liart-rho-81.vercel.app"
+private const val AI_ASSISTANT_TRUSTED_HOST = "chatbot-liart-rho-81.vercel.app"
 
 private val AiWebBackground = Color(0xFF121016)
 private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
 
-private class TheStudentAndroidWebBridge(
-    private val userJsonProvider: () -> String,
-    private val tokenProvider: () -> String
-) {
-    @JavascriptInterface
-    fun getUserJson(): String = userJsonProvider()
-
-    @JavascriptInterface
-    fun getAuthToken(): String = tokenProvider()
-
-    @JavascriptInterface
-    fun isLoggedIn(): Boolean = tokenProvider().isNotBlank() || userJsonProvider().isNotBlank()
-}
-
-private fun buildUserBridgeJson(
-    userProfile: UserProfile,
-    prefs: TheStudentPreferences
-): JSONObject {
-    val name = userProfile.name.ifBlank { prefs.userName.orEmpty() }.ifBlank { "Student" }
-    val email = userProfile.email.ifBlank { prefs.userEmail.orEmpty() }
-    val token = prefs.sessionToken.orEmpty()
-    return JSONObject().apply {
-        put("name", name)
-        put("full_name", name)
-        put("email", email)
-        put("avatar_url", userProfile.avatarUrl)
-        put("image", userProfile.avatarUrl)
-        put("picture", userProfile.avatarUrl)
-        put("academic_level", userProfile.academicLevel)
-        put("stream_or_degree", userProfile.streamOrDegree)
-        put("institution", userProfile.institution)
-        put("target_exam", userProfile.targetExam)
-        put("streak_days", userProfile.streakDays)
-        put("points", userProfile.points)
-        put("role", prefs.userRole)
-        put("auth_provider", userProfile.authProvider)
-        put("token", token)
-        put("is_logged_in", userProfile.isLoggedIn || prefs.isLoggedIn || email.isNotBlank())
-    }
-}
-
-private fun injectAuthSessionIntoWebView(
+/**
+ * Single, origin-locked authentication handshake:
+ * - Verifies that the WebView is currently on `https://chatbot-liart-rho-81.vercel.app`.
+ * - Sends ONLY the opaque 64-hex session token via `window.postMessage` with a strict
+ *   `targetOrigin` of `https://chatbot-liart-rho-81.vercel.app`.
+ * - No `@JavascriptInterface`, no `localStorage`, and no unverified client profile JSON.
+ * - The web app verifies the token server-to-server against `GET /api/auth.php?action=me`.
+ */
+private fun postOriginLockedAuthHandshake(
     webView: WebView?,
-    userJson: JSONObject
+    sessionToken: String?
 ) {
-    if (webView == null) return
-    val jsonString = userJson.toString()
-    val quotedJson = JSONObject.quote(jsonString)
-    val quotedToken = JSONObject.quote(userJson.optString("token", ""))
+    if (webView == null || sessionToken.isNullOrBlank()) return
+    val currentUri = runCatching { Uri.parse(webView.url.orEmpty()) }.getOrNull() ?: return
+    val isTrustedOrigin = currentUri.scheme.equals("https", ignoreCase = true) &&
+        currentUri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
+    if (!isTrustedOrigin) return
+
+    // Only allow hex session tokens to be interpolated
+    if (!sessionToken.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) return
+
+    val quotedToken = JSONObject.quote(sessionToken)
+    val quotedOrigin = JSONObject.quote(AI_ASSISTANT_TRUSTED_ORIGIN)
     val script = """
         (function() {
-            try {
-                var userObj = JSON.parse($quotedJson);
-                window.__THESTUDENT_USER__ = userObj;
-                window.__THESTUDENT_TOKEN__ = $quotedToken;
-                localStorage.setItem('thestudent_user', $quotedJson);
-                if ($quotedToken) {
-                    localStorage.setItem('thestudent_token', $quotedToken);
-                }
-                window.dispatchEvent(new CustomEvent('thestudent:auth', { detail: userObj }));
-            } catch (e) {}
+            if (window.location.origin === $quotedOrigin) {
+                window.postMessage(
+                    { type: 'THESTUDENT_AUTH_HANDSHAKE', token: $quotedToken },
+                    $quotedOrigin
+                );
+            }
         })();
     """.trimIndent()
     webView.evaluateJavascript(script, null)
@@ -296,13 +267,11 @@ fun AiAssistantScreen(
     var hasLoadError by remember { mutableStateOf(false) }
 
     val preferences = remember(context) { TheStudentPreferences(context) }
-    val currentUserProfile by androidx.compose.runtime.rememberUpdatedState(userProfile)
 
-    LaunchedEffect(userProfile, isPageLoading) {
+    LaunchedEffect(userProfile.isLoggedIn, isPageLoading) {
         val wv = webViewRef
         if (wv != null && !isPageLoading) {
-            val userJson = buildUserBridgeJson(userProfile, preferences)
-            injectAuthSessionIntoWebView(wv, userJson)
+            postOriginLockedAuthHandshake(wv, preferences.sessionToken)
         }
     }
 
@@ -419,24 +388,12 @@ fun AiAssistantScreen(
                         cookieManager.setAcceptCookie(true)
                         cookieManager.setAcceptThirdPartyCookies(this, true)
 
-                        addJavascriptInterface(
-                            TheStudentAndroidWebBridge(
-                                userJsonProvider = {
-                                    buildUserBridgeJson(currentUserProfile, preferences).toString()
-                                },
-                                tokenProvider = {
-                                    preferences.sessionToken.orEmpty()
-                                }
-                            ),
-                            "TheStudentAndroid"
-                        )
-
                         settings.apply {
                             javaScriptEnabled = true
                             domStorageEnabled = true
                             databaseEnabled = true
-                            allowFileAccess = true
-                            allowContentAccess = true
+                            allowFileAccess = false
+                            allowContentAccess = false
                             mediaPlaybackRequiresUserGesture = false
                             loadWithOverviewMode = true
                             useWideViewPort = true
@@ -444,7 +401,7 @@ fun AiAssistantScreen(
                             builtInZoomControls = false
                             displayZoomControls = false
                             setSupportMultipleWindows(false)
-                            mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
                             cacheMode = WebSettings.LOAD_DEFAULT
                         }
 
@@ -534,15 +491,12 @@ fun AiAssistantScreen(
                             override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
                                 super.onPageStarted(view, url, favicon)
                                 hasLoadError = false
-                                val userJson = buildUserBridgeJson(currentUserProfile, preferences)
-                                injectAuthSessionIntoWebView(view, userJson)
                             }
 
                             override fun onPageFinished(view: WebView?, url: String?) {
                                 super.onPageFinished(view, url)
                                 isPageLoading = false
-                                val userJson = buildUserBridgeJson(currentUserProfile, preferences)
-                                injectAuthSessionIntoWebView(view, userJson)
+                                postOriginLockedAuthHandshake(view, preferences.sessionToken)
                                 CookieManager.getInstance().flush()
                             }
 
@@ -563,9 +517,11 @@ fun AiAssistantScreen(
                                 request: WebResourceRequest?
                             ): Boolean {
                                 val targetUri = request?.url ?: return false
-                                val scheme = targetUri.scheme?.lowercase(Locale.ROOT) ?: return false
+                                val scheme = targetUri.scheme?.lowercase(Locale.ROOT) ?: return true
+                                val host = targetUri.host?.lowercase(Locale.ROOT).orEmpty()
 
-                                if (scheme == "http" || scheme == "https") {
+                                // Only allow HTTPS pages on the trusted AI Assistant origin to load inside the WebView
+                                if (scheme == "https" && host == AI_ASSISTANT_TRUSTED_HOST) {
                                     return false
                                 }
 
