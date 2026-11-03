@@ -92,7 +92,7 @@ const TS_ALLOWED_TARGET_EXAMS = ['G.C.E. O/L', 'G.C.E. A/L', 'University', 'Prof
 const TS_ALLOWED_MEDIUMS = ['Sinhala', 'Tamil', 'English'];
 
 /** Bump whenever the API contract changes; exposed by ?action=version. */
-const TS_API_VERSION                = '3.6.5';
+const TS_API_VERSION                = '3.6.6';
 
 /**
  * Pre-computed bcrypt (cost 12) hash used to equalise the response time of
@@ -162,12 +162,13 @@ if ($action === 'version') {
                 $ins->execute([$testUserId, $tempHash, 'self-test', '127.0.0.1', $tempExp]);
 
                 try {
-                    // 1. Test local action=me via curl
+                    // 1. Test local action=me via curl (using okhttp/4.12.0 User-Agent so DirectAdmin WAF allows it)
                     $meUrl = 'https://app.quizontal.site/api/auth.php?action=me&token=' . $tempToken;
                     $chMe = curl_init($meUrl);
                     curl_setopt_array($chMe, [
                         CURLOPT_RETURNTRANSFER => true,
                         CURLOPT_TIMEOUT        => 10,
+                        CURLOPT_USERAGENT      => 'okhttp/4.12.0',
                         CURLOPT_HTTPHEADER     => [
                             'Authorization: Bearer ' . $tempToken,
                             'X-TheStudent-Token: ' . $tempToken,
