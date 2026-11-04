@@ -208,12 +208,73 @@ Web Speech API uses. Errors are mapped onto its vocabulary (`no-speech`, `aborte
   `android.intent.action.TTS_SERVICE`, plus
   `<uses-feature android:name="android.hardware.microphone" android:required="false" />`.
 
-### Voice messages (`getUserMedia` + `MediaRecorder`)
+### Voice messages: why "this browser can't record audio" (fixed)
 
-That path was already handled by `onPermissionRequest` granting
-`RESOURCE_AUDIO_CAPTURE`; what was missing was a way for the page to ask *before*
-recording. `hasAudioPermission()` / `requestAudioPermission()` cover it, and the
-page can now prompt on the mic tap rather than getting an opaque failure.
+`onPermissionRequest` looked correct, but it had one fatal branch:
+
+```kotlin
+val requester = audioPermissionRequester   // set only while the screen is visible
+if (requester == null) {
+    runCatching { request.deny() }         // ← this
+    return
+}
+```
+
+Since the session is now **pre-warmed**, the page loads off screen at app start.
+If it probes the microphone then, there is no screen yet, so every capture request
+was denied — and **Chromium caches that denial for the lifetime of the page**. The
+site concluded "this browser can't record audio" and never asked again, even after
+the student granted the permission a minute later.
+
+Speech recognition never hit this because it is only started from a tap on the
+visible screen, where the requester exists — which is exactly why "talk" worked
+and the recorder did not.
+
+**Fixed** in three parts:
+
+1. A trusted audio request is never denied for lack of a UI. It is held in
+   `pendingPermission` and answered when the screen attaches
+   (`flushAudioPermissionPrompt()`), or immediately if the grant already exists.
+2. `grant()` now passes only `RESOURCE_AUDIO_CAPTURE` instead of echoing
+   `request.resources` back, so a page asking for audio + video never gets the
+   camera by accident.
+3. A denied prompt becomes a real `not-allowed` error event instead of silence.
+
+### Guaranteed recorder (`window.TheStudentVoiceRecorder`)
+
+Even with the permission fixed, `getUserMedia` + `MediaRecorder` depends on the
+WebView build. When a page would rather not care, the app ships its own recorder —
+AAC in an `.m4a` container, chunked back over the bridge and assembled into a
+normal `Blob`:
+
+```js
+const rec = window.TheStudentVoiceRecorder;
+if (rec.isAvailable()) {
+  await rec.start();                 // resolves after any mic prompt
+  // …user speaks…
+  const note = await rec.stop();     // { blob, mimeType, durationMs, size }
+  form.append('audio', note.blob, 'voice.m4a');
+}
+// rec.cancel() throws the take away
+```
+
+Bridge methods underneath: `isAudioRecordingAvailable()`, `startAudioRecording()`,
+`stopAudioRecording()`, `cancelAudioRecording()`. Audio comes back as
+`recordchunk` events (240 000 base64 chars each, 4-aligned so every chunk decodes
+on its own) followed by `recordend` with `mime`, `durationMs` and `size`.
+
+### Finding out why a page refuses to record
+
+```js
+// chrome://inspect → console, on the AI screen
+TheStudentDiagnostics.media()
+// → { secureContext, mediaDevices, getUserMedia, mediaRecorder,
+//     mediaRecorderTypes: [...], nativeRecorder, audioPermission, … }
+```
+
+Whatever is `false` is the thing the page is choking on. If `mediaRecorder` or
+`mediaRecorderTypes` is the problem, switch to `TheStudentVoiceRecorder` — it does
+not use the browser API at all.
 
 ### Testing without a phone
 

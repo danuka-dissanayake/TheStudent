@@ -89,8 +89,16 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     /** Called when the page opens `<input type="file">`. The screen owns the intent. */
     var fileChooserHandler: ((WebChromeClient.FileChooserParams?) -> Unit)? = null
 
-    /** Called when the page wants the microphone (voice input inside the chat). */
+    /**
+     * Called when the page wants the microphone (voice input inside the chat).
+     * Setting it flushes any capture request that arrived while the screen was
+     * not on screen — see [flushAudioPermissionPrompt].
+     */
     var audioPermissionRequester: (() -> Unit)? = null
+        set(value) {
+            field = value
+            if (value != null) flushAudioPermissionPrompt()
+        }
 
     /** Light tap feedback. The screen posts it to a real `View`. */
     var hapticFeedback: (() -> Unit)? = null
@@ -116,7 +124,19 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
                 speechRecognition.start(lang, continuous)
             } else {
                 // Ask now; the start resumes in deliverAudioPermission().
-                requestRecordAudioPermission(lang to continuous)
+                requestMicrophone(
+                    onGranted = { speechRecognition.start(lang, continuous) },
+                    onDenied = {
+                        emitNativeEvent(
+                            AiSpeechRecognition.EVENT_ERROR,
+                            JSONObject()
+                                .put("error", "not-allowed")
+                                .put("message", "Microphone permission was denied")
+                                .toString()
+                        )
+                        emitNativeEvent(AiSpeechRecognition.EVENT_END, "{}")
+                    }
+                )
             }
             // The polyfill waits for 'start' / 'error' from the engine rather than
             // for this return value, so a permission prompt is not a failure.
@@ -127,7 +147,21 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
         speakHandler = { text, lang -> textToSpeech.speak(text, lang) },
         stopSpeakingHandler = { textToSpeech.stop() },
         audioPermissionCheck = { hasRecordAudioPermission() },
-        audioPermissionRequest = { requestRecordAudioPermission(null) }
+        audioPermissionRequest = { requestMicrophone(onGranted = {}) },
+        recordingAvailable = { audioRecorder.isAvailable() },
+        startRecording = {
+            if (hasRecordAudioPermission()) {
+                audioRecorder.start()
+            } else {
+                requestMicrophone(
+                    onGranted = { audioRecorder.start() },
+                    onDenied = { audioRecorder.reportDenied() }
+                )
+            }
+            true
+        },
+        stopRecording = { audioRecorder.stop() },
+        cancelRecording = { audioRecorder.cancel() }
     )
 
     // ── Speech (the WebView has no Web Speech API of its own) ─────────────────
@@ -137,16 +171,32 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
 
     private val speechRecognition: AiSpeechRecognition
         get() = speechEngine ?: AiSpeechRecognition(app) { event, payload ->
-            emitSpeechEvent(event, payload)
+            emitNativeEvent(event, payload)
         }.also { speechEngine = it }
 
     private val textToSpeech: AiTextToSpeech
         get() = ttsEngine ?: AiTextToSpeech(app) { event, payload ->
-            emitSpeechEvent(event, payload)
+            emitNativeEvent(event, payload)
         }.also { ttsEngine = it }
 
-    /** A recognition start that is waiting on the RECORD_AUDIO grant. */
-    private var pendingSpeechStart: Pair<String?, Boolean>? = null
+    private var recorderEngine: AiAudioRecorder? = null
+
+    /** Voice messages: the native recorder, used when the page asks for it. */
+    private val audioRecorder: AiAudioRecorder
+        get() = recorderEngine ?: AiAudioRecorder(app) { event, payload ->
+            emitNativeEvent(event, payload)
+        }.also { recorderEngine = it }
+
+    /**
+     * What the page wanted to do with the microphone while we were waiting for the
+     * RECORD_AUDIO grant.
+     */
+    private class MicAction(val run: () -> Unit, val onDenied: () -> Unit)
+
+    private var pendingMicAction: MicAction? = null
+
+    /** True while the system permission dialog is up. */
+    private var promptInFlight = false
 
     // ── View plumbing ─────────────────────────────────────────────────────────
 
@@ -195,6 +245,9 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
         // A warm page is already painted: no skeleton on the way back in.
         if (isContentVisible) isLoading = false
         installNetworkWatch()
+        // The page may have asked for the microphone while it was loading off
+        // screen; answer that now that there is a UI to ask with.
+        flushAudioPermissionPrompt()
         return container
     }
 
@@ -204,6 +257,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
         lastDetachedAt = SystemClock.uptimeMillis()
         runCatching { webView?.onPause() }
         runCatching { speechEngine?.cancel() }
+        runCatching { recorderEngine?.cancel() }
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
     }
@@ -212,6 +266,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     fun onAppBackground() {
         runCatching { webView?.onPause() }
         runCatching { speechEngine?.cancel() }
+        runCatching { recorderEngine?.cancel() }
         setTimersPaused(true)
         runCatching { CookieManager.getInstance().flush() }
     }
@@ -250,7 +305,10 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
         speechEngine = null
         ttsEngine?.release()
         ttsEngine = null
-        pendingSpeechStart = null
+        recorderEngine?.release()
+        recorderEngine = null
+        pendingMicAction = null
+        promptInFlight = false
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
         pendingPermission?.deny()
@@ -358,30 +416,17 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     }
 
     fun deliverAudioPermission(granted: Boolean) {
+        promptInFlight = false
         val request = pendingPermission
         pendingPermission = null
-        if (request != null) {
-            runCatching {
-                if (granted) request.grant(request.resources) else request.deny()
-            }
-        }
+        val action = pendingMicAction
+        pendingMicAction = null
 
-        // A mic tap that had to ask for the permission first.
-        val queued = pendingSpeechStart
-        pendingSpeechStart = null
-        when {
-            queued == null -> Unit
-            granted -> speechRecognition.start(queued.first, queued.second)
-            else -> {
-                emitSpeechEvent(
-                    AiSpeechRecognition.EVENT_ERROR,
-                    JSONObject()
-                        .put("error", "not-allowed")
-                        .put("message", "Microphone permission was denied")
-                        .toString()
-                )
-                emitSpeechEvent(AiSpeechRecognition.EVENT_END, "{}")
-            }
+        if (request != null) {
+            if (granted) grantAudio(request) else runCatching { request.deny() }
+        }
+        if (action != null) {
+            if (granted) action.run() else action.onDenied()
         }
     }
 
@@ -390,22 +435,52 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
             PackageManager.PERMISSION_GRANTED
 
     /**
-     * Asks for the microphone once, remembering what the page wanted to do with it:
-     * `getUserMedia` / MediaRecorder (voice notes) or speech recognition.
+     * Asks for the microphone, remembering what the page wanted to do with it:
+     * speech recognition or a voice message.
      */
-    private fun requestRecordAudioPermission(pendingStart: Pair<String?, Boolean>?) {
-        pendingSpeechStart = pendingStart
-        val requester = audioPermissionRequester
-        if (requester == null) {
-            pendingSpeechStart = null
+    private fun requestMicrophone(onGranted: () -> Unit, onDenied: () -> Unit = {}) {
+        pendingMicAction = MicAction(onGranted, onDenied)
+        flushAudioPermissionPrompt()
+    }
+
+    /**
+     * Android's WebView denies any capture request it is not told to grant, and
+     * Chromium remembers that denial for the lifetime of the page. A page that
+     * probes the microphone while it is still loading **off screen** (which is now
+     * the normal case, because the session is pre-warmed) would therefore mark
+     * itself "this browser can't record audio" and never ask again.
+     *
+     * So a trusted capture request is never thrown away: it is held until the
+     * screen can actually ask the student, then granted or denied for real.
+     */
+    private fun flushAudioPermissionPrompt() {
+        if (promptInFlight) return
+        if (!attached) return
+        if (pendingPermission == null && pendingMicAction == null) return
+
+        // Already granted (another feature, or a previous answer): just answer.
+        if (hasRecordAudioPermission()) {
+            val request = pendingPermission
+            pendingPermission = null
+            if (request != null) grantAudio(request)
+            val action = pendingMicAction
+            pendingMicAction = null
+            action?.run?.invoke()
             return
         }
+
+        val requester = audioPermissionRequester ?: return
+        promptInFlight = true
         requester()
     }
 
-    /** Forwards a native speech/TTS event into the page's polyfill. */
-    private fun emitSpeechEvent(event: String, payloadJson: String) {
-        val script = "window.__tsSpeech && window.__tsSpeech.onNativeEvent(" +
+    private fun grantAudio(request: PermissionRequest) {
+        runCatching { request.grant(arrayOf(PermissionRequest.RESOURCE_AUDIO_CAPTURE)) }
+    }
+
+    /** Forwards a native speech / TTS / recorder event into the page. */
+    private fun emitNativeEvent(event: String, payloadJson: String) {
+        val script = "window.__tsDispatch&&window.__tsDispatch(" +
             JSONObject.quote(event) + "," + payloadJson + ");"
         mainHandler.post { evaluate(script) }
     }
@@ -520,22 +595,19 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
                 runCatching { request.deny() }
                 return
             }
-            val granted = ContextCompat.checkSelfPermission(
-                app,
-                android.Manifest.permission.RECORD_AUDIO
-            ) == PackageManager.PERMISSION_GRANTED
-            if (granted) {
-                runCatching { request.grant(request.resources) }
+            if (hasRecordAudioPermission()) {
+                grantAudio(request)
                 return
             }
-            val requester = audioPermissionRequester
-            if (requester == null) {
-                runCatching { request.deny() }
-                return
-            }
-            pendingPermission?.deny()
+
+            // Hold the request instead of denying it. Denying here is what made
+            // getUserMedia / MediaRecorder fail permanently: the page probes the
+            // microphone while the pre-warmed WebView is still off screen, gets a
+            // denial it can never undo, and reports "this browser can't record
+            // audio" even after the student grants the permission later.
+            pendingPermission?.let { runCatching { it.deny() } }
             pendingPermission = request
-            requester()
+            flushAudioPermissionPrompt()
         }
 
         override fun onShowFileChooser(
@@ -572,6 +644,9 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
             isContentVisible = false
             isLoading = true
             canWebHandleBack = false
+            // A pending capture request belongs to the document that is going away.
+            pendingPermission = null
+            promptInFlight = false
             view?.let { injectNativeFeel(it) }
         }
 

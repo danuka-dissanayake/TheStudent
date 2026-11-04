@@ -42,7 +42,11 @@ class AiWebBridge internal constructor(
     private val speakHandler: (String?, String?) -> Unit,
     private val stopSpeakingHandler: () -> Unit,
     private val audioPermissionCheck: () -> Boolean,
-    private val audioPermissionRequest: () -> Unit
+    private val audioPermissionRequest: () -> Unit,
+    private val recordingAvailable: () -> Boolean,
+    private val startRecording: () -> Boolean,
+    private val stopRecording: () -> Unit,
+    private val cancelRecording: () -> Unit
 ) {
 
     /** Host of the main frame, kept current by the session's `WebViewClient`. */
@@ -215,6 +219,35 @@ class AiWebBridge internal constructor(
 
     @JavascriptInterface
     fun hasAudioPermission(): Boolean = audioPermissionCheck()
+
+    // ── Voice messages ────────────────────────────────────────────────────────
+    //
+    // A guaranteed recorder for the page's voice notes, backed by a real
+    // MediaRecorder on the app side. `window.TheStudentVoiceRecorder` (in
+    // assets/webview/ai_speech.js) wraps these three calls into a promise that
+    // resolves to a Blob.
+
+    @JavascriptInterface
+    fun isAudioRecordingAvailable(): Boolean = recordingAvailable()
+
+    /** Starts recording. Returns false only when this device cannot record at all. */
+    @JavascriptInterface
+    fun startAudioRecording(): Boolean =
+        if (isTrustedPage()) startRecording() else false
+
+    /** Stops and hands the audio back as base64 chunks + an `end` event. */
+    @JavascriptInterface
+    fun stopAudioRecording() {
+        if (!isTrustedPage()) return
+        stopRecording()
+    }
+
+    /** Throws the recording away — no audio is delivered. */
+    @JavascriptInterface
+    fun cancelAudioRecording() {
+        if (!isTrustedPage()) return
+        cancelRecording()
+    }
 
     @JavascriptInterface
     fun requestAudioPermission() {

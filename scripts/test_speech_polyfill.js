@@ -14,15 +14,24 @@ const path = require('path');
 const vm = require('vm');
 
 const calls = [];
-const sandbox = { console, setTimeout, clearTimeout };
+const sandbox = { console, setTimeout, clearTimeout, atob, btoa, Blob };
 sandbox.window = sandbox;
+// The shim reads these the way it would in a page. MediaRecorder is deliberately
+// absent: that is the WebView case this fallback exists for.
+sandbox.navigator = { userAgent: 'TheStudentTest/1.0' };
+sandbox.isSecureContext = true;
 sandbox.TheStudentAndroid = {
   isSpeechRecognitionAvailable: () => true,
   startSpeechRecognition: (lang, cont) => { calls.push(['start', lang, cont]); return true; },
   stopSpeechRecognition: () => calls.push(['stop']),
   cancelSpeechRecognition: () => calls.push(['cancel']),
   speakText: (t, l) => calls.push(['speak', t, l]),
-  stopSpeaking: () => calls.push(['stopSpeaking'])
+  stopSpeaking: () => calls.push(['stopSpeaking']),
+  isAudioRecordingAvailable: () => true,
+  startAudioRecording: () => { calls.push(['recStart']); return true; },
+  stopAudioRecording: () => calls.push(['recStop']),
+  cancelAudioRecording: () => calls.push(['recCancel']),
+  hasAudioPermission: () => true
 };
 vm.createContext(sandbox);
 vm.runInContext(
@@ -107,5 +116,59 @@ fire('ttsend', {});
 if (!started || !ended) throw new Error('FAIL: utterance start/end events missing');
 if (synth.speaking) throw new Error('FAIL: the speaking flag was left stuck');
 
-console.log('ALL SPEECH POLYFILL TESTS PASSED');
-console.log('recognition events:', events.join(' | '));
+// ── voice recorder: chunked base64 assembly into a Blob ────────────────────
+(async function testRecorder() {
+  const voice = sandbox.window.TheStudentVoiceRecorder;
+  if (!voice) throw new Error('FAIL: TheStudentVoiceRecorder was not installed');
+  if (!voice.isAvailable()) throw new Error('FAIL: native recorder reported unavailable');
+
+  // 3000 known bytes, delivered in two 4-aligned base64 chunks like the native side
+  const payload = Buffer.alloc(3000);
+  for (let i = 0; i < payload.length; i++) payload[i] = i % 256;
+  const encoded = payload.toString('base64');
+  const cut = 2000 - (2000 % 4);
+
+  const started = voice.start();
+  fire('recordstart', {});
+  await started;
+
+  const stopped = voice.stop();
+  fire('recordchunk', { index: 0, data: encoded.slice(0, cut) });
+  fire('recordchunk', { index: 1, data: encoded.slice(cut) });
+  fire('recordend', { chunks: 2, mime: 'audio/mp4', durationMs: 4200, size: 3000 });
+
+  const note = await stopped;
+  if (note.mimeType !== 'audio/mp4') throw new Error('FAIL: wrong mime ' + note.mimeType);
+  if (note.durationMs !== 4200) throw new Error('FAIL: wrong duration ' + note.durationMs);
+  if (note.size !== 3000) throw new Error('FAIL: wrong size ' + note.size);
+
+  const bytes = new Uint8Array(await note.blob.arrayBuffer());
+  for (let i = 0; i < bytes.length; i++) {
+    if (bytes[i] !== payload[i]) throw new Error('FAIL: blob corrupted at byte ' + i);
+  }
+  if (voice.isRecording()) throw new Error('FAIL: still marked as recording');
+
+  // a denied microphone must reject, not hang
+  const deniedStart = voice.start();
+  fire('recordstart', {});
+  await deniedStart;
+  const denied = voice.stop();
+  fire('recorderror', { error: 'not-allowed', message: 'Microphone permission was denied' });
+  let rejected = false;
+  try {
+    await denied;
+  } catch (e) {
+    rejected = /denied/.test(e.message);
+  }
+  if (!rejected) throw new Error('FAIL: a denied recording did not reject');
+
+  // diagnostics must answer the "why can't I record?" question
+  const report = sandbox.window.TheStudentDiagnostics.media();
+  if (typeof report.getUserMedia !== 'boolean' || report.nativeRecorder !== true) {
+    throw new Error('FAIL: diagnostics incomplete: ' + JSON.stringify(report));
+  }
+
+  console.log('ALL SPEECH POLYFILL TESTS PASSED');
+  console.log('recognition events:', events.join(' | '));
+  console.log('voice note assembled:', note.size, 'bytes,', note.durationMs + 'ms,', note.mimeType);
+})();
