@@ -1,0 +1,65 @@
+/* ---------------------------------------------------------------------------
+ * TheStudent AI Assistant — native shell styles
+ *
+ * Injected by AiWebSession into every trusted page load (see AiWebConfig.STYLE_ID).
+ * Everything here removes a "this is a browser" tell without touching the web
+ * app's own layout. Keep it additive and low-specificity so the app's Tailwind
+ * classes keep winning where they overlap.
+ * ------------------------------------------------------------------------- */
+
+/* No grey flash box on every tap — Android apps highlight with ripple instead. */
+html,
+body {
+    -webkit-tap-highlight-color: transparent;
+}
+
+/* No rubber-band bounce / pull-to-refresh at the edges of the chat. */
+html,
+body {
+    overscroll-behavior: none;
+    overscroll-behavior-y: none;
+}
+
+/* WebKit honours the system font scale differently to native text; keep the
+   design's own scale so the layout does not reflow on a student's big-font phone. */
+body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+}
+
+/* Scrollbars are the loudest browser tell on a phone. */
+::-webkit-scrollbar {
+    width: 0;
+    height: 0;
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: transparent;
+}
+
+/* Images should not be draggable / long-press-saveable like a web page. */
+img,
+video,
+canvas {
+    -webkit-user-drag: none;
+}
+
+/* Buttons and links react on tap without the 300ms double-tap-zoom guess. */
+a,
+button,
+[role="button"] {
+    touch-action: manipulation;
+}
+
+/* When the keyboard is open the visual viewport shrinks; keep the composer
+   from being scrolled under it by reserving a little breathing room. */
+html.ts-kb-open {
+    scroll-padding-bottom: 12px;
+}
+
+/* Set by the injected script from the app's theme so the shell can match the
+   web app's accent. The web app may override by setting its own variables. */
+:root {
+    --ts-accent: #10b981;
+}

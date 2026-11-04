@@ -35,6 +35,7 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import com.example.ui.components.*
 import com.example.ui.screens.*
 import com.example.ui.theme.MyApplicationTheme
+import com.example.ui.webview.AiWebSessionManager
 import com.example.viewmodel.AppScreenFlow
 import com.example.notifications.ChatNotifications
 import com.example.viewmodel.TheStudentViewModel
@@ -58,6 +59,10 @@ class MainActivity : ComponentActivity() {
         ChatNotifications.ensureChannel(this)
         askForNotificationPermission()
         readChatIntent(intent)
+        // Warm the AI Assistant WebView once the first frame is up, so the first
+        // tap on the AI screen opens an already-painted page instead of paying
+        // for a cold Chromium start, TLS handshake and JS boot. See AiWebSession.
+        window.decorView.postDelayed({ AiWebSessionManager.prewarm(this) }, 450L)
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val savedPapers by viewModel.savedPapers.collectAsStateWithLifecycle()
@@ -857,12 +862,37 @@ class MainActivity : ComponentActivity() {
         // While the app is on screen the chat list itself shows the unread
         // badges, so the view model clears whatever the shade was holding.
         viewModel.onAppForegrounded()
+        // Timers paused on the way out are resumed; the retained AI Assistant page
+        // continues from where it was instead of reloading.
+        AiWebSessionManager.onAppForeground()
     }
 
     override fun onStop() {
         // Going to the background: anything still unread becomes a notification.
         viewModel.onAppBackgrounded()
+        // Stop the retained WebView's JavaScript instead of letting a chat page
+        // keep animating and streaming behind the lock screen.
+        AiWebSessionManager.onAppBackground()
         super.onStop()
+    }
+
+    /**
+     * The retained WebView holds this Activity's context, so it can never outlive
+     * it — a rotation therefore reloads the page. Leaving the screen and coming
+     * back is unaffected: that walks through [AiWebSessionManager], not here.
+     */
+    override fun onDestroy() {
+        AiWebSessionManager.onActivityDestroyed(this)
+        super.onDestroy()
+    }
+
+    /**
+     * The retained renderer is the most expensive thing the app keeps off screen.
+     * Dropping it is far cheaper than having the OS kill the process.
+     */
+    override fun onTrimMemory(level: Int) {
+        super.onTrimMemory(level)
+        AiWebSessionManager.onTrimMemory(level)
     }
 
     override fun onNewIntent(intent: Intent) {

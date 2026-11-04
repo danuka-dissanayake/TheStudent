@@ -36,6 +36,7 @@ import com.example.notifications.ChatNotifier
 import com.example.notifications.NotificationPeer
 import com.google.firebase.messaging.FirebaseMessaging
 import com.example.ui.components.TheStudentNavTab
+import com.example.ui.webview.AiWebSessionManager
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
 import java.util.Locale
@@ -3855,6 +3856,9 @@ class TheStudentViewModel(application: Application) : AndroidViewModel(applicati
                 runCatching { TheStudentChatClient.unregisterDevice(serverUrl, token) }
             }
             preferences.logout()
+            // Drop the warm AI Assistant page: it is a signed-in web session, and
+            // the next student to sign in must not find it in memory.
+            runCatching { AiWebSessionManager.releaseForLogout() }
             stopChatSync()
             ChatCrypto.clearSessionCache()
             // Chat history is device storage: a different student signing in on

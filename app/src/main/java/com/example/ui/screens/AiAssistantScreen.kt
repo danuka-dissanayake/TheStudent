@@ -3,31 +3,15 @@ package com.example.ui.screens
 import android.Manifest
 import android.annotation.SuppressLint
 import android.app.Activity
-import android.app.DownloadManager
-import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.Intent
-import android.content.pm.PackageManager
-import android.graphics.Bitmap
 import android.graphics.Color as AndroidColor
 import android.net.Uri
-import android.os.Environment
-import android.view.View
-import android.view.ViewGroup
+import android.provider.MediaStore
+import android.view.HapticFeedbackConstants
 import android.webkit.CookieManager
-import android.webkit.JavascriptInterface
-import android.webkit.PermissionRequest
-import android.webkit.URLUtil
-import android.webkit.ValueCallback
 import android.webkit.WebChromeClient
-import android.webkit.WebResourceError
-import android.webkit.WebResourceRequest
-import android.webkit.WebSettings
-import android.webkit.WebView
-import android.webkit.WebViewClient
-import android.widget.FrameLayout
-import android.widget.Toast
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
@@ -89,7 +73,6 @@ import androidx.compose.material.icons.outlined.WifiOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
-import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
@@ -101,6 +84,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -117,9 +101,11 @@ import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.graphics.TileMode
 import androidx.compose.ui.graphics.asComposePath
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.scale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.TextStyle
@@ -130,7 +116,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
-import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.core.graphics.PathParser
 import androidx.core.view.WindowCompat
 import androidx.lifecycle.Lifecycle
@@ -141,78 +127,34 @@ import com.example.data.model.AiAssistantMessage
 import com.example.data.model.AiModelChoice
 import com.example.data.model.AttachedMedia
 import com.example.data.model.UserProfile
+import com.example.ui.components.AiChatSkeleton
 import com.example.ui.components.TheStudentSystemBars
+import com.example.ui.theme.EmeraldLight
 import com.example.ui.theme.EmeraldPrimary
+import com.example.ui.webview.AiWebError
+import com.example.ui.webview.AiWebSessionManager
 import org.json.JSONObject
+import java.io.File
 import java.util.Locale
 import java.util.UUID
 
-const val AI_ASSISTANT_WEB_URL = "https://chatbot-liart-rho-81.vercel.app/"
-private const val AI_ASSISTANT_TRUSTED_ORIGIN = "https://chatbot-liart-rho-81.vercel.app"
-private const val AI_ASSISTANT_TRUSTED_HOST = "chatbot-liart-rho-81.vercel.app"
 
 private val AiWebBackground = Color(0xFF121016)
-private val AiWebBackgroundInt = AndroidColor.parseColor("#121016")
+
 
 /**
- * Official JavaScript bridge exposed as `window.TheStudentAndroid` (Section 4.1).
- * - Updated from `WebViewClient.onPageStarted` / `onPageFinished`.
- * - Bridge calls run on a background thread (`JavaBridge`), so it never touches the `WebView`
- *   instance directly and returns the 64-hex session token synchronously and immediately.
- */
-private class TheStudentBridge(
-    initialToken: String,
-    private val tokenProvider: () -> String?
-) {
-    @Volatile
-    var pageHost: String = AI_ASSISTANT_TRUSTED_HOST
-
-    @Volatile
-    var cachedToken: String = initialToken.trim()
-
-    @JavascriptInterface
-    fun isAndroidApp(): Boolean = true
-
-    @JavascriptInterface
-    fun getSessionToken(): String {
-        if (pageHost.isNotEmpty() && pageHost != AI_ASSISTANT_TRUSTED_HOST && !pageHost.endsWith(".vercel.app")) {
-            return ""
-        }
-        val fastToken = cachedToken.trim()
-        val token = if (fastToken.isNotEmpty()) fastToken else tokenProvider().orEmpty().trim()
-        if (token.isNotEmpty()) {
-            cachedToken = token
-        }
-        return if (token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) token else ""
-    }
-}
-
-/**
- * Backup origin-locked handshake message (Section 4.4).
- */
-private fun postOriginLockedAuthHandshake(
-    webView: WebView?,
-    url: String?,
-    sessionToken: String?
-) {
-    if (webView == null) return
-    val currentUrl = url ?: webView.url.orEmpty()
-    val host = runCatching { Uri.parse(currentUrl).host }.getOrNull()
-    if (host != AI_ASSISTANT_TRUSTED_HOST) return
-
-    val token = sessionToken?.trim().orEmpty()
-    if (!token.matches(Regex("^[A-Fa-f0-9]{32,256}$"))) return
-
-    val quotedToken = JSONObject.quote(token)
-    val quotedOrigin = JSONObject.quote(AI_ASSISTANT_TRUSTED_ORIGIN)
-    val script = "window.postMessage({type:'THESTUDENT_AUTH_HANDSHAKE',token:$quotedToken},$quotedOrigin);"
-    webView.evaluateJavascript(script, null)
-}
-
-/**
- * TheStudent AI Assistant Screen powered directly by the full-featured mobile web experience
- * at [AI_ASSISTANT_WEB_URL].
+ * TheStudent AI Assistant: the full-featured mobile web experience hosted in a WebView that
+ * is made to behave like a native screen.
  *
+ * - **Warm page.** The `WebView` belongs to [AiWebSessionManager], not to this composable, so
+ *   leaving the screen and coming back re-parents an already-painted page instead of doing a
+ *   cold Chromium start. See `AiWebSession` for the lifecycle, and `AiWebSessionManager.prewarm`
+ *   for the warm start.
+ * - **Native loading state.** The first paint shows [AiChatSkeleton], the chat screen's own
+ *   silhouette, and cross-fades into the page — never a spinner over a black rectangle.
+ * - **Native feel.** A JS/CSS layer injected from `assets/webview/` kills tap highlights and
+ *   scrollbars, syncs the app's accent colour, drives platform haptics, keeps the composer
+ *   above the keyboard, and lets the page close its own drawer before back leaves the screen.
  * - Status bar is fully transparent (`Color.TRANSPARENT`) with light/white status bar icons
  *   (`isAppearanceLightStatusBars = false`) so the clock, Wi-Fi, and battery texts are crisp
  *   and clearly visible against the dark background.
@@ -301,125 +243,125 @@ fun AiAssistantScreen(
         }
     }
 
-    var webViewRef by remember { mutableStateOf<WebView?>(null) }
-    var isPageLoading by remember { mutableStateOf(true) }
-    var hasLoadError by remember { mutableStateOf(false) }
+    val appContext = remember(context) { context.applicationContext }
+    val preferences = remember(appContext) { TheStudentPreferences(appContext) }
+    val hostingActivity = remember(context) { context.findHostingActivity() }
 
-    val preferences = remember(context) { TheStudentPreferences(context) }
-    val bridge = remember(preferences) {
-        TheStudentBridge(
-            initialToken = preferences.sessionToken.orEmpty(),
-            tokenProvider = { preferences.sessionToken }
-        )
-    }
-    var lastSyncedToken by remember { mutableStateOf(preferences.sessionToken.orEmpty().trim()) }
-
-    // Keep the app and web accounts in sync (Section 4.4 & 4.5)
-    LaunchedEffect(userProfile.isLoggedIn, userProfile.email, isPageLoading) {
-        val wv = webViewRef ?: return@LaunchedEffect
-        val currentToken = preferences.sessionToken.orEmpty().trim()
-        bridge.cachedToken = currentToken
-        if (currentToken != lastSyncedToken) {
-            lastSyncedToken = currentToken
-            if (currentToken.isEmpty()) {
-                // Logged out: clear WebView cookies, flush, and reload
-                val cm = CookieManager.getInstance()
-                cm.removeAllCookies {
-                    cm.flush()
-                    wv.loadUrl(AI_ASSISTANT_WEB_URL)
-                }
-                return@LaunchedEffect
-            } else {
-                // Switched account / new token: clear old cookies, flush, and reload
-                val cm = CookieManager.getInstance()
-                cm.removeAllCookies {
-                    cm.flush()
-                    wv.loadUrl(AI_ASSISTANT_WEB_URL)
-                }
-                return@LaunchedEffect
-            }
-        }
-        if (!isPageLoading && currentToken.isNotEmpty()) {
-            postOriginLockedAuthHandshake(wv, wv.url, currentToken)
-        }
+    // One long-lived WebView for the whole process (see AiWebSession). The old
+    // code built a WebView per visit and destroyed it on the way out, so every
+    // re-entry paid for a cold Chromium start, a TLS handshake and a full JS boot
+    // of the chat app. This reuses the warm page instead.
+    val session = remember(hostingActivity, preferences) {
+        hostingActivity?.let { AiWebSessionManager.obtain(it) }
     }
 
-    // File chooser state for `<input type="file">` (photo, PDF, document attachments in the web app)
-    var filePathCallback by remember { mutableStateOf<ValueCallback<Array<Uri>>?>(null) }
+    val isLoading = session?.isLoading ?: true
+    val loadError = session?.error
+    val hasLoadError = loadError != null
+
+    var queuedPromptSent by remember { mutableStateOf(false) }
+    var pendingCaptureUri by remember { mutableStateOf<Uri?>(null) }
+
+    // App session and web session stay in step. Only an actual change costs a
+    // reload; the normal path re-runs the origin-locked handshake on the page
+    // that is already on screen.
+    LaunchedEffect(userProfile.isLoggedIn, userProfile.email, session) {
+        session?.syncToken(preferences.sessionToken)
+    }
+
+    // Attachments: `<input type="file">` in the web app opens the system picker,
+    // with a "Take a photo" entry — photographing a question is how most students
+    // actually use this screen.
     val fileChooserLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        val callback = filePathCallback
-        filePathCallback = null
-        if (callback == null) return@rememberLauncherForActivityResult
-
         val data = result.data
+        val captured = pendingCaptureUri
+        pendingCaptureUri = null
+
         val uris: Array<Uri>? = when {
             result.resultCode != Activity.RESULT_OK -> null
             data?.clipData != null -> {
                 val clip = data.clipData!!
-                Array(clip.itemCount) { idx -> clip.getItemAt(idx).uri }
+                Array(clip.itemCount) { index -> clip.getItemAt(index).uri }
             }
             data?.data != null -> arrayOf(data.data!!)
+            captured != null -> arrayOf(captured)
             else -> WebChromeClient.FileChooserParams.parseResult(result.resultCode, data)
         }
-        callback.onReceiveValue(uris)
+        session?.deliverFileSelection(uris)
     }
 
-    // Microphone permission state for WebRTC / voice input inside the web app
-    var pendingPermissionRequest by remember { mutableStateOf<PermissionRequest?>(null) }
+    // Microphone permission for the voice input inside the web app.
     val audioPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
-    ) { granted ->
-        val request = pendingPermissionRequest
-        pendingPermissionRequest = null
-        if (request != null) {
-            if (granted) {
-                request.grant(request.resources)
-            } else {
-                request.deny()
+    ) { granted -> session?.deliverAudioPermission(granted) }
+
+    val accentHex = remember {
+        String.format(Locale.US, "#%06X", 0xFFFFFF and EmeraldLight.toArgb())
+    }
+    val fontScale = LocalDensity.current.fontScale
+
+    if (session != null) {
+        // Refreshed every recomposition so the page always sees current state.
+        SideEffect {
+            session.audioPermissionRequester = {
+                runCatching { audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO) }
+            }
+            session.fileChooserHandler = { params ->
+                val picker = runCatching { params?.createIntent() }.getOrNull()
+                    ?: Intent(Intent.ACTION_GET_CONTENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        putExtra(
+                            Intent.EXTRA_MIME_TYPES,
+                            arrayOf("image/*", "application/pdf", "text/*")
+                        )
+                        putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
+                    }
+                val capture = cameraCaptureIntent(context)
+                pendingCaptureUri = capture?.second
+                val chooser = Intent.createChooser(picker, "Attach a file").apply {
+                    if (capture != null) {
+                        putExtra(Intent.EXTRA_INITIAL_INTENTS, arrayOf(capture.first))
+                    }
+                }
+                runCatching { fileChooserLauncher.launch(chooser) }
+                    .onFailure { session.deliverFileSelection(null) }
+            }
+            // Real platform haptics instead of a web page's silence. Posted to the
+            // view because the bridge calls this from its own thread.
+            session.hapticFeedback = {
+                view.post { view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP) }
+            }
+            session.themeProvider = {
+                JSONObject()
+                    .put("accent", accentHex)
+                    .put("mode", "dark")
+                    .put("fontScale", fontScale.toDouble())
             }
         }
     }
 
-    // System back gesture/button: navigate back within WebView history first, else exit screen
+    // System back: let the page close its own drawer or dialog first, then walk
+    // its history, and only then leave the screen.
     BackHandler {
-        val wv = webViewRef
-        if (wv != null && wv.canGoBack()) {
-            wv.goBack()
-        } else {
-            onBack()
-        }
+        if (session == null || !session.handleBack()) onBack()
     }
 
-    // If a pre-filled prompt was queued from another screen (e.g. "Ask AI" on a past paper),
-    // populate the web app's composer once loaded.
-    LaunchedEffect(inputText, isPageLoading) {
-        val wv = webViewRef
-        if (!isPageLoading && wv != null && inputText.isNotBlank()) {
-            val escapedPrompt = JSONObject.quote(inputText)
-            val script = """
-                (function() {
-                    var el = document.querySelector('textarea, input[type="text"]');
-                    if (el) {
-                        var proto = el.tagName === 'TEXTAREA'
-                            ? window.HTMLTextAreaElement.prototype
-                            : window.HTMLInputElement.prototype;
-                        var setter = Object.getOwnPropertyDescriptor(proto, 'value');
-                        if (setter && setter.set) {
-                            setter.set.call(el, $escapedPrompt);
-                        } else {
-                            el.value = $escapedPrompt;
-                        }
-                        el.dispatchEvent(new Event('input', { bubbles: true }));
-                        el.focus();
-                    }
-                })();
-            """.trimIndent()
-            wv.evaluateJavascript(script, null)
-            onInputChange("")
+    // A prompt queued from another screen ("Ask AI" on a past paper) is typed
+    // into the web composer once the page is actually interactive.
+    LaunchedEffect(inputText, isLoading) {
+        if (inputText.isBlank()) {
+            queuedPromptSent = false
+            return@LaunchedEffect
         }
+        if (isLoading || queuedPromptSent) return@LaunchedEffect
+        queuedPromptSent = true
+        session?.setComposerText(inputText)
+        onInputChange("")
     }
+
 
     Box(
         modifier = modifier
@@ -437,276 +379,50 @@ fun AiAssistantScreen(
                 )
                 .background(AiWebBackground)
         ) {
-            AndroidView(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .testTag("ai_assistant_webview"),
-                factory = { ctx ->
-                    val host = FrameLayout(ctx).apply {
-                        setBackgroundColor(AiWebBackgroundInt)
-                    }
-
-                    val webView = WebView(ctx).apply {
-                        layoutParams = FrameLayout.LayoutParams(
-                            ViewGroup.LayoutParams.MATCH_PARENT,
-                            ViewGroup.LayoutParams.MATCH_PARENT
-                        )
-                        setBackgroundColor(AiWebBackgroundInt)
-
-                        val cookieManager = CookieManager.getInstance()
-                        cookieManager.setAcceptCookie(true)
-                        cookieManager.setAcceptThirdPartyCookies(this, false)
-
-                        addJavascriptInterface(bridge, "TheStudentAndroid")
-
-                        settings.apply {
-                            javaScriptEnabled = true
-                            domStorageEnabled = true
-                            databaseEnabled = true
-                            allowFileAccess = false
-                            allowContentAccess = false
-                            mediaPlaybackRequiresUserGesture = false
-                            loadWithOverviewMode = true
-                            useWideViewPort = true
-                            setSupportZoom(false)
-                            builtInZoomControls = false
-                            displayZoomControls = false
-                            setSupportMultipleWindows(false)
-                            mixedContentMode = WebSettings.MIXED_CONTENT_NEVER_ALLOW
-                            cacheMode = WebSettings.LOAD_DEFAULT
-                            val defaultUa = userAgentString.orEmpty()
-                            if (!defaultUa.contains("TheStudentAndroid/")) {
-                                userAgentString = "$defaultUa TheStudentAndroid/1.0"
-                            }
-                        }
-
-                        webChromeClient = object : WebChromeClient() {
-                            private var customView: View? = null
-                            private var customViewCallback: CustomViewCallback? = null
-
-                            override fun onShowCustomView(view: View?, callback: CustomViewCallback?) {
-                                if (customView != null) {
-                                    callback?.onCustomViewHidden()
-                                    return
-                                }
-                                customView = view
-                                customViewCallback = callback
-                                view?.let {
-                                    host.addView(
-                                        it,
-                                        FrameLayout.LayoutParams(
-                                            ViewGroup.LayoutParams.MATCH_PARENT,
-                                            ViewGroup.LayoutParams.MATCH_PARENT
-                                        )
-                                    )
-                                }
-                            }
-
-                            override fun onHideCustomView() {
-                                customView?.let { host.removeView(it) }
-                                customView = null
-                                customViewCallback?.onCustomViewHidden()
-                                customViewCallback = null
-                            }
-
-                            override fun onPermissionRequest(request: PermissionRequest?) {
-                                if (request == null) return
-                                val originUri = request.origin
-                                val isTrustedOrigin = originUri != null &&
-                                    originUri.scheme.equals("https", ignoreCase = true) &&
-                                    originUri.host.equals(AI_ASSISTANT_TRUSTED_HOST, ignoreCase = true)
-                                if (!isTrustedOrigin) {
-                                    request.deny()
-                                    return
-                                }
-                                val needsAudio = request.resources.contains(PermissionRequest.RESOURCE_AUDIO_CAPTURE)
-                                if (needsAudio) {
-                                    val hasAudioPerm = ContextCompat.checkSelfPermission(
-                                        ctx,
-                                        Manifest.permission.RECORD_AUDIO
-                                    ) == PackageManager.PERMISSION_GRANTED
-                                    if (hasAudioPerm) {
-                                        request.grant(request.resources)
-                                    } else {
-                                        pendingPermissionRequest?.deny()
-                                        pendingPermissionRequest = request
-                                        audioPermissionLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                                    }
-                                } else {
-                                    request.deny()
-                                }
-                            }
-
-                            override fun onShowFileChooser(
-                                webView: WebView?,
-                                callback: ValueCallback<Array<Uri>>?,
-                                fileChooserParams: FileChooserParams?
-                            ): Boolean {
-                                filePathCallback?.onReceiveValue(null)
-                                filePathCallback = callback
-
-                                val chooserIntent = try {
-                                    fileChooserParams?.createIntent()
-                                } catch (_: Exception) {
-                                    null
-                                } ?: Intent(Intent.ACTION_GET_CONTENT).apply {
-                                    addCategory(Intent.CATEGORY_OPENABLE)
-                                    type = "*/*"
-                                    putExtra(
-                                        Intent.EXTRA_MIME_TYPES,
-                                        arrayOf("image/*", "application/pdf", "text/*")
-                                    )
-                                    putExtra(Intent.EXTRA_ALLOW_MULTIPLE, true)
-                                }
-
-                                return try {
-                                    fileChooserLauncher.launch(chooserIntent)
-                                    true
-                                } catch (_: ActivityNotFoundException) {
-                                    filePathCallback?.onReceiveValue(null)
-                                    filePathCallback = null
-                                    false
-                                }
-                            }
-                        }
-
-                        webViewClient = object : WebViewClient() {
-                            override fun onPageStarted(view: WebView?, url: String?, favicon: Bitmap?) {
-                                super.onPageStarted(view, url, favicon)
-                                hasLoadError = false
-                                url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?.let { bridge.pageHost = it }
-                                bridge.cachedToken = preferences.sessionToken.orEmpty().trim()
-                            }
-
-                            override fun onPageFinished(view: WebView?, url: String?) {
-                                super.onPageFinished(view, url)
-                                isPageLoading = false
-                                url?.let { runCatching { Uri.parse(it).host }.getOrNull() }
-                                    ?.takeIf { it.isNotBlank() }
-                                    ?.let { bridge.pageHost = it }
-                                val tok = preferences.sessionToken.orEmpty().trim()
-                                bridge.cachedToken = tok
-                                postOriginLockedAuthHandshake(view, url, tok)
-                                CookieManager.getInstance().flush()
-                            }
-
-                            override fun onReceivedError(
-                                view: WebView?,
-                                request: WebResourceRequest?,
-                                error: WebResourceError?
-                            ) {
-                                super.onReceivedError(view, request, error)
-                                if (request?.isForMainFrame == true) {
-                                    isPageLoading = false
-                                    hasLoadError = true
-                                }
-                            }
-
-                            override fun shouldOverrideUrlLoading(
-                                view: WebView?,
-                                request: WebResourceRequest?
-                            ): Boolean {
-                                val targetUri = request?.url ?: return false
-                                val scheme = targetUri.scheme?.lowercase(Locale.ROOT) ?: return true
-                                val host = targetUri.host?.lowercase(Locale.ROOT).orEmpty()
-
-                                // Only allow HTTPS pages on the trusted AI Assistant origin to load inside the WebView
-                                if (scheme == "https" && host == AI_ASSISTANT_TRUSTED_HOST) {
-                                    return false
-                                }
-
-                                return try {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, targetUri))
-                                    true
-                                } catch (_: Exception) {
-                                    true
-                                }
-                            }
-                        }
-
-                        setDownloadListener { url, userAgent, contentDisposition, mimeType, _ ->
-                            try {
-                                if (url.startsWith("http://") || url.startsWith("https://")) {
-                                    val fileName = URLUtil.guessFileName(url, contentDisposition, mimeType)
-                                    val dmRequest = DownloadManager.Request(Uri.parse(url)).apply {
-                                        setMimeType(mimeType)
-                                        addRequestHeader("User-Agent", userAgent)
-                                        CookieManager.getInstance().getCookie(url)?.let { cookie ->
-                                            addRequestHeader("Cookie", cookie)
-                                        }
-                                        setTitle(fileName)
-                                        setDescription("Downloading from TheStudent AI")
-                                        setNotificationVisibility(
-                                            DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
-                                        )
-                                        setDestinationInExternalPublicDir(
-                                            Environment.DIRECTORY_DOWNLOADS,
-                                            fileName
-                                        )
-                                    }
-                                    val dm = ctx.getSystemService(Context.DOWNLOAD_SERVICE) as DownloadManager
-                                    dm.enqueue(dmRequest)
-                                    Toast.makeText(ctx, "Downloading $fileName...", Toast.LENGTH_SHORT).show()
-                                } else {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                }
-                            } catch (_: Exception) {
-                                runCatching {
-                                    ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse(url)))
-                                }
-                            }
-                        }
-
-                        // Load the plain production URL with no query parameters (Section 1 & 4.3)
-                        loadUrl(AI_ASSISTANT_WEB_URL)
-                    }
-
-                    webViewRef = webView
-                    host.addView(webView)
-                    host
-                },
-                onRelease = { host ->
-                    filePathCallback?.onReceiveValue(null)
-                    filePathCallback = null
-                    pendingPermissionRequest?.deny()
-                    pendingPermissionRequest = null
-                    for (i in 0 until host.childCount) {
-                        val child = host.getChildAt(i)
-                        if (child is WebView) {
-                            child.stopLoading()
-                            child.onPause()
-                            child.destroy()
-                        }
-                    }
-                    host.removeAllViews()
-                    webViewRef = null
-                }
-            )
-
-            // Loading overlay matching the web app's dark background so there is never a white flash
-            AnimatedVisibility(
-                visible = isPageLoading && !hasLoadError,
-                enter = fadeIn(animationSpec = tween(180)),
-                exit = fadeOut(animationSpec = tween(220))
-            ) {
-                Box(
+            if (session != null) {
+                // The WebView belongs to the session and is only re-parented here,
+                // so leaving and returning to this screen costs nothing: the page,
+                // its scroll position and any streaming answer are still there.
+                AndroidView(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(AiWebBackground),
-                    contentAlignment = Alignment.Center
-                ) {
-                    CircularProgressIndicator(
-                        color = Color(0xFF10B981),
-                        strokeWidth = 2.5.dp,
-                        modifier = Modifier.size(32.dp)
-                    )
-                }
+                        .testTag("ai_assistant_webview"),
+                    factory = { session.attach() },
+                    onRelease = { session.detach() }
+                )
             }
 
-            // Offline / connection error fallback state
+            // The chat screen's own silhouette, not a spinner: the page fades in
+            // underneath it, so a load reads as "the app is starting" rather than
+            // "a web page is downloading".
+            AnimatedVisibility(
+                visible = isLoading && !hasLoadError,
+                enter = fadeIn(animationSpec = tween(120)),
+                exit = fadeOut(animationSpec = tween(220))
+            ) {
+                AiChatSkeleton(modifier = Modifier.fillMaxSize())
+            }
+
+            // Offline / connection error fallback state. The copy is specific
+            // about what failed: "you're offline" and "our server is down" are
+            // different problems and students react differently to them.
             if (hasLoadError) {
+                val errorTitle = when (loadError) {
+                    AiWebError.OFFLINE -> "You're offline"
+                    AiWebError.TIMEOUT -> "The connection timed out"
+                    AiWebError.SERVER -> "TheStudent AI is taking a break"
+                    else -> "Unable to load TheStudent AI"
+                }
+                val errorBody = when (loadError) {
+                    AiWebError.OFFLINE ->
+                        "Check your mobile data or Wi-Fi and try again. Your chat is safe."
+                    AiWebError.TIMEOUT ->
+                        "The network is slow right now. Give it another go in a moment."
+                    AiWebError.SERVER ->
+                        "Our servers didn't answer. Nothing was lost — try again."
+                    else ->
+                        "Something went wrong while opening the chat. Try again."
+                }
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
@@ -735,7 +451,7 @@ fun AiAssistantScreen(
                         }
 
                         Text(
-                            text = "Unable to load TheStudent AI",
+                            text = errorTitle,
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold,
                             color = Color.White,
@@ -743,7 +459,7 @@ fun AiAssistantScreen(
                         )
 
                         Text(
-                            text = "Please check your internet connection and try again.",
+                            text = errorBody,
                             style = MaterialTheme.typography.bodySmall,
                             color = Color(0xFFA1A1AA),
                             textAlign = TextAlign.Center
@@ -752,11 +468,7 @@ fun AiAssistantScreen(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Button(
-                            onClick = {
-                                hasLoadError = false
-                                isPageLoading = true
-                                webViewRef?.reload() ?: webViewRef?.loadUrl(AI_ASSISTANT_WEB_URL)
-                            },
+                            onClick = { session?.reload() },
                             colors = ButtonDefaults.buttonColors(
                                 containerColor = Color(0xFF10B981),
                                 contentColor = Color.White
@@ -770,7 +482,7 @@ fun AiAssistantScreen(
                             )
                             Spacer(modifier = Modifier.width(6.dp))
                             Text(
-                                text = "Retry",
+                                text = "Try again",
                                 fontWeight = FontWeight.SemiBold,
                                 fontSize = 14.sp
                             )
@@ -814,6 +526,26 @@ fun AiAssistantScreen(
             }
         }
     }
+}
+
+/**
+ * "Take a photo" entry for the attachment chooser. The shot is written straight
+ * into the app cache and handed to the page as a `content://` Uri, so no storage
+ * permission is needed on any API level.
+ */
+private fun cameraCaptureIntent(context: Context): Pair<Intent, Uri>? {
+    val dir = File(context.cacheDir, "ai_captures").apply { mkdirs() }
+    val file = File(dir, "question_" + System.currentTimeMillis() + ".jpg")
+    val uri = runCatching {
+        FileProvider.getUriForFile(context, context.packageName + ".fileprovider", file)
+    }.getOrNull() ?: return null
+
+    val intent = Intent(MediaStore.ACTION_IMAGE_CAPTURE).apply {
+        putExtra(MediaStore.EXTRA_OUTPUT, uri)
+        addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    }
+    if (intent.resolveActivity(context.packageManager) == null) return null
+    return intent to uri
 }
 
 private fun Context.findHostingActivity(): Activity? {
