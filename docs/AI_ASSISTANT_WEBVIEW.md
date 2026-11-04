@@ -68,6 +68,11 @@ chat page kept animating, polling and streaming behind the lock screen.
 **Fixed**: `detach()` → `onPause()`, `MainActivity.onStop` → `pauseTimers()`,
 `onStart` → `resumeTimers()`, cookies flushed on pause.
 
+`pauseTimers()` / `resumeTimers()` are resolved reflectively: they are public
+platform API, but the class stub this project compiles against (`compileSdk 36`)
+does not expose them. `AiWebSession.setTimersPaused()` handles static and
+instance forms and no-ops if the platform has neither.
+
 ### 6. Offline was a dead end
 
 One generic message and a manual Retry, with `cacheMode` pinned to `LOAD_DEFAULT`.

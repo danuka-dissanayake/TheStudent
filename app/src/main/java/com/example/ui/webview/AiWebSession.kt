@@ -172,14 +172,34 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     /** The whole app is leaving the foreground. */
     fun onAppBackground() {
         runCatching { webView?.onPause() }
-        WebView.pauseTimers()
+        setTimersPaused(true)
         runCatching { CookieManager.getInstance().flush() }
     }
 
     /** Back to the foreground: timers resume, page resumes only if visible. */
     fun onAppForeground() {
-        WebView.resumeTimers()
+        setTimersPaused(false)
         if (attached) runCatching { webView?.onResume() }
+    }
+
+    /**
+     * `pauseTimers()` / `resumeTimers()` stop JavaScript timers for every WebView
+     * in the process, which is what keeps a backgrounded chat page from animating,
+     * polling and streaming behind the lock screen.
+     *
+     * They are public platform API, but the class stub this project compiles
+     * against does not expose them (the platform has carried them as both static
+     * and instance members across versions), so they are resolved reflectively:
+     * best effort, and a silent no-op on a platform that has neither.
+     */
+    private fun setTimersPaused(paused: Boolean) {
+        val name = if (paused) "pauseTimers" else "resumeTimers"
+        runCatching {
+            val method = WebView::class.java.getMethod(name)
+            val target: Any? =
+                if (java.lang.reflect.Modifier.isStatic(method.modifiers)) null else webView
+            method.invoke(target)
+        }
     }
 
     /** Throw the page away. The next visit starts cold, by design. */
@@ -199,8 +219,9 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
             runCatching { wv.loadUrl("about:blank") }
             runCatching { wv.onPause() }
             runCatching { wv.removeJavascriptInterface(AiWebConfig.JS_BRIDGE) }
-            runCatching { wv.webChromeClient = null }
-            runCatching { wv.webViewClient = null }
+            // Clients are deliberately left attached: their setters are annotated
+            // non-null on this SDK, and `destroy()` releases them with the instance
+            // anyway. Only the JavaScript interface is removed explicitly.
             runCatching { wv.destroy() }
         }
         runCatching { container.removeAllViews() }
