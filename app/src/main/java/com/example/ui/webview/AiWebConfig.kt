@@ -36,6 +36,13 @@ object AiWebConfig {
     const val JS_ASSET = "webview/ai_native_feel.js"
 
     /**
+     * The Web Speech API polyfill. Android's System WebView has neither
+     * `SpeechRecognition` nor `speechSynthesis`, so the page's "talk" mode is
+     * rebuilt on top of the bridge in this file.
+     */
+    const val JS_SPEECH_ASSET = "webview/ai_speech.js"
+
+    /**
      * How long a detached session is kept warm. Long enough that leaving the
      * screen to open a past paper and coming back is instant, short enough that
      * a `WebView` renderer never sits in RAM for a whole study session.

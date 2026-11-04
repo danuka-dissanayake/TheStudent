@@ -107,8 +107,46 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
             isContentVisible = true
             isLoading = false
         },
-        launchIntent = { intent -> launchExternal(intent) }
+        launchIntent = { intent -> launchExternal(intent) },
+        // Deferred by construction: the lambdas only run once the page calls them,
+        // by which time the lazy engines below exist.
+        speechAvailable = { speechRecognition.isAvailable() },
+        startSpeech = { lang, continuous ->
+            if (hasRecordAudioPermission()) {
+                speechRecognition.start(lang, continuous)
+            } else {
+                // Ask now; the start resumes in deliverAudioPermission().
+                requestRecordAudioPermission(lang to continuous)
+            }
+            // The polyfill waits for 'start' / 'error' from the engine rather than
+            // for this return value, so a permission prompt is not a failure.
+            true
+        },
+        stopSpeech = { speechRecognition.stop() },
+        cancelSpeech = { speechRecognition.cancel() },
+        speakHandler = { text, lang -> textToSpeech.speak(text, lang) },
+        stopSpeakingHandler = { textToSpeech.stop() },
+        audioPermissionCheck = { hasRecordAudioPermission() },
+        audioPermissionRequest = { requestRecordAudioPermission(null) }
     )
+
+    // ── Speech (the WebView has no Web Speech API of its own) ─────────────────
+
+    private var speechEngine: AiSpeechRecognition? = null
+    private var ttsEngine: AiTextToSpeech? = null
+
+    private val speechRecognition: AiSpeechRecognition
+        get() = speechEngine ?: AiSpeechRecognition(app) { event, payload ->
+            emitSpeechEvent(event, payload)
+        }.also { speechEngine = it }
+
+    private val textToSpeech: AiTextToSpeech
+        get() = ttsEngine ?: AiTextToSpeech(app) { event, payload ->
+            emitSpeechEvent(event, payload)
+        }.also { ttsEngine = it }
+
+    /** A recognition start that is waiting on the RECORD_AUDIO grant. */
+    private var pendingSpeechStart: Pair<String?, Boolean>? = null
 
     // ── View plumbing ─────────────────────────────────────────────────────────
 
@@ -165,6 +203,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
         attached = false
         lastDetachedAt = SystemClock.uptimeMillis()
         runCatching { webView?.onPause() }
+        runCatching { speechEngine?.cancel() }
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
     }
@@ -172,6 +211,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     /** The whole app is leaving the foreground. */
     fun onAppBackground() {
         runCatching { webView?.onPause() }
+        runCatching { speechEngine?.cancel() }
         setTimersPaused(true)
         runCatching { CookieManager.getInstance().flush() }
     }
@@ -205,6 +245,12 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     /** Throw the page away. The next visit starts cold, by design. */
     fun destroy() {
         uninstallNetworkWatch()
+        // Never leave a recogniser holding the microphone, or a TTS engine alive.
+        speechEngine?.release()
+        speechEngine = null
+        ttsEngine?.release()
+        ttsEngine = null
+        pendingSpeechStart = null
         pendingFileCallback?.onReceiveValue(null)
         pendingFileCallback = null
         pendingPermission?.deny()
@@ -314,10 +360,54 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
     fun deliverAudioPermission(granted: Boolean) {
         val request = pendingPermission
         pendingPermission = null
-        if (request == null) return
-        runCatching {
-            if (granted) request.grant(request.resources) else request.deny()
+        if (request != null) {
+            runCatching {
+                if (granted) request.grant(request.resources) else request.deny()
+            }
         }
+
+        // A mic tap that had to ask for the permission first.
+        val queued = pendingSpeechStart
+        pendingSpeechStart = null
+        when {
+            queued == null -> Unit
+            granted -> speechRecognition.start(queued.first, queued.second)
+            else -> {
+                emitSpeechEvent(
+                    AiSpeechRecognition.EVENT_ERROR,
+                    JSONObject()
+                        .put("error", "not-allowed")
+                        .put("message", "Microphone permission was denied")
+                        .toString()
+                )
+                emitSpeechEvent(AiSpeechRecognition.EVENT_END, "{}")
+            }
+        }
+    }
+
+    fun hasRecordAudioPermission(): Boolean =
+        ContextCompat.checkSelfPermission(app, android.Manifest.permission.RECORD_AUDIO) ==
+            PackageManager.PERMISSION_GRANTED
+
+    /**
+     * Asks for the microphone once, remembering what the page wanted to do with it:
+     * `getUserMedia` / MediaRecorder (voice notes) or speech recognition.
+     */
+    private fun requestRecordAudioPermission(pendingStart: Pair<String?, Boolean>?) {
+        pendingSpeechStart = pendingStart
+        val requester = audioPermissionRequester
+        if (requester == null) {
+            pendingSpeechStart = null
+            return
+        }
+        requester()
+    }
+
+    /** Forwards a native speech/TTS event into the page's polyfill. */
+    private fun emitSpeechEvent(event: String, payloadJson: String) {
+        val script = "window.__tsSpeech && window.__tsSpeech.onNativeEvent(" +
+            JSONObject.quote(event) + "," + payloadJson + ");"
+        mainHandler.post { evaluate(script) }
     }
 
     // ── WebView construction ──────────────────────────────────────────────────
@@ -592,7 +682,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
 
     private fun injectNativeFeel(wv: WebView) {
         val css = cssAsset
-        val js = jsAsset
+        val js = jsAsset + "\n" + speechAsset
         if (css.isEmpty() && js.isEmpty()) return
         val styleId = JSONObject.quote(AiWebConfig.STYLE_ID)
         val script = buildString {
@@ -702,6 +792,7 @@ class AiWebSession internal constructor(val ownerActivity: Activity) {
 
     private val cssAsset: String by lazy { readAsset(AiWebConfig.CSS_ASSET) }
     private val jsAsset: String by lazy { readAsset(AiWebConfig.JS_ASSET) }
+    private val speechAsset: String by lazy { readAsset(AiWebConfig.JS_SPEECH_ASSET) }
 
     private fun readAsset(path: String): String =
         runCatching { app.assets.open(path).bufferedReader().use { it.readText() } }.getOrDefault("")

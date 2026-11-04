@@ -34,7 +34,15 @@ class AiWebBridge internal constructor(
     private val hapticHandler: () -> Unit,
     private val reportRoute: (Boolean) -> Unit,
     private val reportReady: () -> Unit,
-    private val launchIntent: (Intent) -> Unit
+    private val launchIntent: (Intent) -> Unit,
+    private val speechAvailable: () -> Boolean,
+    private val startSpeech: (String?, Boolean) -> Boolean,
+    private val stopSpeech: () -> Unit,
+    private val cancelSpeech: () -> Unit,
+    private val speakHandler: (String?, String?) -> Unit,
+    private val stopSpeakingHandler: () -> Unit,
+    private val audioPermissionCheck: () -> Boolean,
+    private val audioPermissionRequest: () -> Unit
 ) {
 
     /** Host of the main frame, kept current by the session's `WebViewClient`. */
@@ -151,6 +159,67 @@ class AiWebBridge internal constructor(
             val clipboard = app.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
             clipboard.setPrimaryClip(ClipData.newPlainText("TheStudent AI", value))
         }
+    }
+
+    // ── Speech ────────────────────────────────────────────────────────────────
+    //
+    // Android's System WebView has no Web Speech API, so `assets/webview/ai_speech.js`
+    // re-creates `SpeechRecognition` and `speechSynthesis` on top of these calls.
+
+    /** True when the device has a usable on-device or cloud recogniser. */
+    @JavascriptInterface
+    fun isSpeechRecognitionAvailable(): Boolean =
+        if (isTrustedPage()) speechAvailable() else false
+
+    /**
+     * Starts listening. Returns false when this device cannot do speech
+     * recognition at all (no RecognitionService), so the page can fall back to
+     * typing instead of waiting forever for an `onresult`.
+     */
+    @JavascriptInterface
+    fun startSpeechRecognition(lang: String?, continuous: Boolean): Boolean =
+        if (isTrustedPage()) startSpeech(lang, continuous) else false
+
+    /** Ends the session gracefully — the final transcript still arrives. */
+    @JavascriptInterface
+    fun stopSpeechRecognition() {
+        if (!isTrustedPage()) return
+        stopSpeech()
+    }
+
+    /** Drops whatever was heard and ends immediately. */
+    @JavascriptInterface
+    fun cancelSpeechRecognition() {
+        if (!isTrustedPage()) return
+        cancelSpeech()
+    }
+
+    /** Text-to-speech for the assistant's spoken replies. */
+    @JavascriptInterface
+    fun speakText(text: String?, lang: String?) {
+        if (!isTrustedPage()) return
+        speakHandler(text, lang)
+    }
+
+    @JavascriptInterface
+    fun stopSpeaking() {
+        if (!isTrustedPage()) return
+        stopSpeakingHandler()
+    }
+
+    // ── Microphone permission ─────────────────────────────────────────────────
+    //
+    // `getUserMedia` / MediaRecorder (the voice-message recorder) needs the runtime
+    // RECORD_AUDIO grant. Exposing the check and the prompt lets the page ask at
+    // the right moment — a tap on the mic — instead of failing silently.
+
+    @JavascriptInterface
+    fun hasAudioPermission(): Boolean = audioPermissionCheck()
+
+    @JavascriptInterface
+    fun requestAudioPermission() {
+        if (!isTrustedPage()) return
+        audioPermissionRequest()
     }
 
     /** Debug-only console relay, so page errors show up in Logcat. */

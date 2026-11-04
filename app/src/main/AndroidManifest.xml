@@ -9,6 +9,24 @@
     <!-- Android 13+: needed before chat notifications can be posted at all. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Speech recognition + in-app voice notes. Not required: the app still works
+         on a device without a microphone (the AI screen falls back to typing). -->
+    <uses-feature
+        android:name="android.hardware.microphone"
+        android:required="false" />
+
+    <!-- Android 11+ package visibility: without this the app cannot see the
+         system RecognitionService, so SpeechRecognizer.isRecognitionAvailable()
+         returns false and speech-to-text silently does nothing. -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.TTS_SERVICE" />
+        </intent>
+    </queries>
+
     <application
         android:allowBackup="true"
         android:hardwareAccelerated="true"

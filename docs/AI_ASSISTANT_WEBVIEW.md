@@ -130,6 +130,9 @@ MainActivity.onCreate ──(450 ms)──► AiWebSessionManager.prewarm()
 | `ui/components/AiChatSkeleton.kt` | Loading silhouette |
 | `assets/webview/ai_native_feel.js` | Back, haptics, keyboard, links, ready signal |
 | `assets/webview/ai_native_feel.css` | Tap highlight, scrollbars, overscroll, text-size |
+| `ui/webview/AiSpeechRecognition.kt` | Native speech-to-text behind the polyfill |
+| `ui/webview/AiTextToSpeech.kt` | Native text-to-speech behind the polyfill |
+| `assets/webview/ai_speech.js` | `SpeechRecognition` + `speechSynthesis` polyfills |
 
 ### Memory policy
 
@@ -147,6 +150,79 @@ leaking an Activity or showing popups against a dead window token.
 
 ---
 
+## Speech: why "talk" mode was dead in the app
+
+Android's System WebView implements **no** Web Speech API. Not a partial one — none:
+
+| API | Chrome (desktop/PWA) | Android WebView |
+|---|---|---|
+| `window.webkitSpeechRecognition` | ✅ | ❌ `undefined` |
+| `window.speechSynthesis` | ✅ | ❌ `undefined` |
+
+So `new webkitSpeechRecognition()` throws `TypeError` inside the app while the same
+page works perfectly in a browser, and the voice recorder (`getUserMedia` +
+`MediaRecorder`) fails silently when the microphone runtime grant is missing.
+
+**Fixed** by rebuilding both interfaces on the native engines and injecting them on
+every page load. Existing page code keeps working unchanged:
+
+```js
+const rec = new (window.SpeechRecognition || window.webkitSpeechRecognition)();
+rec.lang = 'en-US';
+rec.onresult = e => console.log(e.results[0][0].transcript);
+rec.start();
+```
+
+### Bridge surface
+
+| `window.TheStudentAndroid` | Backed by |
+|---|---|
+| `isSpeechRecognitionAvailable()` | `SpeechRecognizer.isRecognitionAvailable` |
+| `startSpeechRecognition(lang, continuous)` | `SpeechRecognizer.startListening` |
+| `stopSpeechRecognition()` | `stopListening` (final transcript still arrives) |
+| `cancelSpeechRecognition()` | `cancel` |
+| `speakText(text, lang)` / `stopSpeaking()` | `TextToSpeech` |
+| `hasAudioPermission()` / `requestAudioPermission()` | `RECORD_AUDIO` runtime grant |
+
+Native events are pushed back into the page as
+`window.__tsSpeech.onNativeEvent(type, payload)` with `start`, `audiostart`,
+`speechstart`, `speechend`, `result`, `nomatch`, `error`, `end` — the same names the
+Web Speech API uses. Errors are mapped onto its vocabulary (`no-speech`, `aborted`,
+`not-allowed`, `network`, `audio-capture`, `service-not-allowed`).
+
+### Details that matter
+
+- **Permission first.** Tapping the mic with no `RECORD_AUDIO` grant asks once and
+  then resumes the recognition it was going to start (`pendingSpeechStart`), instead
+  of throwing an error the page has to interpret.
+- **`continuous` is emulated.** The platform recogniser stops after a pause; on a
+  final result in continuous mode the session restarts itself after 220 ms, which is
+  long enough for the service to release the microphone.
+- **`interimResults` is honoured** — partial results are dropped in the polyfill when
+  the page did not ask for them.
+- **No `onRmsChanged` forwarding.** It fires ~10×/second; forwarding it would mean ten
+  `evaluateJavascript` calls a second, which is the cost this screen removed.
+- **Manifest.** Android 11+ hides `RecognitionService` from the app unless it is
+  declared in `<queries>`, so `isRecognitionAvailable()` returns false without it.
+  The manifest now declares `android.speech.RecognitionService` and
+  `android.intent.action.TTS_SERVICE`, plus
+  `<uses-feature android:name="android.hardware.microphone" android:required="false" />`.
+
+### Voice messages (`getUserMedia` + `MediaRecorder`)
+
+That path was already handled by `onPermissionRequest` granting
+`RESOURCE_AUDIO_CAPTURE`; what was missing was a way for the page to ask *before*
+recording. `hasAudioPermission()` / `requestAudioPermission()` cover it, and the
+page can now prompt on the mic tap rather than getting an opaque failure.
+
+### Testing without a phone
+
+`node scripts/test_speech_polyfill.js` stubs the bridge, drives the native events by
+hand and asserts the whole surface: partial → final results, single `end`, the error
+path, `abort()` detaching the recogniser, and the TTS start/end cycle.
+
+---
+
 ## Verifying it
 
 1. `adb shell setprop log.tag.AiWeb DEBUG` and watch for `onRenderProcessGone`.
@@ -160,6 +236,10 @@ leaking an Activity or showing popups against a dead window token.
    composer stays above it, no scroll jump.
 6. `chrome://inspect` against the debug build shows the injected style element
    `#ts-native-feel` in `<head>`.
+7. In `chrome://inspect`'s console, `typeof window.webkitSpeechRecognition` must be
+   `"function"` and `typeof window.speechSynthesis` must be `"object"`.
+8. Tap the site's mic: the Android microphone prompt appears once, then the "listening"
+   UI runs and the transcript lands in the composer.
 
 ---
 
@@ -211,3 +291,20 @@ These are the only improvements that cannot be made from Kotlin. All optional.
 6. **Long-press actions** (`copy`, `share`) can call
    `window.TheStudentAndroid.copyText(md)` / `.share(md, title)` for native
    clipboard and share-sheet behaviour.
+7. **Create speech objects lazily.** The polyfill is injected when the page loads,
+   which can be *after* a bundled module has already evaluated
+   `const SR = window.webkitSpeechRecognition` (capturing `undefined`). Resolve it
+   where it is used instead:
+
+   ```js
+   function createRecognition() {
+     const Ctor = window.SpeechRecognition || window.webkitSpeechRecognition;
+     return Ctor ? new Ctor() : null;   // null → show the "type instead" state
+   }
+   // call inside the mic click handler, not at module scope
+   ```
+
+   Same for `speechSynthesis`: read `window.speechSynthesis` at call time.
+   If you want zero ambiguity, skip the polyfill entirely and call
+   `window.TheStudentAndroid?.startSpeechRecognition(lang, continuous)` directly,
+   then listen for `window.__tsSpeech.onNativeEvent(...)`.
